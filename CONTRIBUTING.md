@@ -92,12 +92,7 @@ git commit -m "Add: brief description of changes"
 
 ## Code of Conduct
 
-- Follow ethical coding practices.
-- Do not submit a Pull request unless you are assigned.
-- Tasks must be completed within the specified deadline.
-- Always reach out to the maintainer if you get stuck.
-- Ensure all tests pass.
-- Request reviews from maintainers, when you submit a PR.
+By participating in this project, you agree to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
