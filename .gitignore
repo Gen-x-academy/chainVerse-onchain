@@ -1,0 +1,4 @@
+target/
+.soroban/
+node_modules/
+.env
