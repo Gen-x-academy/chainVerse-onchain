@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "chainverse-core"
+]
+
+[workspace.dependencies]
+soroban-sdk = "20.5.0"
