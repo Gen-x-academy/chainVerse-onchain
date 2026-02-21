@@ -16,6 +16,10 @@ mod events;
 mod errors;
 mod mint;
 mod verify;
+mod pause;
+mod purchase;
+mod reward;
+mod certificate;
 
 pub use contract::*;
 
@@ -25,9 +29,7 @@ pub struct CertificateContract;
 #[contractimpl]
 impl CertificateContract {
 
-    // ============================
     // Generate deterministic certificate ID
-    // ============================
     fn generate_certificate_id(
         env: &Env,
         wallet: &Address,
@@ -37,9 +39,7 @@ impl CertificateContract {
         env.crypto().sha256(&env.serialize(&hash_input).unwrap())
     }
 
-    // ============================
     // Mint Certificate (internal)
-    // ============================
     pub fn issue_certificate(
         env: Env,
         wallet: Address,
@@ -82,9 +82,7 @@ impl CertificateContract {
         certificate_id
     }
 
-    // ============================
     // Query Certificate
-    // ============================
     pub fn get_certificate(
         env: Env,
         certificate_id: BytesN<32>,
@@ -95,9 +93,7 @@ impl CertificateContract {
             .expect("CertificateNotFound")
     }
 
-    // ============================
     // Query by Wallet + Course
-    // ============================
     pub fn get_certificate_by_wallet(
         env: Env,
         wallet: Address,
@@ -130,6 +126,29 @@ impl CertificateContract {
             backend_public_key,
             signature,
         )
+    }
+
+    // Admin toggle
+    pub fn toggle_pause(env: Env, admin: Address, paused: bool) -> Result<(), ContractError> {
+        pause::set_pause(&env, admin, paused)
+    }
+
+    // Example: Purchase wrapper
+    pub fn purchase_course(env: Env, user: Address, course_id: u32) -> Result<(), ContractError> {
+        pause::require_not_paused(&env)?;
+        purchase::execute(env, user, course_id)
+    }
+
+    // Example: Reward wrapper
+    pub fn claim_reward(env: Env, user: Address) -> Result<(), ContractError> {
+        pause::require_not_paused(&env)?;
+        reward::execute(env, user)
+    }
+
+    // Example: Certificate mint
+    pub fn mint_certificate(env: Env, user: Address) -> Result<(), ContractError> {
+        pause::require_not_paused(&env)?;
+        certificate::execute(env, user)
     }
     
 }
