@@ -1,4 +1,7 @@
-use soroban_sdk::{contract, contractimpl, Env, BytesN};
+#![no_std]
+
+use soroban_sdk::{contract, contractimpl, Env, BytesN,Address};
+use reward::claim_reward;
 use crate::admin::require_admin;
 use crate::storage::DataKey;
 use crate::errors::Error;
@@ -8,6 +11,8 @@ mod signature;
 use signature::build_message;
 mod errors;
 use errors::RewardError;
+mod reward;
+mod events;
 
 #[contract]
 pub struct RewardContract;
@@ -39,6 +44,10 @@ impl RewardContract {
         env.storage()
             .instance()
             .get(&DataKey::BackendPubKey)
+    }
+
+    pub fn claim_reward(env: Env, user: Address) -> Result<(), errors::ContractError> {
+        claim_reward(env, user)
     }
 }
 
