@@ -2,6 +2,12 @@ use soroban_sdk::{contract, contractimpl, Env, BytesN};
 use crate::admin::require_admin;
 use crate::storage::DataKey;
 use crate::errors::Error;
+mod storage;
+use storage::DataKey;
+mod signature;
+use signature::build_message;
+mod errors;
+use errors::RewardError;
 
 #[contract]
 pub struct RewardContract;
@@ -34,4 +40,13 @@ impl RewardContract {
             .instance()
             .get(&DataKey::BackendPubKey)
     }
+}
+
+use soroban_sdk::{contracttype, BytesN};
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    BackendSigner,
+    UsedNonce(BytesN<32>),
 }
