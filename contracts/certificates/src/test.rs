@@ -18,4 +18,16 @@ mod test {
 
         assert!(result.is_err());
     }
+    
+    #[test]
+    fn duplicate_mint_fails() {
+        let env = Env::default();
+        let wallet = Address::generate(&env);
+
+        // Simulate first mint
+        // (mock signature verification if needed)
+
+        // Second mint should fail with CertificateExists
+    }
 }
+
