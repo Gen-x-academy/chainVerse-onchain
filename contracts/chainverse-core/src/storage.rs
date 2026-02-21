@@ -14,3 +14,10 @@ pub enum DataKey {
     Treasury,
     CHVToken,
 }
+
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    Purchase(Address, u64), // (buyer, course_id)
+}
