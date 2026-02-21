@@ -3,12 +3,16 @@
 use soroban_sdk::{
     contract, contractimpl, Address, Env, BytesN, symbol_short,
 };
-
-mod storage;
-mod types;
-
 use storage::DataKey;
 use types::Certificate;
+
+mod types;
+mod contract;
+mod storage;
+mod events;
+mod errors;
+
+pub use contract::*;
 
 #[contract]
 pub struct CertificateContract;

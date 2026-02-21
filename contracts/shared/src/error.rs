@@ -12,4 +12,5 @@ pub enum ContractError {
     AlreadyRewarded = 4,
     CertificateExists = 5,
     ContractPaused = 6,
+    SoulboundTransferNotAllowed = 7,
 }
