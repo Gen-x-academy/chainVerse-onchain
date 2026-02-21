@@ -1,16 +1,21 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, Address, Env, BytesN, symbol_short,
+    contract, contractimpl, Address, Env, BytesN, symbol_short, contract, contractimpl,
 };
 use storage::DataKey;
 use types::Certificate;
+use crate::mint::mint_certificate;
+use crate::shared::errors::ContractError;
+
 
 mod types;
 mod contract;
 mod storage;
 mod events;
 mod errors;
+mod mint;
+mod verify;
 
 pub use contract::*;
 
@@ -110,4 +115,24 @@ impl CertificateContract {
             .get(&DataKey::Certificate(cert_id))
             .unwrap()
     }
+    
+    pub fn mint(
+        env: Env,
+        wallet: Address,
+        course_id: u64,
+        backend_public_key: Bytes,
+        signature: Bytes,
+    ) -> Result<(), ContractError> {
+        mint_certificate(
+            env,
+            wallet,
+            course_id,
+            backend_public_key,
+            signature,
+        )
+    }
+    
 }
+
+
+

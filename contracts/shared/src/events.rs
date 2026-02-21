@@ -1,8 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{Env, Symbol, symbol_short};
+use soroban_sdk::{Env, Symbol, symbol_short,Address};
 
 pub struct EventEmitter;
+pub const CERTIFICATE_MINTED: Symbol = symbol_short!("CertMint");
 
 impl EventEmitter {
 
@@ -62,4 +63,19 @@ impl EventEmitter {
             (user, course_id, token_id),
         );
     }
+    
+    pub fn emit_certificate_minted(
+        env: &Env,
+        wallet: Address,
+        course_id: u64,
+        timestamp: u64,
+    ) {
+        env.events().publish(
+            (CERTIFICATE_MINTED, wallet.clone()),
+            (wallet, course_id, timestamp),
+        );
+    }
 }
+
+
+
