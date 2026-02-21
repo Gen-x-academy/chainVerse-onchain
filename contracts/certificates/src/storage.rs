@@ -9,7 +9,9 @@ const CERT_OWNER: soroban_sdk::Symbol = symbol_short!("CERTOWN");
 #[contracttype]
 pub enum DataKey {
     Certificate(BytesN<32>),             
-    WalletCourse(Address, u32),          
+    WalletCourse(Address, u32),     
+    Admin,
+    Paused,     
 }
 
 
