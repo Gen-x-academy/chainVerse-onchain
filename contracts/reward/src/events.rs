@@ -1,4 +1,4 @@
-use soroban_sdk::{Env, Symbol, Address};
+use soroban_sdk::{Env, Symbol, Address,symbol_short};
 
 pub fn reward_claimed(
     env: &Env,
@@ -10,4 +10,9 @@ pub fn reward_claimed(
         (Symbol::new(env, "RewardClaimed"), user),
         (course_id, amount, env.ledger().timestamp()),
     );
+}
+
+pub fn emit_reward_claimed(env: &Env, user: &Address, amount: i128) {
+    let topics = (symbol_short!("RewardClaimed"), user.clone());
+    env.events().publish(topics, amount);
 }
