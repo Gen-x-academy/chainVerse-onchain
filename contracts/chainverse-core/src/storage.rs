@@ -1,23 +1,15 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Vec};
 
 #[contracttype]
-pub struct Course {
-    pub course_id: u32,
-    pub price_xlm: i128,
-    pub price_chv: i128,
-}
-
-#[contracttype]
-pub enum DataKey {
-    Course(u32),
-    Purchase(Address, u32),
-    Treasury,
-    CHVToken,
-}
-
-
 #[derive(Clone)]
+pub struct Config {
+    pub admin: Address,
+    pub protocol_fee: u32, // basis points, e.g. 100 = 1%
+    pub supported_tokens: Vec<Address>,
+}
+
 #[contracttype]
+#[derive(Clone)]
 pub enum DataKey {
-    Purchase(Address, u64), // (buyer, course_id)
+    Config,
 }

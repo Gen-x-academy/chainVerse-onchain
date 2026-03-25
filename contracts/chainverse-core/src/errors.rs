@@ -1,13 +1,15 @@
 use soroban_sdk::contracterror;
 
 #[contracterror]
-#[derive(Copy, Clone,Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
-    InvalidAsset = 1,
-    IncorrectAmount = 2,
-    AlreadyPurchased = 3,
-    CourseNotFound = 4,
-    AlreadyPurchased = 1,
+    Unauthorized = 1,
+    AlreadyInitialized = 2,
+    NotInitialized = 3,
+    ContractPaused = 4,
+    InvalidAmount = 5,
+    UnsupportedToken = 6,
+    EscrowNotFound = 7,
+    InvalidEscrowState = 8,
 }
-
