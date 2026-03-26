@@ -1,0 +1,12 @@
+use soroban_sdk::contracterror;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum EscrowError {
+    NotFound = 1,
+    NotPending = 2,
+    Expired = 3,
+    Unauthorized = 4,
+    TokenNotAllowed = 5,
+}
