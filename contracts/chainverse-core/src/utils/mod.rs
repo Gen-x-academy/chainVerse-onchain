@@ -43,3 +43,20 @@ pub fn require_supported_token(env: &Env, token: &Address) -> Result<(), Contrac
         Err(ContractError::UnsupportedToken)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fee calculation
+// ---------------------------------------------------------------------------
+
+/// Calculates the protocol fee based on the config.
+pub fn calculate_fee(env: &Env, amount: i128) -> Result<i128, ContractError> {
+    let config: crate::storage::Config = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Config)
+        .ok_or(ContractError::NotInitialized)?;
+
+    // fee in basis points, e.g. 100 = 1%
+    // amount * fee / 10000
+    Ok((amount * (config.protocol_fee as i128)) / 10000)
+}
