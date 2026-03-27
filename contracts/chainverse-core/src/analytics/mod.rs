@@ -17,9 +17,31 @@ pub enum AnalyticsKey {
     EventCount(Symbol),
 }
 
+/// Aggregate statistics for the contract's escrows.
+#[contracttype]
+#[derive(Clone, Default)]
+pub struct Stats {
+    pub total: u64,
+    pub active: u64,
+    pub completed: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/// Returns high-level statistics about the contract's escrows.
+pub fn get_stats(env: &Env) -> Stats {
+    let total = count(env, EVT_ESCROW_CREATED);
+    let released = count(env, EVT_ESCROW_RELEASED);
+    let cancelled = count(env, EVT_ESCROW_CANCELLED);
+
+    Stats {
+        total,
+        active: total - released - cancelled,
+        completed: released,
+    }
+}
 
 /// Increments the counter for `event` by one.
 pub fn record(env: &Env, event: Symbol) {

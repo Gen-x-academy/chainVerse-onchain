@@ -154,10 +154,11 @@ impl ChainverseCore {
         env: Env,
         depositor: Address,
         recipient: Address,
+        token: Address,
         amount: i128,
     ) -> Result<u64, ContractError> {
         admin::assert_not_paused(&env)?;
-        let id = escrow::create(&env, depositor, recipient, amount)?;
+        let id = escrow::create(&env, depositor, recipient, token, amount)?;
         analytics::record(&env, EVT_ESCROW_CREATED);
         Ok(id)
     }
@@ -192,6 +193,20 @@ impl ChainverseCore {
         analytics::count(&env, event)
     }
 
+    /// Returns high-level statistics about the contract's escrows.
+    pub fn get_escrow_stats(env: Env) -> analytics::Stats {
+        analytics::get_stats(&env)
+    }
+
+    /// Search escrows by token and/or status.
+    pub fn search_escrows(
+        env: Env,
+        token: Option<Address>,
+        status: Option<EscrowStatus>,
+    ) -> Vec<EscrowRecord> {
+        escrow::search(&env, token, status)
+    }
+
     // -----------------------------------------------------------------------
     // Utils module
     // -----------------------------------------------------------------------
@@ -199,5 +214,10 @@ impl ChainverseCore {
     /// Returns `true` when `token` is in the supported-token list.
     pub fn is_token_supported(env: Env, token: Address) -> bool {
         utils::is_token_supported(&env, &token)
+    }
+
+    /// Calculates the protocol fee for a given amount.
+    pub fn calculate_fee(env: Env, amount: i128) -> Result<i128, ContractError> {
+        utils::calculate_fee(&env, amount)
     }
 }

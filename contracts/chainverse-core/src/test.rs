@@ -192,4 +192,62 @@ mod test {
         assert_eq!(config.protocol_fee, 150);
         assert_eq!(config.admin, admin);
     }
+
+    // -----------------------------------------------------------------------
+    // New Features: Escrow, Stats, Search, and Fees
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_calculate_fee() {
+        let (env, _, client) = setup();
+        let admin = Address::generate(&env);
+        let tokens = vec![&env];
+        client.initialize(&admin, &250, &tokens); // 2.5%
+
+        let amount = 10000;
+        let fee = client.calculate_fee(&amount);
+        assert_eq!(fee, 250); // 10000 * 250 / 10000 = 250
+    }
+
+    #[test]
+    fn test_escrow_analytics_and_stats() {
+        let (env, _, client) = setup();
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let tokens = vec![&env, token.clone()];
+        client.initialize(&admin, &100, &tokens);
+
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+
+        // Initially stats should be zero
+        let stats = client.get_escrow_stats();
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.active, 0);
+
+        // Create an escrow
+        let id1 = client.create_escrow(&buyer, &seller, &token, &1000);
+        
+        let stats = client.get_escrow_stats();
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.active, 1);
+        assert_eq!(stats.completed, 0);
+
+        // Search by token
+        let escrows = client.search_escrows(&Some(token.clone()), &None);
+        assert_eq!(escrows.len(), 1);
+        assert_eq!(escrows.get(0).unwrap().id, id1);
+
+        // Search by wrong token
+        let other_token = Address::generate(&env);
+        let escrows = client.search_escrows(&Some(other_token), &None);
+        assert_eq!(escrows.len(), 0);
+
+        // Release funds
+        client.release_escrow(&buyer, &id1);
+        let stats = client.get_escrow_stats();
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.active, 0);
+        assert_eq!(stats.completed, 1);
+    }
 }

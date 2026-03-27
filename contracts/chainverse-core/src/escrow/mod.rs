@@ -25,6 +25,7 @@ pub struct EscrowRecord {
     pub id: u64,
     pub depositor: Address,
     pub recipient: Address,
+    pub token: Address,
     pub amount: i128,
     pub status: EscrowStatus,
     pub created_at: u64,
@@ -79,16 +80,19 @@ pub fn create(
     env: &Env,
     depositor: Address,
     recipient: Address,
+    token: Address,
     amount: i128,
 ) -> Result<u64, ContractError> {
     depositor.require_auth();
     crate::utils::validate_amount(amount)?;
+    crate::utils::require_supported_token(env, &token)?;
 
     let id = next_id(env);
     let record = EscrowRecord {
         id,
         depositor,
         recipient,
+        token,
         amount,
         status: EscrowStatus::Pending,
         created_at: env.ledger().timestamp(),
@@ -136,4 +140,39 @@ pub fn cancel(env: &Env, caller: Address, id: u64) -> Result<(), ContractError> 
 /// Returns the escrow record for the given id.
 pub fn get(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
     load(env, id)
+}
+
+/// Returns all escrows optionally filtered by token and/or status.
+/// Using iterative search — for high-volume use cases, off-chain indexing is recommended.
+pub fn search(
+    env: &Env,
+    token: Option<Address>,
+    status: Option<EscrowStatus>,
+) -> soroban_sdk::Vec<EscrowRecord> {
+    let mut results = soroban_sdk::Vec::new(env);
+    let count: u64 = env
+        .storage()
+        .persistent()
+        .get(&EscrowKey::NextId)
+        .unwrap_or(0u64);
+
+    for i in 0..count {
+        if let Ok(record) = load(env, i) {
+            let mut matches = true;
+            if let Some(t) = &token {
+                if &record.token != t {
+                    matches = false;
+                }
+            }
+            if let Some(s) = &status {
+                if &record.status != s {
+                    matches = false;
+                }
+            }
+            if matches {
+                results.push_back(record);
+            }
+        }
+    }
+    results
 }
