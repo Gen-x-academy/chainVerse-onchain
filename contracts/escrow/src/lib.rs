@@ -102,6 +102,36 @@ mod test {
     }
 
     // -----------------------------------------------------------------------
+    // create_escrow
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_create_escrow_success() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &2000);
+        assert_eq!(escrow_id, 1); // First id is 1
+
+        let escrow = client.get_escrow(&escrow_id);
+        assert_eq!(escrow.buyer, buyer);
+        assert_eq!(escrow.seller, seller);
+        assert_eq!(escrow.amount, 500);
+        assert_eq!(escrow.status, EscrowStatus::Pending);
+
+        let balance = TokenClient::new(&env, &token_addr).balance(&buyer);
+        assert_eq!(balance, 500);
+    }
+
+    #[test]
+    fn test_create_escrow_token_not_allowed() {
+        let (env, buyer, seller, _token_addr, client) = setup(1000);
+        
+        let invalid_token = Address::generate(&env);
+        let result = client.try_create_escrow(&buyer, &seller, &invalid_token, &500, &2000);
+        assert!(result.is_err(), "creation with an unwhitelisted token must fail");
+    }
+
+    // -----------------------------------------------------------------------
     // refund_buyer
     // -----------------------------------------------------------------------
 
