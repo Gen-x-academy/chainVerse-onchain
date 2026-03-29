@@ -55,6 +55,11 @@ impl EscrowContract {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
+    /// Returns the number of currently active (Pending) escrows.
+    pub fn get_active_escrow_count(env: Env) -> u64 {
+        storage::get_active_escrow_count(&env)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
@@ -99,6 +104,30 @@ mod test {
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    // -----------------------------------------------------------------------
+    // get_active_escrow_count
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_active_escrow_count_accurate() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        assert_eq!(client.get_active_escrow_count(), 0);
+
+        let id1 = client.create_escrow(&buyer, &seller, &token_addr, &100, &9000);
+        let id2 = client.create_escrow(&buyer, &seller, &token_addr, &100, &9000);
+        assert_eq!(client.get_active_escrow_count(), 2);
+
+        // Release one — active should drop to 1
+        client.release_funds(&id1);
+        assert_eq!(client.get_active_escrow_count(), 1);
+
+        // Refund the other — active should drop to 0
+        env.ledger().with_mut(|li| li.timestamp = 10000);
+        client.refund_buyer(&id2);
+        assert_eq!(client.get_active_escrow_count(), 0);
     }
 
     // -----------------------------------------------------------------------
