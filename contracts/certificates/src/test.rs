@@ -1,3 +1,5 @@
+extern crate std;
+
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{testutils::Address as _, xdr::ToXdr, Address, Bytes, Env};
 
@@ -13,7 +15,9 @@ fn public_key_bytes(env: &Env, signing_key: &SigningKey) -> Bytes {
 
 fn proof_bytes(env: &Env, signing_key: &SigningKey, wallet: &Address, course_id: u64) -> Bytes {
     let payload = (wallet.clone(), course_id).to_xdr(env);
-    let signature = signing_key.sign(&payload.to_alloc_vec());
+    let mut message = std::vec![0u8; payload.len() as usize];
+    payload.copy_into_slice(&mut message);
+    let signature = signing_key.sign(&message);
     Bytes::from_slice(env, &signature.to_bytes())
 }
 
