@@ -134,6 +134,18 @@ mod test {
         assert!(result.is_err(), "release after expiration must fail");
     }
 
+    #[test]
+    fn test_release_funds_fails_on_double_release() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &9000);
+        client.release_funds(&escrow_id);
+
+        // Second release must be rejected with AlreadyReleased
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "double release must be rejected");
+    }
+
     // -----------------------------------------------------------------------
     // refund_buyer
     // -----------------------------------------------------------------------
