@@ -55,6 +55,11 @@ impl EscrowContract {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
+    /// Returns the total number of escrows ever created.
+    pub fn get_escrow_count(env: Env) -> u64 {
+        storage::get_escrow_count(&env)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
@@ -99,6 +104,21 @@ mod test {
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    // -----------------------------------------------------------------------
+    // get_escrow_count
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_escrow_count_increments() {
+        let (_, buyer, seller, token_addr, client) = setup(1000);
+
+        assert_eq!(client.get_escrow_count(), 0);
+        client.create_escrow(&buyer, &seller, &token_addr, &100, &2000);
+        assert_eq!(client.get_escrow_count(), 1);
+        client.create_escrow(&buyer, &seller, &token_addr, &100, &2000);
+        assert_eq!(client.get_escrow_count(), 2);
     }
 
     // -----------------------------------------------------------------------
