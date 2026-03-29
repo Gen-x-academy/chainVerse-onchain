@@ -1,0 +1,25 @@
+[package]
+name = "certificates"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+ed25519-dalek = "=2.0.0"
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[[test]]
+name = "pause_tests"
+required-features = ["testutils"]
+
+[[test]]
+name = "security_tests"
+required-features = ["testutils"]
