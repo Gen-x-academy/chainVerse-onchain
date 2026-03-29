@@ -21,7 +21,7 @@ mod test;
 // ---------------------------------------------------------------------------
 
 pub use errors::ContractError;
-pub use escrow::{EscrowRecord, EscrowStatus};
+pub use escrow::{paginate, EscrowRecord, EscrowStatus};
 pub use storage::Config;
 
 // ---------------------------------------------------------------------------
@@ -205,6 +205,11 @@ impl ChainverseCore {
         status: Option<EscrowStatus>,
     ) -> Vec<EscrowRecord> {
         escrow::search(&env, token, status)
+    }
+
+    /// Returns a paginated slice of all escrow records.
+    pub fn paginate_escrows(env: Env, offset: u64, limit: u64) -> Vec<EscrowRecord> {
+        escrow::paginate(&env, offset, limit)
     }
 
     // -----------------------------------------------------------------------

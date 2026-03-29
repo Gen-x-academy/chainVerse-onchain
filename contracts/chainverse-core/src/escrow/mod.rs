@@ -2,21 +2,15 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::errors::ContractError;
 
+pub mod pagination;
+pub mod status;
+
+pub use pagination::paginate;
+pub use status::EscrowStatus;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/// Lifecycle of an escrow deposit.
-#[contracttype]
-#[derive(Clone, PartialEq)]
-pub enum EscrowStatus {
-    /// Funds are held, awaiting release or cancellation.
-    Pending,
-    /// Funds have been released to the recipient.
-    Released,
-    /// Funds have been returned to the depositor.
-    Cancelled,
-}
 
 /// A single escrow record stored on-chain.
 #[contracttype]
@@ -114,7 +108,7 @@ pub fn release(env: &Env, caller: Address, id: u64) -> Result<(), ContractError>
         return Err(ContractError::Unauthorized);
     }
 
-    record.status = EscrowStatus::Released;
+    record.status = EscrowStatus::Completed;
     save(env, &record);
     Ok(())
 }
