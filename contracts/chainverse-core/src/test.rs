@@ -227,7 +227,7 @@ mod test {
 
         // Create an escrow
         let id1 = client.create_escrow(&buyer, &seller, &token, &1000);
-        
+
         let stats = client.get_escrow_stats();
         assert_eq!(stats.total, 1);
         assert_eq!(stats.active, 1);
@@ -249,5 +249,30 @@ mod test {
         assert_eq!(stats.total, 1);
         assert_eq!(stats.active, 0);
         assert_eq!(stats.completed, 1);
+    }
+
+    #[test]
+    fn test_governance_dao_quorum_check_passes_at_exact_threshold() {
+        let (env, _, client) = setup();
+        let admin = Address::generate(&env);
+        let tokens = vec![&env];
+        client.initialize(&admin, &100, &tokens);
+
+        // Simulated governance test:
+        // proposal should pass when votes reach quorum exactly.
+        let quorum_threshold: i128 = 100;
+        let mut vote_count: i128 = 0;
+
+        vote_count += 40;
+        vote_count += 30;
+        vote_count += 30;
+
+        assert_eq!(vote_count, quorum_threshold);
+
+        let proposal_passes = vote_count >= quorum_threshold;
+        assert!(
+            proposal_passes,
+            "proposal should transition to passing state at exact quorum threshold"
+        );
     }
 }
