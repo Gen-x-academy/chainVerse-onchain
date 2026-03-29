@@ -1,43 +1,67 @@
-use soroban_sdk::{contracttype, Address, Env, BytesN, Symbol,symbol_short};
+use soroban_sdk::{contracttype, Address, Env};
 
-use crate::types::Certificate;
-use crate::shared::types::Certificate;
-
-const CERTIFICATE_KEY: soroban_sdk::Symbol = symbol_short!("CERT");
-const CERT_OWNER: soroban_sdk::Symbol = symbol_short!("CERTOWN");
+use crate::{Certificate, ContractError};
 
 #[contracttype]
+#[derive(Clone)]
 pub enum DataKey {
-    Certificate(BytesN<32>),             
-    WalletCourse(Address, u32),     
     Admin,
-    Paused,     
+    Paused,
+    Certificate(Address, u64),
 }
 
-
-pub fn set_certificate_owner(e: &Env, cert_id: u64, owner: &Address) {
-    e.storage().instance().set(&(CERT_OWNER, cert_id), owner);
+pub fn get_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Admin)
 }
 
-pub fn get_certificate_owner(e: &Env, cert_id: u64) -> Option<Address> {
-    e.storage().instance().get(&(CERT_OWNER, cert_id))
+pub fn set_admin(env: &Env, admin: &Address) {
+    env.storage().instance().set(&DataKey::Admin, admin);
 }
 
-pub fn get_certificate(
-    env: &Env,
-    wallet: &Address,
-    course_id: u64,
-) -> Option<Certificate> {
-    env.storage().persistent().get(&(CERTIFICATE_KEY, wallet, course_id))
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
 }
 
-pub fn store_certificate(
-    env: &Env,
-    wallet: &Address,
-    course_id: u64,
-    cert: &Certificate,
-) {
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
+}
+
+pub fn require_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
+    caller.require_auth();
+
+    match get_admin(env) {
+        Some(admin) if admin == *caller => Ok(()),
+        Some(_) => Err(ContractError::Unauthorized),
+        None => Err(ContractError::NotInitialized),
+    }
+}
+
+pub fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+    if is_paused(env) {
+        Err(ContractError::ContractPaused)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn has_certificate(env: &Env, wallet: &Address, course_id: u64) -> bool {
     env.storage()
         .persistent()
-        .set(&(CERTIFICATE_KEY, wallet, course_id), cert);
+        .has(&DataKey::Certificate(wallet.clone(), course_id))
+}
+
+pub fn load_certificate(env: &Env, wallet: &Address, course_id: u64) -> Option<Certificate> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Certificate(wallet.clone(), course_id))
+}
+
+pub fn save_certificate(env: &Env, wallet: &Address, course_id: u64, certificate: &Certificate) {
+    env.storage().persistent().set(
+        &DataKey::Certificate(wallet.clone(), course_id),
+        certificate,
+    );
 }
