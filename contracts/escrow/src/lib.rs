@@ -102,6 +102,39 @@ mod test {
     }
 
     // -----------------------------------------------------------------------
+    // release_funds
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_release_funds_success() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &2000);
+        client.release_funds(&escrow_id);
+
+        let escrow = client.get_escrow(&escrow_id);
+        assert_eq!(escrow.status, EscrowStatus::Completed);
+
+        let seller_balance = TokenClient::new(&env, &token_addr).balance(&seller);
+        assert_eq!(seller_balance, 500);
+    }
+
+    #[test]
+    fn test_release_funds_fails_if_expired() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &2000);
+
+        // Advance past expiration
+        env.ledger().with_mut(|li| {
+            li.timestamp = 3000;
+        });
+
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "release after expiration must fail");
+    }
+
+    // -----------------------------------------------------------------------
     // refund_buyer
     // -----------------------------------------------------------------------
 
