@@ -2,6 +2,9 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::errors::ContractError;
 
+pub mod status_validator;
+pub use status_validator::validate_transition;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
