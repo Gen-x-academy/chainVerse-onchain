@@ -3,7 +3,9 @@ resolver = "2"
 
 members = [
     "chainverse-core",
-    "escrow"
+    "escrow",
+    "escrow-vault",
+    "payout-automation"
 ]
 
 [workspace.dependencies]
