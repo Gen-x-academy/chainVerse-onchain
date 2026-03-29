@@ -3,7 +3,8 @@ resolver = "2"
 
 members = [
     "chainverse-core",
-    "escrow"
+    "escrow",
+    "shared"
 ]
 
 [workspace.dependencies]

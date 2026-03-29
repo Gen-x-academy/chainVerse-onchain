@@ -1,6 +1,4 @@
-#![no_std]
-
-use soroban_sdk::{Env, Symbol, symbol_short,Address};
+use soroban_sdk::{Env, Symbol, symbol_short, Address};
 
 pub struct EventEmitter;
 pub const CERTIFICATE_MINTED: Symbol = symbol_short!("CertMint");
@@ -15,9 +13,9 @@ impl EventEmitter {
         amount: i128,
     ) {
         let topic = (
-            symbol_short!("chainverse"),
+            symbol_short!("chainvrs"),
             symbol_short!("course"),
-            symbol_short!("purchased"),
+            symbol_short!("purchase"),
         );
 
         env.events().publish(
@@ -34,7 +32,7 @@ impl EventEmitter {
         amount: i128,
     ) {
         let topic = (
-            symbol_short!("chainverse"),
+            symbol_short!("chainvrs"),
             symbol_short!("reward"),
             symbol_short!("claimed"),
         );
@@ -53,8 +51,8 @@ impl EventEmitter {
         token_id: u64,
     ) {
         let topic = (
-            symbol_short!("chainverse"),
-            symbol_short!("certificate"),
+            symbol_short!("chainvrs"),
+            symbol_short!("cert"),
             symbol_short!("minted"),
         );
 
