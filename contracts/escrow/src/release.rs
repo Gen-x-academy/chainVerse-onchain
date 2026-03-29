@@ -1,5 +1,6 @@
 use soroban_sdk::{token::Client as TokenClient, Env};
 use crate::errors::EscrowError;
+use crate::events::escrow_completed;
 use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 
@@ -30,6 +31,9 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Update status to Completed
     escrow.status = EscrowStatus::Completed;
     save_escrow(env, escrow_id, &escrow);
+
+    // Emit event
+    escrow_completed(env, escrow_id, &escrow.buyer, &escrow.seller, escrow.amount);
 
     Ok(())
 }
