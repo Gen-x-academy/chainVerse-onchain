@@ -12,4 +12,5 @@ pub enum ContractError {
     UnsupportedToken = 6,
     EscrowNotFound = 7,
     InvalidEscrowState = 8,
+    EscrowNotExpired = 9,
 }

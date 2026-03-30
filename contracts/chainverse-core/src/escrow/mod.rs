@@ -1,12 +1,17 @@
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, Address, Env, Vec};
 
 use crate::errors::ContractError;
 
 pub mod active_query;
 pub mod id_generator;
+pub mod pagination;
+pub mod status;
+pub mod status_validator;
 
 pub use active_query::get_active_escrows;
 pub use id_generator::next_escrow_id;
+pub use pagination::paginate;
+pub use status::EscrowStatus;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,6 +28,8 @@ pub struct EscrowRecord {
     pub amount: i128,
     pub status: EscrowStatus,
     pub created_at: u64,
+    /// Unix timestamp after which the escrow can be refunded. 0 means no expiry.
+    pub expires_at: u64,
 }
 
 /// Storage key for escrow entries.
@@ -70,12 +77,14 @@ fn save(env: &Env, record: &EscrowRecord) {
 
 /// Creates a new escrow and returns its id.
 /// The depositor must authorise this call.
+/// `expires_at` is a Unix timestamp; pass 0 for no expiry.
 pub fn create(
     env: &Env,
     depositor: Address,
     recipient: Address,
     token: Address,
     amount: i128,
+    expires_at: u64,
 ) -> Result<u64, ContractError> {
     depositor.require_auth();
     crate::utils::validate_amount(amount)?;
@@ -90,6 +99,7 @@ pub fn create(
         amount,
         status: EscrowStatus::Pending,
         created_at: env.ledger().timestamp(),
+        expires_at,
     };
     save(env, &record);
     Ok(id)
@@ -134,6 +144,81 @@ pub fn cancel(env: &Env, caller: Address, id: u64) -> Result<(), ContractError> 
 /// Returns the escrow record for the given id.
 pub fn get(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
     load(env, id)
+}
+
+/// Returns all escrows where `buyer` is the depositor.
+pub fn get_by_buyer(env: &Env, buyer: &Address) -> Vec<EscrowRecord> {
+    let mut results = Vec::new(env);
+    let count: u64 = env
+        .storage()
+        .persistent()
+        .get(&EscrowKey::NextId)
+        .unwrap_or(0u64);
+    for i in 0..count {
+        if let Ok(record) = load(env, i) {
+            if &record.depositor == buyer {
+                results.push_back(record);
+            }
+        }
+    }
+    results
+}
+
+/// Returns all escrows where `seller` is the recipient.
+pub fn get_by_seller(env: &Env, seller: &Address) -> Vec<EscrowRecord> {
+    let mut results = Vec::new(env);
+    let count: u64 = env
+        .storage()
+        .persistent()
+        .get(&EscrowKey::NextId)
+        .unwrap_or(0u64);
+    for i in 0..count {
+        if let Ok(record) = load(env, i) {
+            if &record.recipient == seller {
+                results.push_back(record);
+            }
+        }
+    }
+    results
+}
+
+/// Allows the buyer (depositor) to cancel a Pending escrow before the seller
+/// has interacted (i.e. while status is still Pending). Marks it Cancelled.
+pub fn buyer_cancel(env: &Env, buyer: Address, id: u64) -> Result<(), ContractError> {
+    buyer.require_auth();
+    let mut record = load(env, id)?;
+
+    if record.depositor != buyer {
+        return Err(ContractError::Unauthorized);
+    }
+    if record.status != EscrowStatus::Pending {
+        // Seller has already interacted or escrow is no longer open.
+        return Err(ContractError::InvalidEscrowState);
+    }
+
+    record.status = EscrowStatus::Cancelled;
+    save(env, &record);
+    Ok(())
+}
+
+/// Refunds an expired escrow back to the depositor.
+/// Anyone may call this once the escrow has passed its `expires_at` timestamp.
+pub fn refund_expired(env: &Env, id: u64) -> Result<(), ContractError> {
+    let mut record = load(env, id)?;
+
+    if record.expires_at == 0 {
+        return Err(ContractError::InvalidEscrowState);
+    }
+    if env.ledger().timestamp() < record.expires_at {
+        return Err(ContractError::EscrowNotExpired);
+    }
+    if record.status != EscrowStatus::Pending {
+        return Err(ContractError::InvalidEscrowState);
+    }
+
+    record.status = EscrowStatus::Expired;
+    save(env, &record);
+    Ok(())
 }
 
 /// Returns all escrows optionally filtered by token and/or status.

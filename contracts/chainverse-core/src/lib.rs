@@ -150,15 +150,17 @@ impl ChainverseCore {
     // -----------------------------------------------------------------------
 
     /// Creates a new escrow and returns its id.
+    /// `expires_at` is a Unix timestamp after which the escrow can be refunded; pass 0 for no expiry.
     pub fn create_escrow(
         env: Env,
         depositor: Address,
         recipient: Address,
         token: Address,
         amount: i128,
+        expires_at: u64,
     ) -> Result<u64, ContractError> {
         admin::assert_not_paused(&env)?;
-        let id = escrow::create(&env, depositor, recipient, token, amount)?;
+        let id = escrow::create(&env, depositor, recipient, token, amount, expires_at)?;
         analytics::record(&env, EVT_ESCROW_CREATED);
         Ok(id)
     }
@@ -179,9 +181,35 @@ impl ChainverseCore {
         Ok(())
     }
 
+    /// Buyer cancels a Pending escrow before the seller has interacted.
+    pub fn buyer_cancel_escrow(env: Env, buyer: Address, id: u64) -> Result<(), ContractError> {
+        admin::assert_not_paused(&env)?;
+        escrow::buyer_cancel(&env, buyer, id)?;
+        analytics::record(&env, EVT_ESCROW_CANCELLED);
+        Ok(())
+    }
+
+    /// Refunds an escrow that has passed its expiry timestamp.
+    pub fn refund_expired_escrow(env: Env, id: u64) -> Result<(), ContractError> {
+        admin::assert_not_paused(&env)?;
+        escrow::refund_expired(&env, id)?;
+        analytics::record(&env, EVT_ESCROW_CANCELLED);
+        Ok(())
+    }
+
     /// Returns the escrow record for `id`.
     pub fn get_escrow(env: Env, id: u64) -> Result<EscrowRecord, ContractError> {
         escrow::get(&env, id)
+    }
+
+    /// Returns all escrows where `buyer` is the depositor.
+    pub fn get_escrows_by_buyer(env: Env, buyer: Address) -> Vec<EscrowRecord> {
+        escrow::get_by_buyer(&env, &buyer)
+    }
+
+    /// Returns all escrows where `seller` is the recipient.
+    pub fn get_escrows_by_seller(env: Env, seller: Address) -> Vec<EscrowRecord> {
+        escrow::get_by_seller(&env, &seller)
     }
 
     // -----------------------------------------------------------------------
