@@ -155,6 +155,34 @@ mod test {
         (env, client)
     }
 
+    #[test]
+    fn test_approve_release_on_already_released_escrow_fails() {
+        let (env, client) = setup();
+
+        let depositor = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token     = Address::generate(&env);
+        let approver  = Address::generate(&env);
+
+        let vault_id = client.create_vault(
+            &depositor,
+            &recipient,
+            &token,
+            &100,
+            &vec![&env, approver.clone()],
+        );
+
+        // First approval should succeed and release the vault
+        client.approve_release(&approver, &vault_id);
+
+        // Second approval attempt should fail with NotPending
+        let result = client.try_approve_release(&approver, &vault_id);
+        assert!(result.is_err(), "approve_release on already released escrow must fail");
+        if let Err(err) = result {
+            assert_eq!(err, VaultError::NotPending);
+        }
+    }
+
     // Issue #98 — approve_release from unauthorised caller must be rejected
     #[test]
     fn test_approve_release_from_unauthorised_caller_is_rejected() {
