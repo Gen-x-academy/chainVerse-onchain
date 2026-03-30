@@ -10,4 +10,5 @@ pub enum EscrowError {
     Unauthorized = 4,
     TokenNotAllowed = 5,
     NotExpired = 6,
+    AlreadyReleased = 7,
 }
