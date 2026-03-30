@@ -21,7 +21,7 @@ mod test;
 // ---------------------------------------------------------------------------
 
 pub use errors::ContractError;
-pub use escrow::{EscrowRecord, EscrowStatus};
+pub use escrow::{paginate, EscrowRecord, EscrowStatus};
 pub use storage::Config;
 
 // ---------------------------------------------------------------------------
