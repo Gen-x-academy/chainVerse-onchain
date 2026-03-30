@@ -3,6 +3,9 @@ use soroban_sdk::{Address, Env};
 use crate::errors::ContractError;
 use crate::storage::DataKey;
 
+pub mod token_validation;
+pub use token_validation::validate_token_amount;
+
 // ---------------------------------------------------------------------------
 // Amount validation
 // ---------------------------------------------------------------------------

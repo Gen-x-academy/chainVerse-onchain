@@ -2,11 +2,11 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::errors::ContractError;
 
-pub mod pagination;
-pub mod status;
+pub mod active_query;
+pub mod id_generator;
 
-pub use pagination::paginate;
-pub use status::EscrowStatus;
+pub use active_query::get_active_escrows;
+pub use id_generator::next_escrow_id;
 
 // ---------------------------------------------------------------------------
 // Types

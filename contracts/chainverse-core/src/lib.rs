@@ -207,9 +207,9 @@ impl ChainverseCore {
         escrow::search(&env, token, status)
     }
 
-    /// Returns a paginated slice of all escrow records.
-    pub fn paginate_escrows(env: Env, offset: u64, limit: u64) -> Vec<EscrowRecord> {
-        escrow::paginate(&env, offset, limit)
+    /// Returns all escrows currently in the Pending (active) state.
+    pub fn get_active_escrows(env: Env) -> Vec<EscrowRecord> {
+        escrow::get_active_escrows(&env)
     }
 
     // -----------------------------------------------------------------------
