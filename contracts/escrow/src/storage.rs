@@ -28,6 +28,13 @@ pub fn next_escrow_id(env: &Env) -> u64 {
     next
 }
 
+pub fn get_escrow_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::EscrowCount)
+        .unwrap_or(0)
+}
+
 pub fn is_token_whitelisted(env: &Env, token: &Address) -> bool {
     env.storage()
         .instance()
