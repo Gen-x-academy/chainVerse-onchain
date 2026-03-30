@@ -226,7 +226,7 @@ mod test {
         assert_eq!(stats.active, 0);
 
         // Create an escrow
-        let id1 = client.create_escrow(&buyer, &seller, &token, &1000);
+        let id1 = client.create_escrow(&buyer, &seller, &token, &1000, &0);
 
         let stats = client.get_escrow_stats();
         assert_eq!(stats.total, 1);
