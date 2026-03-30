@@ -2,10 +2,10 @@
 resolver = "2"
 
 members = [
+    "certificates",
     "chainverse-core",
     "escrow",
-    "escrow-vault",
-    "payout-automation"
+    "shared"
 ]
 
 [workspace.dependencies]

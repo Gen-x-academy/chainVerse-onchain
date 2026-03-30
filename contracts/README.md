@@ -1,5 +1,11 @@
 # Chainverse Smart Contracts
 
+## Documentation
+
+- [Architecture Diagram](./docs/architecture.md)
+- [Escrow Lifecycle](./docs/escrow_lifecycle.md)
+- [Contract Events](./docs/events.md)
+- [Developer Setup Guide](./docs/setup.md)
 ## Requirements
 
 - Rust (latest stable)

@@ -1,10 +1,9 @@
-use soroban_sdk::{contracttype, Address, BytesN};
+use soroban_sdk::{contracttype, Address};
 
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Certificate {
     pub wallet: Address,
-    pub course_id: u32,
-    pub metadata_hash: BytesN<32>,
-    pub timestamp: u64,
+    pub course_id: u64,
+    pub issued_at: u64,
 }

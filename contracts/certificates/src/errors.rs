@@ -4,10 +4,11 @@ use soroban_sdk::contracterror;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
-    Unauthorized = 1,
-    AlreadyPurchased = 2,
-    InvalidPayment = 3,
-    AlreadyRewarded = 4,
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    Unauthorized = 3,
+    ContractPaused = 4,
     CertificateExists = 5,
-    ContractPaused = 6,   // NEW
+    InvalidProof = 6,
+    SoulboundTransferNotAllowed = 7,
 }
