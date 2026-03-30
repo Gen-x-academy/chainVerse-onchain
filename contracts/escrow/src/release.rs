@@ -41,5 +41,8 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Emit release event
     escrow_released(env, escrow_id, &escrow.seller, escrow.amount);
 
+    // Emit event
+    escrow_completed(env, escrow_id, &escrow.buyer, &escrow.seller, escrow.amount);
+
     Ok(())
 }
