@@ -7,10 +7,10 @@ pub fn escrow_created(env: &Env, escrow_id: u64, buyer: &Address, seller: &Addre
     );
 }
 
-pub fn escrow_completed(env: &Env, escrow_id: u64, buyer: &Address, seller: &Address, amount: i128) {
+pub fn escrow_released(env: &Env, escrow_id: u64, seller: &Address, amount: i128) {
     env.events().publish(
-        (symbol_short!("ESC_CMPL"),),
-        (escrow_id, buyer.clone(), seller.clone(), amount),
+        (symbol_short!("ESC_RLSD"),),
+        (escrow_id, seller.clone(), amount),
     );
 }
 

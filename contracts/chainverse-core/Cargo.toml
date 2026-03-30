@@ -18,3 +18,11 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
 [[test]]
 name = "security_tests"
 required-features = ["testutils"]
+
+[[test]]
+name = "governance_dao_tests"
+required-features = ["testutils"]
+
+[[test]]
+name = "fraud_prevention_tests"
+required-features = ["testutils"]

@@ -2,6 +2,12 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::errors::ContractError;
 
+pub mod active_query;
+pub mod id_generator;
+
+pub use active_query::get_active_escrows;
+pub use id_generator::next_escrow_id;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

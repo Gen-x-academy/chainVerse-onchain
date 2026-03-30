@@ -55,6 +55,11 @@ impl EscrowContract {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
+    /// Returns the total token volume that has been deposited into escrow.
+    pub fn get_total_volume(env: Env) -> i128 {
+        storage::get_total_volume(&env)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
@@ -99,6 +104,68 @@ mod test {
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    // -----------------------------------------------------------------------
+    // get_total_volume
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_total_volume_increases_correctly() {
+        let (_, buyer, seller, token_addr, client) = setup(1000);
+
+        assert_eq!(client.get_total_volume(), 0);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+        assert_eq!(client.get_total_volume(), 300);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &200, &9000);
+        assert_eq!(client.get_total_volume(), 500);
+    }
+
+    // -----------------------------------------------------------------------
+    // release_funds
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_release_funds_success() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &2000);
+        client.release_funds(&escrow_id);
+
+        let escrow = client.get_escrow(&escrow_id);
+        assert_eq!(escrow.status, EscrowStatus::Completed);
+
+        let seller_balance = TokenClient::new(&env, &token_addr).balance(&seller);
+        assert_eq!(seller_balance, 500);
+    }
+
+    #[test]
+    fn test_release_funds_fails_if_expired() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &2000);
+
+        // Advance past expiration
+        env.ledger().with_mut(|li| {
+            li.timestamp = 3000;
+        });
+
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "release after expiration must fail");
+    }
+
+    #[test]
+    fn test_release_funds_fails_on_double_release() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &9000);
+        client.release_funds(&escrow_id);
+
+        // Second release must be rejected with AlreadyReleased
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "double release must be rejected");
     }
 
     // -----------------------------------------------------------------------
