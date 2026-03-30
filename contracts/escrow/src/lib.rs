@@ -55,6 +55,11 @@ impl EscrowContract {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
+    /// Returns the total token volume that has been deposited into escrow.
+    pub fn get_total_volume(env: Env) -> i128 {
+        storage::get_total_volume(&env)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
@@ -99,6 +104,23 @@ mod test {
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    // -----------------------------------------------------------------------
+    // get_total_volume
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_total_volume_increases_correctly() {
+        let (_, buyer, seller, token_addr, client) = setup(1000);
+
+        assert_eq!(client.get_total_volume(), 0);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+        assert_eq!(client.get_total_volume(), 300);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &200, &9000);
+        assert_eq!(client.get_total_volume(), 500);
     }
 
     // -----------------------------------------------------------------------
