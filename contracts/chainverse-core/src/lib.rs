@@ -207,6 +207,11 @@ impl ChainverseCore {
         escrow::search(&env, token, status)
     }
 
+    /// Returns all escrows currently in the Pending (active) state.
+    pub fn get_active_escrows(env: Env) -> Vec<EscrowRecord> {
+        escrow::get_active_escrows(&env)
+    }
+
     // -----------------------------------------------------------------------
     // Utils module
     // -----------------------------------------------------------------------

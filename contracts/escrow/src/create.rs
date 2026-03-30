@@ -1,7 +1,7 @@
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
-use crate::storage::{increment_active_escrows, is_token_whitelisted, next_escrow_id, save_escrow};
+use crate::storage::{add_to_total_volume, is_token_whitelisted, next_escrow_id, save_escrow};
 use crate::types::{Escrow, EscrowStatus};
 
 pub fn create_escrow(
@@ -39,8 +39,8 @@ pub fn create_escrow(
     };
     save_escrow(env, escrow_id, &escrow);
 
-    // Track active escrows
-    increment_active_escrows(env);
+    // Track total volume processed
+    add_to_total_volume(env, amount);
 
     // Emit event
     escrow_created(env, escrow_id, &buyer, &seller, amount);

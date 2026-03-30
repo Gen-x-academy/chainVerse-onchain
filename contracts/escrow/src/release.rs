@@ -1,6 +1,7 @@
 use soroban_sdk::{token::Client as TokenClient, Env};
 use crate::errors::EscrowError;
-use crate::storage::{decrement_active_escrows, load_escrow, save_escrow};
+use crate::events::escrow_released;
+use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 
 pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
@@ -9,6 +10,11 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
 
     // Validate: only buyer can release funds to seller
     escrow.buyer.require_auth();
+
+    // Explicit guard: prevent double release
+    if escrow.status == EscrowStatus::Completed {
+        return Err(EscrowError::AlreadyReleased);
+    }
 
     // Validate: escrow must be in Pending state
     if escrow.status != EscrowStatus::Pending {
@@ -31,6 +37,9 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     escrow.status = EscrowStatus::Completed;
     save_escrow(env, escrow_id, &escrow);
     decrement_active_escrows(env);
+
+    // Emit release event
+    escrow_released(env, escrow_id, &escrow.seller, escrow.amount);
 
     Ok(())
 }

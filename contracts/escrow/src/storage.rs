@@ -5,7 +5,7 @@ use crate::types::Escrow;
 pub enum DataKey {
     Escrow(u64),
     EscrowCount,
-    ActiveEscrowCount,
+    TotalVolume,
     WhitelistedToken(Address),
 }
 
@@ -41,33 +41,20 @@ pub fn whitelist_token(env: &Env, token: &Address) {
         .set(&DataKey::WhitelistedToken(token.clone()), &true);
 }
 
-pub fn increment_active_escrows(env: &Env) {
-    let count: u64 = env
+pub fn add_to_total_volume(env: &Env, amount: i128) {
+    let volume: i128 = env
         .storage()
         .instance()
-        .get(&DataKey::ActiveEscrowCount)
+        .get(&DataKey::TotalVolume)
         .unwrap_or(0);
     env.storage()
         .instance()
-        .set(&DataKey::ActiveEscrowCount, &(count + 1));
+        .set(&DataKey::TotalVolume, &(volume + amount));
 }
 
-pub fn decrement_active_escrows(env: &Env) {
-    let count: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::ActiveEscrowCount)
-        .unwrap_or(0);
-    if count > 0 {
-        env.storage()
-            .instance()
-            .set(&DataKey::ActiveEscrowCount, &(count - 1));
-    }
-}
-
-pub fn get_active_escrow_count(env: &Env) -> u64 {
+pub fn get_total_volume(env: &Env) -> i128 {
     env.storage()
         .instance()
-        .get(&DataKey::ActiveEscrowCount)
+        .get(&DataKey::TotalVolume)
         .unwrap_or(0)
 }
