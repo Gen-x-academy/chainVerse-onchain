@@ -55,9 +55,9 @@ impl EscrowContract {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
-    /// Returns the total number of escrows ever created.
-    pub fn get_escrow_count(env: Env) -> u64 {
-        storage::get_escrow_count(&env)
+    /// Returns the total token volume that has been deposited into escrow.
+    pub fn get_total_volume(env: Env) -> i128 {
+        storage::get_total_volume(&env)
     }
 
     /// Returns the contract version string.
@@ -107,18 +107,20 @@ mod test {
     }
 
     // -----------------------------------------------------------------------
-    // get_escrow_count
+    // get_total_volume
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_get_escrow_count_increments() {
+    fn test_total_volume_increases_correctly() {
         let (_, buyer, seller, token_addr, client) = setup(1000);
 
-        assert_eq!(client.get_escrow_count(), 0);
-        client.create_escrow(&buyer, &seller, &token_addr, &100, &2000);
-        assert_eq!(client.get_escrow_count(), 1);
-        client.create_escrow(&buyer, &seller, &token_addr, &100, &2000);
-        assert_eq!(client.get_escrow_count(), 2);
+        assert_eq!(client.get_total_volume(), 0);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+        assert_eq!(client.get_total_volume(), 300);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &200, &9000);
+        assert_eq!(client.get_total_volume(), 500);
     }
 
     // -----------------------------------------------------------------------
@@ -152,6 +154,18 @@ mod test {
 
         let result = client.try_release_funds(&escrow_id);
         assert!(result.is_err(), "release after expiration must fail");
+    }
+
+    #[test]
+    fn test_release_funds_fails_on_double_release() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &9000);
+        client.release_funds(&escrow_id);
+
+        // Second release must be rejected with AlreadyReleased
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "double release must be rejected");
     }
 
     // -----------------------------------------------------------------------
