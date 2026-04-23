@@ -60,6 +60,11 @@ impl EscrowContract {
         storage::get_total_volume(&env)
     }
 
+    /// Returns the total protocol fees accumulated for a given token.
+    pub fn get_protocol_fee(env: Env, token: Address) -> i128 {
+        storage::get_protocol_fee(&env, &token)
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)

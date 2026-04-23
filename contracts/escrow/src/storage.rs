@@ -7,6 +7,7 @@ pub enum DataKey {
     EscrowCount,
     TotalVolume,
     WhitelistedToken(Address),
+    ProtocolFees(Address),
 }
 
 pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
@@ -64,4 +65,23 @@ pub fn get_total_volume(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::TotalVolume)
         .unwrap_or(0)
+}
+
+pub fn accumulate_protocol_fee(env: &Env, token: &Address, fee: i128) {
+    let key = DataKey::ProtocolFees(token.clone());
+    let current: i128 = env.storage().instance().get(&key).unwrap_or(0);
+    env.storage().instance().set(&key, &(current + fee));
+}
+
+pub fn get_protocol_fee(env: &Env, token: &Address) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProtocolFees(token.clone()))
+        .unwrap_or(0)
+}
+
+pub fn clear_protocol_fee(env: &Env, token: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::ProtocolFees(token.clone()), &0_i128);
 }
