@@ -111,7 +111,7 @@
                   }
                 },
                 {
-                  "u64": 5000
+                  "u64": 2000
                 }
               ]
             }
@@ -149,7 +149,7 @@
   "ledger": {
     "protocol_version": 20,
     "sequence_number": 0,
-    "timestamp": 1000,
+    "timestamp": 3000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -289,7 +289,7 @@
                                 "symbol": "expiration"
                               },
                               "val": {
-                                "u64": 5000
+                                "u64": 2000
                               }
                             },
                             {
@@ -1128,7 +1128,7 @@
                   }
                 },
                 {
-                  "u64": 5000
+                  "u64": 2000
                 }
               ]
             }
@@ -1303,7 +1303,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "refund_buyer"
+                "symbol": "release_funds"
               }
             ],
             "data": {
@@ -1326,12 +1326,12 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "refund_buyer"
+                "symbol": "release_funds"
               }
             ],
             "data": {
               "error": {
-                "contract": 6
+                "contract": 3
               }
             }
           }
@@ -1352,7 +1352,7 @@
               },
               {
                 "error": {
-                  "contract": 6
+                  "contract": 3
                 }
               }
             ],
@@ -1377,7 +1377,7 @@
               },
               {
                 "error": {
-                  "contract": 6
+                  "contract": 3
                 }
               }
             ],
@@ -1387,7 +1387,7 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "refund_buyer"
+                  "symbol": "release_funds"
                 },
                 {
                   "vec": [

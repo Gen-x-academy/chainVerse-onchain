@@ -47,7 +47,10 @@ fn is_eligible(weight: i128) -> bool {
 #[test]
 fn test_cast_vote_eligible_voter_recorded_in_tally() {
     let voter_weight: i128 = 40;
-    assert!(is_eligible(voter_weight), "voter must meet eligibility threshold");
+    assert!(
+        is_eligible(voter_weight),
+        "voter must meet eligibility threshold"
+    );
 
     let mut tally = VoteTally::new();
     tally.cast(voter_weight, true);
@@ -70,7 +73,10 @@ fn test_cast_vote_multiple_eligible_voters_tallied_correctly() {
 
     assert_eq!(tally.yes, 100);
     assert_eq!(tally.no, 0);
-    assert!(tally.quorum_reached(), "quorum should be reached at exactly 100");
+    assert!(
+        tally.quorum_reached(),
+        "quorum should be reached at exactly 100"
+    );
 }
 
 #[test]

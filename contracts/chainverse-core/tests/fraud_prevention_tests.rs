@@ -31,7 +31,10 @@ fn test_generate_id_produces_unique_ids_across_calls() {
     // All IDs must be distinct
     let mut seen = std::collections::HashSet::new();
     for id in &ids {
-        assert!(seen.insert(id), "ID collision detected: {id} was generated more than once");
+        assert!(
+            seen.insert(id),
+            "ID collision detected: {id} was generated more than once"
+        );
     }
 
     assert_eq!(ids.len(), n, "expected exactly {n} IDs");
