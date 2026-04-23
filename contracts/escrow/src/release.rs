@@ -4,6 +4,7 @@ use crate::events::escrow_released;
 use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 
+
 pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Load escrow, return NotFound if missing
     let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
@@ -36,13 +37,9 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Update status to Completed
     escrow.status = EscrowStatus::Completed;
     save_escrow(env, escrow_id, &escrow);
-    decrement_active_escrows(env);
 
     // Emit release event
     escrow_released(env, escrow_id, &escrow.seller, escrow.amount);
-
-    // Emit event
-    escrow_completed(env, escrow_id, &escrow.buyer, &escrow.seller, escrow.amount);
 
     Ok(())
 }
