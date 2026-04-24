@@ -17,6 +17,11 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
         return Err(EscrowError::AlreadyReleased);
     }
 
+    // Validate: escrow must not be disputed
+    if escrow.status == EscrowStatus::Disputed {
+        return Err(EscrowError::NotPending);
+    }
+
     // Validate: escrow must be in Pending state
     if escrow.status != EscrowStatus::Pending {
         return Err(EscrowError::NotPending);

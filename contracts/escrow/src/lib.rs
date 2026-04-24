@@ -87,6 +87,25 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Flag an escrow as disputed. Only the buyer or seller can raise a dispute.
+    /// Prevents automatic release until resolved.
+    pub fn flag_dispute(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        let mut escrow = storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)?;
+
+        if escrow.status == EscrowStatus::Disputed {
+            return Err(EscrowError::AlreadyDisputed);
+        }
+        if escrow.status != EscrowStatus::Pending {
+            return Err(EscrowError::NotPending);
+        }
+
+        escrow.buyer.require_auth();
+
+        escrow.status = EscrowStatus::Disputed;
+        storage::save_escrow(&env, escrow_id, &escrow);
+        Ok(())
+    }
+
     /// Withdraw accumulated protocol fees for a token to the admin's address.
     /// Only callable by the admin.
     pub fn withdraw_fees(env: Env, token: Address) -> Result<(), EscrowError> {
