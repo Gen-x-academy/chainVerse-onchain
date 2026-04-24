@@ -106,6 +106,21 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Resolve a disputed escrow.
+    ///
+    /// # Placeholder
+    /// Full arbitration logic (arbiter selection, evidence submission, ruling
+    /// enforcement) is not yet implemented. Calling this function will always
+    /// return `EscrowError::DisputeResolutionNotImplemented` until the feature
+    /// is built out.
+    pub fn resolve_dispute(
+        _env: Env,
+        _escrow_id: u64,
+        _release_to_seller: bool,
+    ) -> Result<(), EscrowError> {
+        Err(EscrowError::DisputeResolutionNotImplemented)
+    }
+
     /// Withdraw accumulated protocol fees for a token to the admin's address.
     /// Only callable by the admin.
     pub fn withdraw_fees(env: Env, token: Address) -> Result<(), EscrowError> {
