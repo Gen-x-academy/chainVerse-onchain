@@ -1,0 +1,42 @@
+/* Image optimization styles - FE-138
+ *
+ * Prevents layout shift (CLS) and ensures images are
+ * responsive and performant on mobile.
+ */
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Aspect-ratio placeholder to prevent CLS while image loads */
+.img-wrapper {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.img-wrapper img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Common aspect ratios */
+.aspect-16-9  { aspect-ratio: 16 / 9; }
+.aspect-4-3   { aspect-ratio: 4 / 3; }
+.aspect-1-1   { aspect-ratio: 1 / 1; }
+.aspect-3-2   { aspect-ratio: 3 / 2; }
+
+/* Fade-in on load for a smooth UX */
+img[loading="lazy"] {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+img[loading="lazy"].loaded {
+  opacity: 1;
+}

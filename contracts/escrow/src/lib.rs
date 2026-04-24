@@ -19,10 +19,23 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Whitelist a token so it can be used in escrows. Admin-only in production;
-    /// kept simple here as a direct call for composability.
-    pub fn whitelist_token(env: Env, token: Address) {
+    /// Sets or rotates the escrow admin.
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
+        if let Some(current_admin) = storage::get_admin(&env) {
+            current_admin.require_auth();
+        } else {
+            admin.require_auth();
+        }
+
+        storage::set_admin(&env, &admin);
+        Ok(())
+    }
+
+    /// Whitelist a token so it can be used in escrows.
+    pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
+        storage::require_admin(&env)?;
         storage::whitelist_token(&env, &token);
+        Ok(())
     }
 
     /// Create a new escrow. Transfers `amount` of `token` from `buyer` into
@@ -60,6 +73,75 @@ impl EscrowContract {
         storage::get_total_volume(&env)
     }
 
+    /// Returns the total protocol fees accumulated for a given token.
+    pub fn get_protocol_fee(env: Env, token: Address) -> i128 {
+        storage::get_protocol_fee(&env, &token)
+    }
+
+    /// Set the contract admin. Can only be called once (if no admin is set).
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
+        if storage::get_admin(&env).is_some() {
+            return Err(EscrowError::Unauthorized);
+        }
+        storage::set_admin(&env, &admin);
+        Ok(())
+    }
+
+    /// Flag an escrow as disputed. Only the buyer or seller can raise a dispute.
+    /// Prevents automatic release until resolved.
+    pub fn flag_dispute(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        let mut escrow = storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)?;
+
+        if escrow.status == EscrowStatus::Disputed {
+            return Err(EscrowError::AlreadyDisputed);
+        }
+        if escrow.status != EscrowStatus::Pending {
+            return Err(EscrowError::NotPending);
+        }
+
+        escrow.buyer.require_auth();
+
+        escrow.status = EscrowStatus::Disputed;
+        storage::save_escrow(&env, escrow_id, &escrow);
+        Ok(())
+    }
+
+    /// Resolve a disputed escrow.
+    ///
+    /// # Placeholder
+    /// Full arbitration logic (arbiter selection, evidence submission, ruling
+    /// enforcement) is not yet implemented. Calling this function will always
+    /// return `EscrowError::DisputeResolutionNotImplemented` until the feature
+    /// is built out.
+    pub fn resolve_dispute(
+        _env: Env,
+        _escrow_id: u64,
+        _release_to_seller: bool,
+    ) -> Result<(), EscrowError> {
+        Err(EscrowError::DisputeResolutionNotImplemented)
+    }
+
+    /// Withdraw accumulated protocol fees for a token to the admin's address.
+    /// Only callable by the admin.
+    pub fn withdraw_fees(env: Env, token: Address) -> Result<(), EscrowError> {
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
+
+        let fees = storage::get_protocol_fee(&env, &token);
+        if fees == 0 {
+            return Err(EscrowError::NoFeesAvailable);
+        }
+
+        soroban_sdk::token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &admin,
+            &fees,
+        );
+
+        storage::clear_protocol_fee(&env, &token);
+        Ok(())
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
@@ -68,11 +150,13 @@ impl EscrowContract {
 
 #[cfg(test)]
 mod test {
+    extern crate std;
+
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
-        Env,
+        Env, IntoVal, Symbol,
     };
 
     // -----------------------------------------------------------------------
@@ -81,7 +165,15 @@ mod test {
 
     /// Registers all contracts, whitelists the token, mints tokens to the
     /// buyer, and sets the ledger timestamp to `now`.
-    fn setup(now: u64) -> (Env, Address, Address, Address, EscrowContractClient<'static>) {
+    fn setup(
+        now: u64,
+    ) -> (
+        Env,
+        Address,
+        Address,
+        Address,
+        EscrowContractClient<'static>,
+    ) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -96,14 +188,62 @@ mod test {
         let token_addr = env.register_stellar_asset_contract(token_admin.clone());
         let stellar = StellarAssetClient::new(&env, &token_addr);
 
+        let admin = Address::generate(&env);
         let buyer = Address::generate(&env);
         let seller = Address::generate(&env);
 
         stellar.mint(&buyer, &1000);
 
+        client.set_admin(&admin);
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    #[test]
+    fn test_whitelist_token_requires_admin_setup() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_addr = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &escrow_addr);
+
+        let token_admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(token_admin);
+
+        let result = client.try_whitelist_token(&token_addr);
+        assert_eq!(result, Err(Ok(EscrowError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_whitelist_token_requires_admin_auth() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_addr = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &escrow_addr);
+
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(token_admin);
+
+        client.set_admin(&admin);
+        client.whitelist_token(&token_addr);
+
+        assert_eq!(
+            env.auths(),
+            std::vec![(
+                admin,
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        client.address.clone(),
+                        Symbol::new(&env, "whitelist_token"),
+                        (&token_addr,).into_val(&env),
+                    )),
+                    sub_invocations: std::vec![],
+                },
+            )]
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -121,6 +261,22 @@ mod test {
 
         client.create_escrow(&buyer, &seller, &token_addr, &200, &9000);
         assert_eq!(client.get_total_volume(), 500);
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_expired_timestamps() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &300, &1000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidExpiration)));
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_same_party() {
+        let (_env, buyer, _seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &buyer, &token_addr, &300, &2000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidParties)));
     }
 
     // -----------------------------------------------------------------------
@@ -203,10 +359,7 @@ mod test {
         let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &5000);
 
         let result = client.try_refund_buyer(&escrow_id);
-        assert!(
-            result.is_err(),
-            "refund before expiration must be rejected"
-        );
+        assert!(result.is_err(), "refund before expiration must be rejected");
         let _ = env; // keep env alive
     }
 

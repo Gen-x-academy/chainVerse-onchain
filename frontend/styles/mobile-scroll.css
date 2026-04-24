@@ -1,0 +1,66 @@
+/*
+ * Mobile Scrolling Performance
+ *
+ * Enables GPU-accelerated, momentum-based scrolling on iOS/Android.
+ * Uses `will-change` and `contain` to reduce layout thrashing.
+ */
+
+/* Smooth momentum scrolling on iOS */
+.scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  will-change: scroll-position;
+}
+
+/* Horizontal scroll (e.g. course carousels) */
+.scroll-container-x {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  will-change: scroll-position;
+  /* Hide scrollbar visually but keep it functional */
+  scrollbar-width: none;
+}
+.scroll-container-x::-webkit-scrollbar {
+  display: none;
+}
+
+/* Contain layout/paint for scroll children to avoid full-page repaints */
+.scroll-item {
+  contain: layout style;
+}
+
+/* Prevent text selection jank during fast scroll on mobile */
+.scroll-container *,
+.scroll-container-x * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Re-enable selection for interactive text elements */
+.scroll-container input,
+.scroll-container textarea,
+.scroll-container [contenteditable],
+.scroll-container-x input,
+.scroll-container-x textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Reduce paint cost on fixed/sticky headers during scroll */
+.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .scroll-container,
+  .scroll-container-x {
+    scroll-behavior: auto;
+  }
+}

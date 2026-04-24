@@ -1,5 +1,5 @@
-use crate::errors::ContractError;
 use super::EscrowStatus;
+use crate::errors::ContractError;
 
 /// Validates that transitioning from `current` to `next` is a legal escrow state change.
 ///
