@@ -67,15 +67,20 @@ impl EscrowVault {
         depositor.require_auth();
         let id = Self::next_id(&env);
         let vault = Vault {
-            depositor,
+            depositor: depositor.clone(),
             recipient,
-            token,
+            token: token.clone(),
             amount,
             approvers,
             approvals: Vec::new(&env),
             status: VaultStatus::Pending,
         };
-        env.storage().instance().set(&DataKey::Vault(id), &vault);
+        env.storage().persistent().set(&DataKey::Vault(id), &vault);
+
+        // Pull funds from depositor into the contract
+        soroban_sdk::token::Client::new(&env, &token)
+            .transfer(&depositor, &env.current_contract_address(), &amount);
+
         id
     }
 
@@ -86,7 +91,7 @@ impl EscrowVault {
 
         let mut vault: Vault = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Vault(vault_id))
             .ok_or(VaultError::NotFound)?;
 
@@ -109,18 +114,43 @@ impl EscrowVault {
         // Release when all approvers have signed off
         if vault.approvals.len() == vault.approvers.len() {
             vault.status = VaultStatus::Released;
+            soroban_sdk::token::Client::new(&env, &vault.token)
+                .transfer(&env.current_contract_address(), &vault.recipient, &vault.amount);
         }
 
-        env.storage().instance().set(&DataKey::Vault(vault_id), &vault);
+        env.storage().persistent().set(&DataKey::Vault(vault_id), &vault);
         Ok(())
     }
 
     /// Returns the vault record for the given id.
     pub fn get_vault(env: Env, vault_id: u64) -> Result<Vault, VaultError> {
         env.storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Vault(vault_id))
             .ok_or(VaultError::NotFound)
+    }
+
+    /// Cancel a pending vault and return funds to the depositor.
+    pub fn cancel_vault(env: Env, vault_id: u64) -> Result<(), VaultError> {
+        let mut vault: Vault = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .ok_or(VaultError::NotFound)?;
+
+        vault.depositor.require_auth();
+
+        if vault.status != VaultStatus::Pending {
+            return Err(VaultError::NotPending);
+        }
+
+        // Return funds to depositor
+        soroban_sdk::token::Client::new(&env, &vault.token)
+            .transfer(&env.current_contract_address(), &vault.depositor, &vault.amount);
+
+        vault.status = VaultStatus::Cancelled;
+        env.storage().persistent().set(&DataKey::Vault(vault_id), &vault);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
