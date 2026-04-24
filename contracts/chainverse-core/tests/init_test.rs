@@ -79,7 +79,9 @@ fn setup_initialized() -> (Env, ComplianceState, Address) {
     let (env, mut state) = setup_uninitialized();
     let admin = Address::generate(&env);
     let audit_key = [0x42u8; 32];
-    state.initialize(&admin, audit_key).expect("initialization should succeed");
+    state
+        .initialize(&admin, audit_key)
+        .expect("initialization should succeed");
     (env, state, admin)
 }
 
@@ -168,7 +170,10 @@ fn test_initialize_with_same_admin_twice_still_fails() {
 fn test_initialization_sets_correct_state() {
     let (_env, mut state, admin) = setup_initialized();
 
-    assert!(state.is_initialized(), "State should be marked as initialized");
+    assert!(
+        state.is_initialized(),
+        "State should be marked as initialized"
+    );
     assert!(state.get_admin().is_some(), "Admin should be set");
     assert!(state.get_audit_key().is_some(), "Audit key should be set");
 
@@ -312,7 +317,10 @@ fn test_initialize_with_zero_audit_key() {
 
     // Should still initialize successfully (key validation is separate concern)
     let result = state.initialize(&admin, zero_key);
-    assert!(result.is_ok(), "Initialization should accept any 32-byte key");
+    assert!(
+        result.is_ok(),
+        "Initialization should accept any 32-byte key"
+    );
     assert_eq!(state.get_audit_key().unwrap(), &zero_key);
 }
 
@@ -323,9 +331,7 @@ fn test_concurrent_initialization_attempts_fail() {
     env.mock_all_auths();
 
     let admins: Vec<Address> = (0..5).map(|_| Address::generate(&env)).collect();
-    let keys: Vec<[u8; 32]> = (0..5)
-        .map(|i| [i as u8; 32])
-        .collect();
+    let keys: Vec<[u8; 32]> = (0..5).map(|i| [i as u8; 32]).collect();
 
     let mut state = ComplianceState::new();
 
