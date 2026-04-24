@@ -10,6 +10,7 @@ pub enum DataKey {
     TotalVolume,
     WhitelistedToken(Address),
     ProtocolFees(Address),
+    Admin,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -100,4 +101,12 @@ pub fn clear_protocol_fee(env: &Env, token: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::ProtocolFees(token.clone()), &0_i128);
+}
+
+pub fn set_admin(env: &Env, admin: &Address) {
+    env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn get_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Admin)
 }

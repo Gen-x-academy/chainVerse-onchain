@@ -78,6 +78,36 @@ impl EscrowContract {
         storage::get_protocol_fee(&env, &token)
     }
 
+    /// Set the contract admin. Can only be called once (if no admin is set).
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
+        if storage::get_admin(&env).is_some() {
+            return Err(EscrowError::Unauthorized);
+        }
+        storage::set_admin(&env, &admin);
+        Ok(())
+    }
+
+    /// Withdraw accumulated protocol fees for a token to the admin's address.
+    /// Only callable by the admin.
+    pub fn withdraw_fees(env: Env, token: Address) -> Result<(), EscrowError> {
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
+
+        let fees = storage::get_protocol_fee(&env, &token);
+        if fees == 0 {
+            return Err(EscrowError::NoFeesAvailable);
+        }
+
+        soroban_sdk::token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &admin,
+            &fees,
+        );
+
+        storage::clear_protocol_fee(&env, &token);
+        Ok(())
+    }
+
     /// Returns the contract version string.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
