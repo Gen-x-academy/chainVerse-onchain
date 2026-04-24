@@ -147,7 +147,10 @@ mod test {
         let non_admin = Address::generate(&env);
 
         let result = client.try_update_config(&non_admin, &Some(999u32), &None);
-        assert!(result.is_err(), "non-admin must not be able to update config");
+        assert!(
+            result.is_err(),
+            "non-admin must not be able to update config"
+        );
     }
 
     #[test]
@@ -158,7 +161,10 @@ mod test {
         let victim = Address::generate(&env);
 
         let result = client.try_transfer_admin(&non_admin, &victim);
-        assert!(result.is_err(), "non-admin must not be able to transfer admin");
+        assert!(
+            result.is_err(),
+            "non-admin must not be able to transfer admin"
+        );
     }
 
     #[test]
@@ -168,7 +174,9 @@ mod test {
 
         // Contract never initialized — only_admin returns NotInitialized
         assert!(client.try_pause(&caller).is_err());
-        assert!(client.try_update_config(&caller, &Some(1u32), &None).is_err());
+        assert!(client
+            .try_update_config(&caller, &Some(1u32), &None)
+            .is_err());
         assert!(client.try_transfer_admin(&caller, &caller).is_err());
     }
 

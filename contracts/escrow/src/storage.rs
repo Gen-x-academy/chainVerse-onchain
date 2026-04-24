@@ -1,14 +1,30 @@
-use soroban_sdk::{contracttype, Address, Env};
+use crate::errors::EscrowError;
 use crate::types::Escrow;
+use soroban_sdk::{contracttype, Address, Env};
 
 #[contracttype]
 pub enum DataKey {
+    Admin,
     Escrow(u64),
     EscrowCount,
     TotalVolume,
     WhitelistedToken(Address),
     ProtocolFees(Address),
     Admin,
+}
+
+pub fn get_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Admin)
+}
+
+pub fn set_admin(env: &Env, admin: &Address) {
+    env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn require_admin(env: &Env) -> Result<Address, EscrowError> {
+    let admin = get_admin(env).ok_or(EscrowError::Unauthorized)?;
+    admin.require_auth();
+    Ok(admin)
 }
 
 pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
