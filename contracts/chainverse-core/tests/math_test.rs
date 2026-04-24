@@ -1,11 +1,12 @@
 #![cfg(test)]
 
+use crate::breach_detector::{AccessEvent, BreachDetector, BreachDetectorConfig};
+use crate::retention::RetentionManager;
+use crate::rules_engine::{Jurisdiction, OperationContext, RulesEngine, Severity};
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, testutils::Address as _, Address, Env, Symbol, Vec, Map, String
+    contract, contractimpl, symbol_short, testutils::Address as _, Address, Env, Map, String,
+    Symbol, Vec,
 };
-use crate::rules_engine::{RulesEngine, OperationContext, Jurisdiction, Severity};
-use crate::breach_detector::{BreachDetector, AccessEvent, BreachDetectorConfig};
-use crate::retention::{RetentionManager};
 
 #[contract]
 pub struct ComplianceMockContract;
@@ -21,7 +22,7 @@ impl ComplianceMockContract {
         has_consent: bool,
     ) -> bool {
         let mut engine = RulesEngine::new();
-        
+
         // Register a rule that uses the parameters to check for bounds-related issues
         engine.register_rule(crate::rules_engine::ComplianceRule {
             id: "MATH-001".into(),
@@ -34,7 +35,7 @@ impl ComplianceMockContract {
                 // ctx.timestamp is u64
                 let _seconds_in_hour = 3600;
                 let _hour = (ctx.timestamp / _seconds_in_hour) % 24;
-                ctx.record_count <= 1_000_000 
+                ctx.record_count <= 1_000_000
             }),
         });
 
@@ -59,14 +60,10 @@ impl ComplianceMockContract {
     }
 
     /// Wrapper to test BreachDetector with boundary values
-    pub fn test_breach_detector(
-        _env: Env,
-        timestamp: u64,
-        record_count: u32,
-    ) -> u32 {
+    pub fn test_breach_detector(_env: Env, timestamp: u64, record_count: u32) -> u32 {
         let config = BreachDetectorConfig::default();
         let mut detector = BreachDetector::with_config(config);
-        
+
         let event = AccessEvent {
             actor: "test_actor".into(),
             actor_role: "clinician".into(),
@@ -99,18 +96,13 @@ impl ComplianceMockContract {
                 } else {
                     val1.saturating_div(val2)
                 }
-            },
+            }
             _ => 0,
         }
     }
 
     /// Check retention logic boundary handling
-    pub fn test_retention_purge(
-        _env: Env,
-        created: u64,
-        policy_period: u64,
-        now: u64,
-    ) -> bool {
+    pub fn test_retention_purge(_env: Env, created: u64, policy_period: u64, now: u64) -> bool {
         let mut manager = RetentionManager::new(now);
         manager.add_policy("TEST", policy_period);
         manager.should_purge(created, "TEST", now)
@@ -216,4 +208,3 @@ fn test_floating_point_precision_boundaries() {
     // Score should be exactly 100.0 since all passed
     assert!((report.aggregate_score - 100.0).abs() < f64::EPSILON);
 }
-
