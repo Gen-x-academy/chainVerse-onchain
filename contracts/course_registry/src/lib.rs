@@ -69,6 +69,11 @@ impl CourseRegistryContract {
     ) {
         Self::require_admin(&env);
 
+        // Validate: prices must be non-negative
+        if price_xlm < 0 || price_chv < 0 {
+            panic!("prices must be non-negative");
+        }
+
         let course = Course {
             course_id: course_id.clone(),
             price_xlm,
