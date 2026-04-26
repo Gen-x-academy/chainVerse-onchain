@@ -78,14 +78,11 @@ impl EscrowContract {
         storage::get_protocol_fee(&env, &token)
     }
 
-    /// Set the contract admin. Can only be called once (if no admin is set).
-    pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
-        if storage::get_admin(&env).is_some() {
-            return Err(EscrowError::Unauthorized);
-        }
-        storage::set_admin(&env, &admin);
-        Ok(())
+    /// Returns the total number of escrows created.
+    pub fn get_escrow_count(env: Env) -> u64 {
+        storage::get_escrow_count(&env)
     }
+
 
     /// Flag an escrow as disputed. Only the buyer or seller can raise a dispute.
     /// Prevents automatic release until resolved.

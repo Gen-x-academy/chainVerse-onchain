@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "certificates",
     "chainverse-core",
+    "course_registry",
     "escrow",
     "shared"
 ]

@@ -1,13 +1,13 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
-    Address, Env, Symbol, Vec, panic_with_error
+    contract, contractimpl, contracttype, contracterror,
+    Address, Env, Symbol, panic_with_error
 };
 
 // Errors
-#[contracttype]
-#[derive(Clone)]
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ContractError {
     NotAdmin = 1,
     CourseNotFound = 2,
@@ -108,6 +108,23 @@ impl CourseRegistryContract {
         env.storage().persistent().set(&key, &course);
     }
 
+    // Deactivate Course
+    pub fn deactivate_course(env: Env, course_id: Symbol) {
+        Self::require_admin(&env);
+
+        let key = DataKey::Course(course_id.clone());
+
+        if !env.storage().persistent().has(&key) {
+            panic_with_error!(&env, ContractError::CourseNotFound);
+        }
+
+        let mut course: Course = env.storage().persistent().get(&key).unwrap();
+        course.is_active = false;
+
+        env.storage().persistent().set(&key, &course);
+    }
+
+
     // Get Course
     pub fn get_course(env: Env, course_id: Symbol) -> Course {
         let key = DataKey::Course(course_id);
@@ -122,7 +139,7 @@ impl CourseRegistryContract {
     // Purchase Check
     // (Used by payment contract later)
     pub fn assert_course_active(env: Env, course_id: Symbol) {
-        let course = Self::get_course(env, course_id);
+        let course = Self::get_course(env.clone(), course_id);
 
         if !course.is_active {
             panic_with_error!(&env, ContractError::CourseInactive);

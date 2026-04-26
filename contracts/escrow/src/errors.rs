@@ -14,4 +14,7 @@ pub enum EscrowError {
     InvalidAmount = 8,
     InvalidParties = 9,
     InvalidExpiration = 10,
+    AlreadyDisputed = 11,
+    DisputeResolutionNotImplemented = 12,
+    NoFeesAvailable = 13,
 }
