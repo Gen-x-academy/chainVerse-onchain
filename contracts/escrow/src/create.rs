@@ -52,7 +52,7 @@ pub fn create_escrow(
     add_to_total_volume(env, amount);
 
     // Emit event
-    escrow_created(env, escrow_id, &buyer, &seller, amount);
+    escrow_created(env, escrow_id, &buyer, &seller, &escrow.token, amount);
 
     Ok(escrow_id)
 }

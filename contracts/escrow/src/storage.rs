@@ -31,14 +31,14 @@ pub fn require_admin(env: &Env) -> Result<Address, EscrowError> {
 }
 
 pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
-    env.storage().instance().set(&DataKey::Escrow(id), escrow);
+    env.storage().persistent().set(&DataKey::Escrow(id), escrow);
     
     // Extend TTL for persistent escrow entry to prevent expiration
     env.storage().persistent().extend_ttl(&DataKey::Escrow(id), MIN_TTL, MAX_TTL);
 }
 
 pub fn load_escrow(env: &Env, id: u64) -> Option<Escrow> {
-    env.storage().instance().get(&DataKey::Escrow(id))
+    env.storage().persistent().get(&DataKey::Escrow(id))
 }
 
 pub fn next_escrow_id(env: &Env) -> u64 {
