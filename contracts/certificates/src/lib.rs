@@ -23,6 +23,7 @@ impl CertificateContract {
             return Err(ContractError::AlreadyInitialized);
         }
 
+        // The deployer must sign to prove they control the intended admin address.
         admin.require_auth();
         storage::set_admin(&env, &admin);
         storage::set_paused(&env, false);
@@ -32,6 +33,7 @@ impl CertificateContract {
     pub fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         storage::require_admin(&env, &caller)?;
         storage::set_paused(&env, paused);
+        env.events().publish((symbol_short!("paused"),), paused);
         Ok(())
     }
 

@@ -65,6 +65,9 @@ impl EscrowVault {
         approvers: Vec<Address>,
     ) -> u64 {
         depositor.require_auth();
+        if approvers.is_empty() {
+            panic!("approvers list cannot be empty");
+        }
         let id = Self::next_id(&env);
         let vault = Vault {
             depositor: depositor.clone(),
