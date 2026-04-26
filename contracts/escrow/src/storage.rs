@@ -2,6 +2,10 @@ use crate::errors::EscrowError;
 use crate::types::Escrow;
 use soroban_sdk::{contracttype, Address, Env};
 
+// TTL constants for persistent storage
+const MIN_TTL: u32 = 4096;  // Minimum TTL extension (ledgers)
+const MAX_TTL: u32 = 100_000; // Maximum TTL extension (ledgers)
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -10,7 +14,6 @@ pub enum DataKey {
     TotalVolume,
     WhitelistedToken(Address),
     ProtocolFees(Address),
-    Admin,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -29,6 +32,9 @@ pub fn require_admin(env: &Env) -> Result<Address, EscrowError> {
 
 pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
     env.storage().instance().set(&DataKey::Escrow(id), escrow);
+    
+    // Extend TTL for persistent escrow entry to prevent expiration
+    env.storage().persistent().extend_ttl(&DataKey::Escrow(id), MIN_TTL, MAX_TTL);
 }
 
 pub fn load_escrow(env: &Env, id: u64) -> Option<Escrow> {
@@ -101,12 +107,4 @@ pub fn clear_protocol_fee(env: &Env, token: &Address) {
     env.storage()
         .instance()
         .set(&DataKey::ProtocolFees(token.clone()), &0_i128);
-}
-
-pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().instance().set(&DataKey::Admin, admin);
-}
-
-pub fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().instance().get(&DataKey::Admin)
 }

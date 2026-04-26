@@ -12,6 +12,11 @@ pub fn create_escrow(
     amount: i128,
     expiration: u64,
 ) -> Result<u64, EscrowError> {
+    // Validate: amount must be greater than zero
+    if amount <= 0 {
+        return Err(EscrowError::InvalidAmount);
+    }
+
     if buyer == seller {
         return Err(EscrowError::InvalidParties);
     }
