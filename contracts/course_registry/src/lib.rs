@@ -12,6 +12,8 @@ pub enum ContractError {
     NotAdmin = 1,
     CourseNotFound = 2,
     CourseInactive = 3,
+    AlreadyInitialized = 4,
+    NotInitialized = 5,
 }
 
 // Storage Keys
@@ -40,23 +42,25 @@ pub struct CourseRegistryContract;
 impl CourseRegistryContract {
 
     // Initialize Admin (run once)
-    pub fn initialize(env: Env, admin: Address) {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Already initialized");
+            return Err(ContractError::AlreadyInitialized);
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        Ok(())
     }
 
     // Internal Admin Check
-    fn require_admin(env: &Env) {
+    fn require_admin(env: &Env) -> Result<(), ContractError> {
         let admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap();
+            .ok_or(ContractError::NotInitialized)?;
 
         admin.require_auth();
+        Ok(())
     }
 
     // Add or Update Course
@@ -66,8 +70,8 @@ impl CourseRegistryContract {
         price_xlm: i128,
         price_chv: i128,
         is_active: bool,
-    ) {
-        Self::require_admin(&env);
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
 
         // Validate: prices must be non-negative
         if price_xlm < 0 || price_chv < 0 {
@@ -84,6 +88,7 @@ impl CourseRegistryContract {
         env.storage()
             .persistent()
             .set(&DataKey::Course(course_id), &course);
+        Ok(())
     }
 
     // Toggle Course Activation
@@ -91,8 +96,8 @@ impl CourseRegistryContract {
         env: Env,
         course_id: Symbol,
         is_active: bool,
-    ) {
-        Self::require_admin(&env);
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
 
         let key = DataKey::Course(course_id.clone());
 
@@ -106,11 +111,12 @@ impl CourseRegistryContract {
         course.is_active = is_active;
 
         env.storage().persistent().set(&key, &course);
+        Ok(())
     }
 
     // Deactivate Course
-    pub fn deactivate_course(env: Env, course_id: Symbol) {
-        Self::require_admin(&env);
+    pub fn deactivate_course(env: Env, course_id: Symbol) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
 
         let key = DataKey::Course(course_id.clone());
 
@@ -122,6 +128,7 @@ impl CourseRegistryContract {
         course.is_active = false;
 
         env.storage().persistent().set(&key, &course);
+        Ok(())
     }
 
 

@@ -3,7 +3,7 @@
 use soroban_sdk::{
     contract, contractimpl, contracttype, contracterror,
     token::Client as TokenClient,
-    Address, Env, Vec,
+    symbol_short, Address, Env, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -80,13 +80,22 @@ impl PayoutAutomation {
         }
 
         let token_client = TokenClient::new(&env, &token);
+        let mut total_amount: i128 = 0;
+        let mut recipient_count: u32 = 0;
         for entry in payouts.iter() {
             token_client.transfer(
                 &env.current_contract_address(),
                 &entry.recipient,
                 &entry.amount,
             );
+            total_amount += entry.amount;
+            recipient_count += 1;
         }
+
+        env.events().publish(
+            (symbol_short!("payout"), symbol_short!("executed")),
+            (caller, token, total_amount, recipient_count),
+        );
 
         Ok(())
     }

@@ -52,6 +52,8 @@ impl ChainverseCore {
         protocol_fee: u32,
         supported_tokens: Vec<Address>,
     ) -> Result<(), ContractError> {
+        admin.require_auth();
+
         if env.storage().persistent().has(&DataKey::Config) {
             return Err(ContractError::AlreadyInitialized);
         }
