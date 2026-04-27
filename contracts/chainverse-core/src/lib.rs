@@ -65,6 +65,7 @@ impl ChainverseCore {
         };
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         Ok(())
     }
 
@@ -125,6 +126,7 @@ impl ChainverseCore {
         }
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_CONFIG_UPDATED);
         Ok(())
     }
