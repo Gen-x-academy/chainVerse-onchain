@@ -140,10 +140,12 @@ impl ChainverseCore {
             .get(&DataKey::Config)
             .ok_or(ContractError::NotInitialized)?;
 
-        config.admin = new_admin;
+        let old_admin = config.admin.clone();
+        config.admin = new_admin.clone();
 
         env.storage().persistent().set(&DataKey::Config, &config);
         analytics::record(&env, EVT_ADMIN_CHANGED);
+        env.events().publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
         Ok(())
     }
 
