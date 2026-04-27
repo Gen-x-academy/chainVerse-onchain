@@ -13,4 +13,5 @@ pub enum ContractError {
     EscrowNotFound = 7,
     InvalidEscrowState = 8,
     EscrowNotExpired = 9,
+    InvalidFee = 10,
 }

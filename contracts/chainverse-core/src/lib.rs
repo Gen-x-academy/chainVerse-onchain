@@ -115,6 +115,9 @@ impl ChainverseCore {
             .ok_or(ContractError::NotInitialized)?;
 
         if let Some(fee) = new_protocol_fee {
+            if fee > 10_000 {
+                return Err(ContractError::InvalidFee);
+            }
             config.protocol_fee = fee;
         }
         if let Some(tokens) = new_supported_tokens {
