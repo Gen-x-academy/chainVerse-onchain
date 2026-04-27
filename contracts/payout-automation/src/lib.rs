@@ -64,6 +64,14 @@ impl PayoutAutomation {
         Ok(())
     }
 
+    /// Admin-only: remove an address from the authorised set.
+    pub fn remove_authorised(env: Env, admin: Address, caller: Address) -> Result<(), PayoutError> {
+        admin.require_auth();
+        Self::only_admin(&env, &admin)?;
+        env.storage().instance().remove(&DataKey::Authorised(caller));
+        Ok(())
+    }
+
     /// Execute a batch payout. The caller must be in the authorised set.
     /// Transfers `token` from the contract to each recipient in `payouts`.
     /// An empty batch is accepted gracefully (no-op).
@@ -83,6 +91,9 @@ impl PayoutAutomation {
         let mut total_amount: i128 = 0;
         let mut recipient_count: u32 = 0;
         for entry in payouts.iter() {
+            if entry.amount <= 0 {
+                continue;
+            }
             token_client.transfer(
                 &env.current_contract_address(),
                 &entry.recipient,

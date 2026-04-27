@@ -6,11 +6,11 @@ const TOKEN: soroban_sdk::Symbol = symbol_short!("TOKEN");
 const REWARD_AMOUNT: soroban_sdk::Symbol = symbol_short!("REWARD_AMT");
 
 pub fn has_been_rewarded(env: &Env, user: &Address) -> bool {
-    env.storage().instance().get(&(REWARDED, user)).unwrap_or(false)
+    env.storage().persistent().get(&(REWARDED, user)).unwrap_or(false)
 }
 
 pub fn set_rewarded(env: &Env, user: &Address) {
-    env.storage().instance().set(&(REWARDED, user), &true);
+    env.storage().persistent().set(&(REWARDED, user), &true);
 }
 
 pub fn set_treasury(env: &Env, treasury: &Address) {
