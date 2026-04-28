@@ -4,7 +4,7 @@
 use crate::errors::Error;
 use crate::membership_token::DataKey;
 use crate::types::{RoyaltyConfig, RoyaltyInfo, RoyaltyRecipient};
-use soroban_sdk::{symbol_short, Address, BytesN, Env, Vec};
+use soroban_sdk::{symbol_short, token, Address, BytesN, Env, Vec};
 
 pub struct RoyaltyModule;
 
@@ -30,9 +30,21 @@ impl RoyaltyModule {
     /// Sets or updates the royalty configuration for a token
     pub fn set_royalty(
         env: Env,
+        admin: Address,
         token_id: BytesN<32>,
         recipients: Vec<RoyaltyRecipient>,
     ) -> Result<(), Error> {
+        // Require admin authorization
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::AdminNotSet)?;
+        stored_admin.require_auth();
+        if stored_admin != admin {
+            return Err(Error::Unauthorized);
+        }
+
         // Validation
         let _ = Self::validate_config(&recipients)?;
 
@@ -62,12 +74,13 @@ impl RoyaltyModule {
         Ok(())
     }
 
-    /// Calculates required royalty payments based on sale price and emits distribution events.
+    /// Calculates and transfers royalty payments for each recipient.
     pub fn calculate_and_pay_royalties(
         env: &Env,
         token_id: &BytesN<32>,
         payment_token: &Address,
         sale_price: i128,
+        payer: &Address,
     ) -> Result<i128, Error> {
         if sale_price <= 0 {
             return Ok(0);
@@ -83,19 +96,19 @@ impl RoyaltyModule {
                 return Ok(0);
             }
 
+            let token_client = token::Client::new(env, payment_token);
             let mut total_royalty_amount: i128 = 0;
 
             for recipient in cfg.recipients.iter() {
-                // Calculate portion using basis points (percentage * sale_price / 10000)
                 let amount =
                     (sale_price * recipient.percentage as i128) / Self::MAX_ROYALTY_BPS as i128;
 
                 if amount > 0 {
                     total_royalty_amount += amount;
 
-                    // Note: Here we'd normally call `token::Client::new(env, payment_token).transfer(...)`
-                    // To keep things simple and avoiding external cross-contract token integrations for the royalty distribution,
-                    // we emit an event that off-chain indexers or wrapper contracts can use to fulfill the payment synchronously or asynchronously.
+                    // Transfer royalty to recipient
+                    token_client.transfer(payer, &recipient.address, &amount);
+
                     env.events().publish(
                         (
                             symbol_short!("roy_paid"),

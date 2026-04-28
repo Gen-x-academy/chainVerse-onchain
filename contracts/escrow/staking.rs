@@ -99,6 +99,11 @@ impl StakingModule {
         env.storage()
             .persistent()
             .set(&StakingDataKey::Tier(tier.id.clone()), &tier);
+        env.storage().persistent().extend_ttl(
+            &StakingDataKey::Tier(tier.id.clone()),
+            STAKE_TTL_LEDGERS,
+            STAKE_TTL_LEDGERS,
+        );
 
         // Append tier ID to the tier list.
         let mut list: Vec<String> = env
