@@ -1,7 +1,7 @@
 // Allow deprecated events API until migration to #[contractevent] macro
 #![allow(deprecated)]
 
-use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contracttype, symbol_short, token, Address, BytesN, Env, Map, String, Vec};
 
 use crate::attendance_log::AttendanceLogModule;
 use crate::errors::Error;
@@ -28,6 +28,9 @@ pub enum SubscriptionDataKey {
     TierAnalytics(String),
     UserSubscriptionByTier(Address, String),
 }
+
+const MIN_TTL: u32 = 17_280; // ~1 day
+const MAX_TTL: u32 = 518_400; // ~30 days
 
 pub struct SubscriptionContract;
 
@@ -132,11 +135,8 @@ impl SubscriptionContract {
         // Validate payment first
         Self::validate_payment(&env, &payment_token, amount, &user)?;
 
-        // Note: Token transfer is omitted in this implementation.
-        // In production, you would transfer tokens using:
-        // let token_client = token::Client::new(&env, &payment_token);
-        // let contract_address = env.current_contract_address();
-        // token_client.transfer(&user, &contract_address, &amount);
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&user, &env.current_contract_address(), &amount);
 
         // Create subscription record
         let current_time = env.ledger().timestamp();
@@ -166,7 +166,7 @@ impl SubscriptionContract {
 
         // Store and extend TTL with same key
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit subscription created event
         env.events().publish(
@@ -267,7 +267,7 @@ impl SubscriptionContract {
 
         let key = SubscriptionDataKey::Subscription(id.clone());
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         env.events().publish(
             (
@@ -367,7 +367,7 @@ impl SubscriptionContract {
 
         let key = SubscriptionDataKey::Subscription(id.clone());
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         env.events().publish(
             (
@@ -502,11 +502,8 @@ impl SubscriptionContract {
         // Validate payment
         Self::validate_payment(&env, &payment_token, amount, &subscription.user)?;
 
-        // Note: Token transfer is omitted in this implementation.
-        // In production, you would transfer tokens using:
-        // let token_client = token::Client::new(&env, &payment_token);
-        // let contract_address = env.current_contract_address();
-        // token_client.transfer(&subscription.user, &contract_address, &amount);
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&subscription.user, &env.current_contract_address(), &amount);
 
         // Update subscription details - extend from current expiry date or current time, whichever is later
         let current_time = env.ledger().timestamp();
@@ -524,7 +521,7 @@ impl SubscriptionContract {
 
         // Store updated subscription and extend TTL
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Update tier analytics if subscription has a tier
         if !subscription.tier_id.is_empty() {
@@ -610,17 +607,27 @@ impl SubscriptionContract {
         Ok(())
     }
 
-    /// Generate a deterministic event_id from subscription_id
+    /// Generate a unique event_id using ledger timestamp and contract address as seed
     fn generate_event_id(env: &Env, subscription_id: &String) -> BytesN<32> {
-        // Use the subscription_id to generate a BytesN<32>
-        // Pad or truncate the subscription_id to create a 32-byte array
         let mut bytes = [0u8; 32];
 
-        // For simplicity, we'll create a deterministic ID based on the subscription_id length
-        // In production, you'd want to use a proper hashing mechanism
+        // Seed bytes 0-7 with ledger timestamp
+        let timestamp = env.ledger().timestamp();
+        let ts_bytes = timestamp.to_be_bytes();
+        bytes[..8].copy_from_slice(&ts_bytes);
+
+        // Seed bytes 8-27 with contract address bytes
+        let contract_addr = env.current_contract_address();
+        let addr_bytes = contract_addr.to_xdr(env);
+        let addr_len = addr_bytes.len().min(20);
+        for i in 0..addr_len {
+            bytes[8 + i as usize] = addr_bytes.get(i).unwrap_or(0);
+        }
+
+        // Seed bytes 28-31 with subscription_id length
         let id_len = subscription_id.len();
-        bytes[0] = (id_len % 256) as u8;
-        bytes[1] = ((id_len / 256) % 256) as u8;
+        bytes[28] = (id_len % 256) as u8;
+        bytes[29] = ((id_len / 256) % 256) as u8;
 
         BytesN::from_array(env, &bytes)
     }
@@ -664,7 +671,7 @@ impl SubscriptionContract {
 
         // Store tier
         env.storage().persistent().set(&key, &tier);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Add to tier list
         let list_key = SubscriptionDataKey::TierList;
@@ -893,7 +900,7 @@ impl SubscriptionContract {
 
         // Store subscription
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Update tier analytics
         Self::update_tier_analytics_on_subscribe(&env, &tier_id, final_price)?;
