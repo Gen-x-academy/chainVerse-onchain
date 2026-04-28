@@ -12,6 +12,7 @@ pub use errors::ContractError;
 pub use types::Certificate;
 
 use soroban_sdk::{contract, contractimpl, symbol_short, xdr::ToXdr, Address, Bytes, Env};
+use storage::{MIN_TTL, MAX_TTL};
 
 #[contract]
 pub struct CertificateContract;
@@ -19,6 +20,7 @@ pub struct CertificateContract;
 #[contractimpl]
 impl CertificateContract {
     pub fn init(env: Env, admin: Address) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() {
             return Err(ContractError::AlreadyInitialized);
         }
@@ -31,6 +33,7 @@ impl CertificateContract {
     }
 
     pub fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::require_admin(&env, &caller)?;
         storage::set_paused(&env, paused);
         env.events().publish((symbol_short!("paused"),), paused);
@@ -38,6 +41,7 @@ impl CertificateContract {
     }
 
     pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::is_paused(&env)
     }
 
@@ -48,6 +52,7 @@ impl CertificateContract {
         backend_public_key: Bytes,
         proof: Bytes,
     ) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::require_not_paused(&env)?;
         wallet.require_auth();
 
@@ -71,11 +76,33 @@ impl CertificateContract {
         Ok(())
     }
 
+    pub fn revoke_certificate(
+        env: Env,
+        caller: Address,
+        wallet: Address,
+        course_id: u64,
+    ) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        storage::require_admin(&env, &caller)?;
+
+        if !storage::has_certificate(&env, &wallet, course_id) {
+            return Err(ContractError::CertificateNotFound);
+        }
+
+        storage::remove_certificate(&env, &wallet, course_id);
+        env.events()
+            .publish((symbol_short!("cert_rvk"), wallet), course_id);
+
+        Ok(())
+    }
+
     pub fn get_certificate(env: Env, wallet: Address, course_id: u64) -> Option<Certificate> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::load_certificate(&env, &wallet, course_id)
     }
 
     pub fn has_certificate(env: Env, wallet: Address, course_id: u64) -> bool {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::has_certificate(&env, &wallet, course_id)
     }
 

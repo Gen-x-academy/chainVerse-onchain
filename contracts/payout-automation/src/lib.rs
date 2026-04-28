@@ -47,6 +47,9 @@ pub struct PayoutAutomation;
 impl PayoutAutomation {
     /// One-time initialisation — sets the admin and first authorised caller.
     pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()

@@ -1,4 +1,14 @@
-use soroban_sdk::{Env, Address, symbol_short};
+use soroban_sdk::{contracttype, Env, Address, BytesN, symbol_short};
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    Initialized,
+    BackendPubKey,
+    BackendSigner,
+    UsedNonce(BytesN<32>),
+}
 
 const REWARDED: soroban_sdk::Symbol = symbol_short!("REWARDED");
 const TREASURY: soroban_sdk::Symbol = symbol_short!("TREASURY");
