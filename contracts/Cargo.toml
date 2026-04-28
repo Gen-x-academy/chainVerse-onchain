@@ -6,7 +6,9 @@ members = [
     "chainverse-core",
     "course_registry",
     "escrow",
+    "escrow-vault",
     "payout-automation",
+    "reward",
     "shared"
 ]
 
