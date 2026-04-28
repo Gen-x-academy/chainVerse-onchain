@@ -36,6 +36,8 @@ pub struct SubscriptionContract;
 
 impl SubscriptionContract {
     fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
+        caller.require_auth();
+
         let admin: Address = env
             .storage()
             .instance()
@@ -46,7 +48,6 @@ impl SubscriptionContract {
             return Err(Error::Unauthorized);
         }
 
-        caller.require_auth();
         Ok(())
     }
 
@@ -415,10 +416,7 @@ impl SubscriptionContract {
 
     #[allow(deprecated)]
     pub fn set_usdc_contract(env: Env, admin: Address, usdc_address: Address) -> Result<(), Error> {
-        admin.require_auth();
-
-        // Check if admin is authorized (you might want to implement admin checking logic)
-        // For now, we'll store the USDC contract address
+        Self::require_admin(&env, &admin)?;
         env.storage()
             .instance()
             .set(&SubscriptionDataKey::UsdcContract, &usdc_address);
@@ -638,7 +636,7 @@ impl SubscriptionContract {
 
     /// Creates a new subscription tier. Admin only.
     pub fn create_tier(env: Env, admin: Address, params: CreateTierParams) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         // Validate prices
         if params.price < 0 {
@@ -707,7 +705,7 @@ impl SubscriptionContract {
 
     /// Updates an existing subscription tier. Admin only.
     pub fn update_tier(env: Env, admin: Address, params: UpdateTierParams) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         let key = SubscriptionDataKey::Tier(params.id.clone());
         let mut tier: SubscriptionTier = env
@@ -803,7 +801,7 @@ impl SubscriptionContract {
 
     /// Deactivates a tier (soft delete). Admin only.
     pub fn deactivate_tier(env: Env, admin: Address, id: String) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         let key = SubscriptionDataKey::Tier(id.clone());
         let mut tier: SubscriptionTier = env
@@ -1052,7 +1050,7 @@ impl SubscriptionContract {
 
         // Verify caller is the user or admin
         if caller != change_request.user {
-            // TODO: Add admin check here
+            Self::require_admin(&env, &caller)?;
         }
 
         // Get subscription and update it
@@ -1157,7 +1155,7 @@ impl SubscriptionContract {
         admin: Address,
         params: CreatePromotionParams,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         // Validate tier exists
         let _ = Self::get_tier(env.clone(), params.tier_id.clone())?;
