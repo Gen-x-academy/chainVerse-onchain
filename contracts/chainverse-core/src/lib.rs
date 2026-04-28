@@ -65,6 +65,7 @@ impl ChainverseCore {
         };
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         Ok(())
     }
 
@@ -115,6 +116,9 @@ impl ChainverseCore {
             .ok_or(ContractError::NotInitialized)?;
 
         if let Some(fee) = new_protocol_fee {
+            if fee > 10_000 {
+                return Err(ContractError::InvalidFee);
+            }
             config.protocol_fee = fee;
         }
         if let Some(tokens) = new_supported_tokens {
@@ -122,6 +126,7 @@ impl ChainverseCore {
         }
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_CONFIG_UPDATED);
         Ok(())
     }
@@ -140,10 +145,12 @@ impl ChainverseCore {
             .get(&DataKey::Config)
             .ok_or(ContractError::NotInitialized)?;
 
-        config.admin = new_admin;
+        let old_admin = config.admin.clone();
+        config.admin = new_admin.clone();
 
         env.storage().persistent().set(&DataKey::Config, &config);
         analytics::record(&env, EVT_ADMIN_CHANGED);
+        env.events().publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
         Ok(())
     }
 
