@@ -10,9 +10,9 @@ pub fn claim_reward(env: Env, user: Address) -> Result<(), Error> {
         return Err(Error::AlreadyRewarded);
     }
 
-    let treasury = get_treasury(&env);
-    let token_address = get_token(&env);
-    let reward_amount = get_reward_amount(&env);
+    let treasury = get_treasury(&env)?;
+    let token_address = get_token(&env)?;
+    let reward_amount = get_reward_amount(&env)?;
 
     let token_client = Client::new(&env, &token_address);
     token_client.transfer(&treasury, &user, &reward_amount);

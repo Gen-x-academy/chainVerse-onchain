@@ -7,4 +7,5 @@ pub enum Error {
     InvalidSignature   = 2,
     AlreadyInitialized = 3,
     AlreadyRewarded    = 4,
+    NotInitialized     = 5,
 }
