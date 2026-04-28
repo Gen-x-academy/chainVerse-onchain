@@ -48,9 +48,16 @@ impl RoyaltyModule {
             (recipients.len(), env.ledger().timestamp()),
         );
 
+        const MIN_TTL: u32 = 100_000;
+        const MAX_TTL: u32 = 200_000;
+
         env.storage()
             .persistent()
-            .set(&DataKey::Royalty(token_id), &config);
+            .set(&DataKey::Royalty(token_id.clone()), &config);
+
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Royalty(token_id), MIN_TTL, MAX_TTL);
 
         Ok(())
     }

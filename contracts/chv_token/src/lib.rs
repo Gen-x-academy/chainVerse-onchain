@@ -4,8 +4,13 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, Address, Env, Symbol, Vec, symbol_short
 };
 
+mod error;
+use error::TokenError;
+
 const DECIMALS: u32 = 7;
 const TOTAL_SUPPLY: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
+const BALANCE_MIN_TTL: u32 = 100_000;
+const BALANCE_MAX_TTL: u32 = 200_000;
 
 #[contracttype]
 pub enum DataKey {
@@ -21,24 +26,26 @@ pub struct CHVToken;
 impl CHVToken {
 
     /// Initialize contract and mint fixed supply to treasury
-    pub fn initialize(env: Env, admin: Address) {
-        // Prevent re-initialization
+    pub fn initialize(env: Env, admin: Address) -> Result<(), TokenError> {
         if env.storage().instance().has(&DataKey::Initialized) {
-            panic!("Already initialized");
+            return Err(TokenError::AlreadyInitialized);
         }
 
         admin.require_auth();
 
-        // Set admin
         env.storage().instance().set(&DataKey::Admin, &admin);
 
-        // Mint entire supply to admin (treasury)
+        // Mint entire supply to admin (treasury) using persistent storage
         env.storage()
-            .instance()
+            .persistent()
             .set(&DataKey::Balance(admin.clone()), &TOTAL_SUPPLY);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(admin.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
 
-        // Mark as initialized
         env.storage().instance().set(&DataKey::Initialized, &true);
+
+        Ok(())
     }
 
     /// Get total supply
@@ -54,7 +61,7 @@ impl CHVToken {
     /// Get balance of address
     pub fn balance(env: Env, addr: Address) -> i128 {
         env.storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Balance(addr))
             .unwrap_or(0)
     }
@@ -75,11 +82,17 @@ impl CHVToken {
         let to_balance = Self::balance(env.clone(), to.clone());
 
         env.storage()
-            .instance()
-            .set(&DataKey::Balance(from), &(from_balance - amount));
+            .persistent()
+            .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(from), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
 
         env.storage()
-            .instance()
-            .set(&DataKey::Balance(to), &(to_balance + amount));
+            .persistent()
+            .set(&DataKey::Balance(to.clone()), &(to_balance + amount));
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(to), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
     }
 }
