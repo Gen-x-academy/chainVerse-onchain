@@ -3237,7 +3237,7 @@ fn test_royalty_config() {
         },
     ];
 
-    client.set_royalty(&token_id, &recipients);
+    client.set_royalty(&admin, &token_id, &recipients);
 
     let info = client.get_royalty_info(&token_id).unwrap();
     assert_eq!(info.config.recipients.len(), 2);
@@ -3269,7 +3269,7 @@ fn test_royalty_validation_fail() {
         },
     ];
 
-    client.set_royalty(&token_id, &recipients);
+    client.set_royalty(&admin, &token_id, &recipients);
 }
 
 #[test]
@@ -3295,7 +3295,7 @@ fn test_transfer_with_royalty_events() {
             percentage: 1000, // 10%
         },
     ];
-    client.set_royalty(&token_id, &recipients);
+    client.set_royalty(&admin, &token_id, &recipients);
 
     // Verify it was set
     let info = client.get_royalty_info(&token_id).unwrap();

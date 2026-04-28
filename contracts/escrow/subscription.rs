@@ -452,6 +452,30 @@ impl SubscriptionContract {
         // Capture old status for event emission
         let old_status = subscription.status.clone();
 
+        // Calculate and transfer prorated refund for remaining subscription time
+        let current_time = env.ledger().timestamp();
+        if subscription.status == MembershipStatus::Active
+            && subscription.expires_at > current_time
+            && subscription.amount > 0
+        {
+            let remaining = subscription.expires_at - current_time;
+            let total_duration: u64 = match subscription.billing_cycle {
+                BillingCycle::Monthly => 30 * 24 * 60 * 60,
+                BillingCycle::Annual => 365 * 24 * 60 * 60,
+            };
+            let refund_amount =
+                (subscription.amount * remaining as i128) / total_duration as i128;
+            if refund_amount > 0 {
+                let token_client =
+                    token::Client::new(&env, &subscription.payment_token);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &subscription.user,
+                    &refund_amount,
+                );
+            }
+        }
+
         // Update status to inactive
         subscription.status = MembershipStatus::Inactive;
         subscription.paused_at = None;
