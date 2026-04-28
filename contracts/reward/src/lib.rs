@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Env, BytesN, Address};
+use soroban_sdk::{contract, contractimpl, Env, BytesN, Address};
 
 mod storage;
 mod signature;
@@ -10,19 +10,9 @@ mod events;
 mod admin;
 mod crypto;
 
-use storage::{set_treasury, set_token, set_reward_amount};
+use storage::{set_treasury, set_token, set_reward_amount, DataKey};
 use admin::require_admin;
 use errors::Error;
-
-#[derive(Clone)]
-#[contracttype]
-pub enum DataKey {
-    Admin,
-    Initialized,
-    BackendPubKey,
-    BackendSigner,
-    UsedNonce(BytesN<32>),
-}
 
 #[contract]
 pub struct RewardContract;
