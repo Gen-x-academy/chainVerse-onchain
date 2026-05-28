@@ -65,6 +65,9 @@ impl EscrowVault {
         approvers: Vec<Address>,
     ) -> u64 {
         depositor.require_auth();
+        if amount <= 0 {
+            panic!("vault amount must be positive");
+        }
         if approvers.is_empty() {
             panic!("approvers list cannot be empty");
         }
