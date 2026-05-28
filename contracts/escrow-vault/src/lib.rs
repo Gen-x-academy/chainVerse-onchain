@@ -65,8 +65,19 @@ impl EscrowVault {
         approvers: Vec<Address>,
     ) -> u64 {
         depositor.require_auth();
+        if amount <= 0 {
+            panic!("vault amount must be positive");
+        }
         if approvers.is_empty() {
             panic!("approvers list cannot be empty");
+        }
+        // Check for duplicate approver addresses
+        for i in 0..approvers.len() {
+            for j in (i + 1)..approvers.len() {
+                if approvers.get(i) == approvers.get(j) {
+                    panic!("duplicate approver address");
+                }
+            }
         }
         let id = Self::next_id(&env);
         let vault = Vault {

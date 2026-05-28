@@ -22,6 +22,10 @@ pub fn has_been_rewarded(env: &Env, user: &Address) -> bool {
 
 pub fn set_rewarded(env: &Env, user: &Address) {
     env.storage().persistent().set(&(REWARDED, user), &true);
+    // Extend TTL to keep the flag alive long-term (e.g., 1 year = 31_536_000 seconds)
+    let key = (REWARDED, user.clone());
+    let ttl = 31_536_000u32; // 1 year in seconds
+    env.storage().persistent().extend_ttl(&key, ttl, ttl);
 }
 
 pub fn set_treasury(env: &Env, treasury: &Address) {
