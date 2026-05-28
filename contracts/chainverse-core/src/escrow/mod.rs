@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, token::Client as TokenClient, Address, Env, Vec};
 
 use crate::errors::ContractError;
 
@@ -118,8 +118,11 @@ pub fn release(env: &Env, caller: Address, id: u64) -> Result<(), ContractError>
         return Err(ContractError::Unauthorized);
     }
 
-    soroban_sdk::token::Client::new(env, &record.token)
-        .transfer(&env.current_contract_address(), &record.recipient, &record.amount);
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.recipient,
+        &record.amount,
+    );
 
     record.status = EscrowStatus::Completed;
     save(env, &record);
