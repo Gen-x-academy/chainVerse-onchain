@@ -8,4 +8,5 @@ pub enum Error {
     AlreadyInitialized = 3,
     AlreadyRewarded    = 4,
     NotInitialized     = 5,
+    InsufficientTreasuryAllowance = 6,
 }

@@ -15,6 +15,10 @@ pub fn claim_reward(env: Env, user: Address) -> Result<(), Error> {
     let reward_amount = get_reward_amount(&env)?;
 
     let token_client = Client::new(&env, &token_address);
+    let allowance = token_client.allowance(&treasury, &env.current_contract_address());
+    if allowance < reward_amount {
+        return Err(Error::InsufficientTreasuryAllowance);
+    }
     token_client.transfer(&treasury, &user, &reward_amount);
 
     set_rewarded(&env, &user);
