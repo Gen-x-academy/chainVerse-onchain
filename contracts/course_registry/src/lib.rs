@@ -9,10 +9,10 @@ use soroban_sdk::{
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ContractError {
-    NotAdmin = 1,
-    CourseNotFound = 2,
-    CourseInactive = 3,
-    AlreadyInitialized = 4,
+    AlreadyInitialized = 1,
+    NotAdmin = 2,
+    CourseNotFound = 3,
+    CourseInactive = 4,
     NotInitialized = 5,
 }
 
