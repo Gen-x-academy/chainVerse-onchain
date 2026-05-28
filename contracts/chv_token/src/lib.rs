@@ -67,16 +67,16 @@ impl CHVToken {
     }
 
     /// Transfer tokens
-    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         from.require_auth();
 
         if amount <= 0 {
-            panic!("Invalid amount");
+            return Err(TokenError::InvalidAmount);
         }
 
         let from_balance = Self::balance(env.clone(), from.clone());
         if from_balance < amount {
-            panic!("Insufficient balance");
+            return Err(TokenError::InsufficientBalance);
         }
 
         let to_balance = Self::balance(env.clone(), to.clone());
@@ -94,5 +94,7 @@ impl CHVToken {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Balance(to), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+
+        Ok(())
     }
 }

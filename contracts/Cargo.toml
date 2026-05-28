@@ -9,9 +9,8 @@ members = [
     "escrow",
     "escrow-vault",
     "payout-automation",
-    "reward",
     "shared"
 ]
 
 [workspace.dependencies]
-soroban-sdk = "22.0.0"
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
