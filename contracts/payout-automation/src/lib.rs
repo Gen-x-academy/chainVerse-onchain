@@ -1,3 +1,4 @@
+const MAX_BATCH_SIZE: u32 = 100;
 #![no_std]
 
 use soroban_sdk::{
@@ -16,6 +17,7 @@ use soroban_sdk::{
 pub enum PayoutError {
     Unauthorized  = 1,
     NotInitialized = 2,
+    BatchTooLarge = 3,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,10 @@ impl PayoutAutomation {
         payouts: Vec<PayoutEntry>,
     ) -> Result<(), PayoutError> {
         caller.require_auth();
+
+        if payouts.len() > MAX_BATCH_SIZE {
+            return Err(PayoutError::BatchTooLarge);
+        }
 
         if !Self::is_authorised(&env, &caller) {
             return Err(PayoutError::Unauthorized);
