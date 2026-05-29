@@ -9,8 +9,8 @@ members = [
     "escrow",
     "escrow-vault",
     "payout-automation",
-    "reward",
-    "shared"
+    "shared",
+    "chv_token"
 ]
 
 [workspace.dependencies]
