@@ -61,34 +61,40 @@ The template location is at [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQU
 
 1. Fork the repository.
 
-2. Clone your fork locally:
+2. Install the required Rust target for building WASM contracts:
+
+   ```bash
+   rustup target add wasm32-unknown-unknown
+   ```
+
+3. Clone your fork locally:
 
 ```bash
 git clone https://github.com/your-username/chainVerse-onchain.git
 cd onchain
 ```
 
-3. In your forked repo, Create a new branch:
+4. In your forked repo, Create a new branch:
 
    ```bash
    git checkout -b feature/your-feature-name
    ```
 
-4. Make your changes
+5. Make your changes
 
-5. Commit with clear messages:
+6. Commit with clear messages:
 
 ```bash
 git commit -m "Add: brief description of changes"
 ```
 
-6. Push to your fork:
+7. Push to your fork:
 
    ```bash
    git push origin feature-name
    ```
 
-7. Submit a Pull Request that properly describes your changes
+8. Submit a Pull Request that properly describes your changes
 
 ## Code of Conduct
 
