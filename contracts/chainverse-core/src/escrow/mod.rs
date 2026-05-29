@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, token::Client as TokenClient, Address, Env, Vec};
 
 use crate::errors::ContractError;
 
@@ -118,8 +118,11 @@ pub fn release(env: &Env, caller: Address, id: u64) -> Result<(), ContractError>
         return Err(ContractError::Unauthorized);
     }
 
-    soroban_sdk::token::Client::new(env, &record.token)
-        .transfer(&env.current_contract_address(), &record.recipient, &record.amount);
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.recipient,
+        &record.amount,
+    );
 
     record.status = EscrowStatus::Completed;
     save(env, &record);
@@ -150,14 +153,15 @@ pub fn get(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
 }
 
 /// Returns all escrows where `buyer` is the depositor.
-pub fn get_by_buyer(env: &Env, buyer: &Address) -> Vec<EscrowRecord> {
+pub fn get_by_buyer(env: &Env, buyer: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
     let mut results = Vec::new(env);
     let count: u64 = env
         .storage()
         .persistent()
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             if &record.depositor == buyer {
                 results.push_back(record);
@@ -168,14 +172,15 @@ pub fn get_by_buyer(env: &Env, buyer: &Address) -> Vec<EscrowRecord> {
 }
 
 /// Returns all escrows where `seller` is the recipient.
-pub fn get_by_seller(env: &Env, seller: &Address) -> Vec<EscrowRecord> {
+pub fn get_by_seller(env: &Env, seller: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
     let mut results = Vec::new(env);
     let count: u64 = env
         .storage()
         .persistent()
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             if &record.recipient == seller {
                 results.push_back(record);
@@ -230,6 +235,8 @@ pub fn search(
     env: &Env,
     token: Option<Address>,
     status: Option<EscrowStatus>,
+    start: u64,
+    limit: u64,
 ) -> soroban_sdk::Vec<EscrowRecord> {
     let mut results = soroban_sdk::Vec::new(env);
     let count: u64 = env
@@ -238,7 +245,8 @@ pub fn search(
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
 
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             let mut matches = true;
             if let Some(t) = &token {

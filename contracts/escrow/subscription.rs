@@ -23,6 +23,7 @@ pub enum SubscriptionDataKey {
     TierList,
     TierPromotion(String),
     TierPromotionList,
+    PromoByCode(String),
     TierChangeRequest(String),
     UserTierChangeHistory(Address),
     TierAnalytics(String),
@@ -1212,6 +1213,8 @@ impl SubscriptionContract {
         };
 
         env.storage().persistent().set(&key, &promotion);
+        // Store promotion by promo code for direct lookup
+        env.storage().persistent().set(&SubscriptionDataKey::PromoByCode(promotion.promo_code.clone()), &promotion);
 
         // Add to promotion list
         let list_key = SubscriptionDataKey::TierPromotionList;
@@ -1252,31 +1255,23 @@ impl SubscriptionContract {
         promo_code: &String,
         base_price: i128,
     ) -> Result<i128, Error> {
-        // Search for promotion with matching code and tier
-        let list_key = SubscriptionDataKey::TierPromotionList;
-        let promo_list: Vec<String> = env
+        // Look up promotion by promo code directly
+        let current_time = env.ledger().timestamp();
+        let promotion = env
             .storage()
             .persistent()
-            .get(&list_key)
-            .unwrap_or_else(|| Vec::new(env));
+            .get::<_, TierPromotion>(&SubscriptionDataKey::PromoByCode(promo_code.clone()));
 
-        let current_time = env.ledger().timestamp();
+        if let Some(mut promotion) = promotion {
+            // Check if promotion matches tier
+            if promotion.tier_id == *tier_id {
+                // Validate promotion is active
+                if current_time < promotion.start_date || current_time > promotion.end_date {
+                    return Err(Error::PromoCodeExpired);
+                }
 
-        for promo_id in promo_list.iter() {
-            if let Some(mut promotion) = env
-                .storage()
-                .persistent()
-                .get::<_, TierPromotion>(&SubscriptionDataKey::TierPromotion(promo_id.clone()))
-            {
-                // Check if promotion matches
-                if promotion.tier_id == *tier_id && promotion.promo_code == *promo_code {
-                    // Validate promotion is active
-                    if current_time < promotion.start_date || current_time > promotion.end_date {
-                        return Err(Error::PromoCodeExpired);
-                    }
-
-                    // Check max redemptions
-                    if promotion.max_redemptions > 0
+                // Check max redemptions
+                if promotion.max_redemptions > 0
                         && promotion.current_redemptions >= promotion.max_redemptions
                     {
                         return Err(Error::PromoCodeMaxRedemptions);
