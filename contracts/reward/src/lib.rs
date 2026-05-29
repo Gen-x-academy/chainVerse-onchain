@@ -10,7 +10,8 @@ mod events;
 mod admin;
 mod crypto;
 
-use storage::{set_treasury, set_token, set_reward_amount, DataKey};
+use storage::{set_treasury, set_token, set_reward_amount};
+pub use crate::storage::DataKey;
 use admin::require_admin;
 use errors::Error;
 

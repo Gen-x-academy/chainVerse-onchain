@@ -145,6 +145,12 @@ pub fn cancel(env: &Env, caller: Address, id: u64) -> Result<(), ContractError> 
         return Err(ContractError::Unauthorized);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Cancelled;
     save(env, &record);
     Ok(())
@@ -206,6 +212,12 @@ pub fn buyer_cancel(env: &Env, buyer: Address, id: u64) -> Result<(), ContractEr
         // Seller has already interacted or escrow is no longer open.
         return Err(ContractError::InvalidEscrowState);
     }
+
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
 
     record.status = EscrowStatus::Cancelled;
     save(env, &record);
