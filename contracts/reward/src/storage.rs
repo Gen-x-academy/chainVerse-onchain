@@ -16,16 +16,19 @@ const TREASURY: soroban_sdk::Symbol = symbol_short!("TREASURY");
 const TOKEN: soroban_sdk::Symbol = symbol_short!("TOKEN");
 const REWARD_AMOUNT: soroban_sdk::Symbol = symbol_short!("REWARD_AMT");
 
+// ~1 year in ledgers (5-second close time): fix #371 — persistent storage prevents
+// reward flag reset on contract upgrade; fix #368 — TTL extended to prevent expiry.
+const MIN_TTL: u32 = 6_307_200;  // ~1 year
+const MAX_TTL: u32 = 12_614_400; // ~2 years
+
 pub fn has_been_rewarded(env: &Env, user: &Address) -> bool {
     env.storage().persistent().get(&(REWARDED, user)).unwrap_or(false)
 }
 
 pub fn set_rewarded(env: &Env, user: &Address) {
-    env.storage().persistent().set(&(REWARDED, user), &true);
-    // Extend TTL to keep the flag alive long-term (e.g., 1 year = 31_536_000 seconds)
     let key = (REWARDED, user.clone());
-    let ttl = 31_536_000u32; // 1 year in seconds
-    env.storage().persistent().extend_ttl(&key, ttl, ttl);
+    env.storage().persistent().set(&key, &true);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 }
 
 pub fn set_treasury(env: &Env, treasury: &Address) {
