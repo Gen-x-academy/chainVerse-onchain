@@ -19,7 +19,7 @@ pub struct CertificateContract;
 
 #[contractimpl]
 impl CertificateContract {
-    pub fn init(env: Env, admin: Address) -> Result<(), ContractError> {
+    pub fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() {
             return Err(ContractError::AlreadyInitialized);
@@ -28,6 +28,7 @@ impl CertificateContract {
         // The deployer must sign to prove they control the intended admin address.
         admin.require_auth();
         storage::set_admin(&env, &admin);
+        storage::set_backend_pubkey(&env, &backend_public_key);
         storage::set_paused(&env, false);
         Ok(())
     }
@@ -49,7 +50,6 @@ impl CertificateContract {
         env: Env,
         wallet: Address,
         course_id: u64,
-        backend_public_key: Bytes,
         proof: Bytes,
     ) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
@@ -59,6 +59,9 @@ impl CertificateContract {
         if storage::has_certificate(&env, &wallet, course_id) {
             return Err(ContractError::CertificateExists);
         }
+
+        let backend_public_key = storage::get_backend_pubkey(&env)
+            .ok_or(ContractError::NotInitialized)?;
 
         let payload = (wallet.clone(), course_id).to_xdr(&env);
         verify::verify_backend_proof(&env, &backend_public_key, &payload, &proof)?;

@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, Address, Bytes, Env};
 
 use crate::{Certificate, ContractError};
 
@@ -8,6 +8,7 @@ pub enum DataKey {
     Admin,
     Paused,
     Certificate(Address, u64),
+    BackendPubKey,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -73,4 +74,12 @@ pub fn remove_certificate(env: &Env, wallet: &Address, course_id: u64) {
     env.storage()
         .persistent()
         .remove(&DataKey::Certificate(wallet.clone(), course_id));
+}
+
+pub fn set_backend_pubkey(env: &Env, pubkey: &Bytes) {
+    env.storage().instance().set(&DataKey::BackendPubKey, pubkey);
+}
+
+pub fn get_backend_pubkey(env: &Env) -> Option<Bytes> {
+    env.storage().instance().get(&DataKey::BackendPubKey)
 }

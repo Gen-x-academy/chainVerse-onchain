@@ -34,11 +34,10 @@ fn test_transfer_fails() {
     let user2 = Address::generate(&env);
     let signer = signing_key();
 
-    client.init(&admin);
+    client.init(&admin, &public_key_bytes(&env, &signer));
     client.mint(
         &user1,
         &1,
-        &public_key_bytes(&env, &signer),
         &proof_bytes(&env, &signer, &user1, 1),
     );
 
@@ -58,18 +57,16 @@ fn duplicate_mint_fails() {
     let wallet = Address::generate(&env);
     let signer = signing_key();
 
-    client.init(&admin);
+    client.init(&admin, &public_key_bytes(&env, &signer));
     client.mint(
         &wallet,
         &7,
-        &public_key_bytes(&env, &signer),
         &proof_bytes(&env, &signer, &wallet, 7),
     );
 
     let second_attempt = client.try_mint(
         &wallet,
         &7,
-        &public_key_bytes(&env, &signer),
         &proof_bytes(&env, &signer, &wallet, 7),
     );
 
