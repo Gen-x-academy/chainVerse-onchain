@@ -1,8 +1,17 @@
+CARGO = cargo
+TARGET = wasm32-unknown-unknown
+
 build:
-	cargo build --target wasm32-unknown-unknown --release
+	$(CARGO) build --workspace --release --target $(TARGET)
 
 test:
-	cargo test
+	$(CARGO) test --workspace
 
 fmt:
-	cargo fmt --all
+	$(CARGO) fmt --all
+
+check:
+	$(CARGO) clippy --workspace -- -D warnings
+
+clean:
+	$(CARGO) clean

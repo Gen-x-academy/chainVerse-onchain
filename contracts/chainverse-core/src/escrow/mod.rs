@@ -239,6 +239,12 @@ pub fn refund_expired(env: &Env, id: u64) -> Result<(), ContractError> {
         return Err(ContractError::InvalidEscrowState);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Expired;
     save(env, &record);
     Ok(())
