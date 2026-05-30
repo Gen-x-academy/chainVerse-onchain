@@ -164,6 +164,11 @@ impl EscrowVault {
 
         vault.status = VaultStatus::Cancelled;
         env.storage().persistent().set(&DataKey::Vault(vault_id), &vault);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("cancelled"), vault_id),
+            (vault.depositor, vault.amount),
+        );
         Ok(())
     }
 
