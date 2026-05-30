@@ -1,5 +1,8 @@
-const MAX_BATCH_SIZE: u32 = 100;
 #![no_std]
+
+const MAX_BATCH_SIZE: u32 = 100;
+const AUTH_MIN_TTL: u32 = 17_280;   // ~1 day
+const AUTH_MAX_TTL: u32 = 518_400;  // ~30 days
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, contracterror,
@@ -54,18 +57,18 @@ impl PayoutAutomation {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .set(&DataKey::Authorised(admin), &true);
+        let auth_key = DataKey::Authorised(admin);
+        env.storage().persistent().set(&auth_key, &true);
+        env.storage().persistent().extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
     }
 
     /// Admin-only: add an address to the authorised set.
     pub fn add_authorised(env: Env, admin: Address, caller: Address) -> Result<(), PayoutError> {
         admin.require_auth();
         Self::only_admin(&env, &admin)?;
-        env.storage()
-            .instance()
-            .set(&DataKey::Authorised(caller), &true);
+        let auth_key = DataKey::Authorised(caller);
+        env.storage().persistent().set(&auth_key, &true);
+        env.storage().persistent().extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
         Ok(())
     }
 
@@ -73,7 +76,7 @@ impl PayoutAutomation {
     pub fn remove_authorised(env: Env, admin: Address, caller: Address) -> Result<(), PayoutError> {
         admin.require_auth();
         Self::only_admin(&env, &admin)?;
-        env.storage().instance().remove(&DataKey::Authorised(caller));
+        env.storage().persistent().remove(&DataKey::Authorised(caller));
         Ok(())
     }
 
@@ -126,7 +129,7 @@ impl PayoutAutomation {
 
     fn is_authorised(env: &Env, addr: &Address) -> bool {
         env.storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Authorised(addr.clone()))
             .unwrap_or(false)
     }
