@@ -10,7 +10,7 @@ mod events;
 mod admin;
 mod crypto;
 
-use storage::{set_treasury, set_token, set_reward_amount};
+use storage::{set_treasury, set_token, set_reward_amount, MIN_TTL, MAX_TTL};
 pub use crate::storage::DataKey;
 use admin::require_admin;
 use errors::Error;
@@ -30,6 +30,7 @@ impl RewardContract {
         token: Address,
         reward_amount: i128,
     ) -> Result<(), Error> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(Error::AlreadyInitialized);
         }
@@ -43,16 +44,19 @@ impl RewardContract {
     }
 
     pub fn rotate_backend_pubkey(env: Env, new_pubkey: BytesN<32>) -> Result<(), Error> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::BackendPubKey, &new_pubkey);
         Ok(())
     }
 
     pub fn get_backend_pubkey(env: Env) -> Option<BytesN<32>> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         env.storage().instance().get(&DataKey::BackendPubKey)
     }
 
     pub fn claim_reward(env: Env, user: Address) -> Result<(), errors::Error> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         reward::claim_reward(env, user)
     }
 }
