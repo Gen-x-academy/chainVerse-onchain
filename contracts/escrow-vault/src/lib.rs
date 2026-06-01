@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -10,10 +10,10 @@ use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum VaultError {
-    NotFound      = 1,
-    NotPending    = 2,
-    Unauthorized  = 3,
-    AlreadyVoted  = 4,
+    NotFound = 1,
+    NotPending = 2,
+    Unauthorized = 3,
+    AlreadyVoted = 4,
 }
 
 // ---------------------------------------------------------------------------
@@ -31,17 +31,18 @@ pub enum VaultStatus {
 #[contracttype]
 #[derive(Clone)]
 pub struct Vault {
-    pub depositor:  Address,
-    pub recipient:  Address,
-    pub token:      Address,
-    pub amount:     i128,
-    pub approvers:  Vec<Address>,
-    pub approvals:  Vec<Address>,
-    pub status:     VaultStatus,
+    pub depositor: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub approvers: Vec<Address>,
+    pub approvals: Vec<Address>,
+    pub status: VaultStatus,
 }
 
 #[contracttype]
 pub enum DataKey {
+    Admin,
     Vault(u64),
     NextId,
 }
@@ -55,6 +56,16 @@ pub struct EscrowVault;
 
 #[contractimpl]
 impl EscrowVault {
+    /// Sets or rotates the contract admin.
+    pub fn set_admin(env: Env, admin: Address) {
+        if let Some(current_admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin) {
+            current_admin.require_auth();
+        } else {
+            admin.require_auth();
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+    }
+
     /// Create a new vault. The depositor provides the approver set.
     pub fn create_vault(
         env: Env,
@@ -92,8 +103,11 @@ impl EscrowVault {
         env.storage().persistent().set(&DataKey::Vault(id), &vault);
 
         // Pull funds from depositor into the contract
-        soroban_sdk::token::Client::new(&env, &token)
-            .transfer(&depositor, &env.current_contract_address(), &amount);
+        soroban_sdk::token::Client::new(&env, &token).transfer(
+            &depositor,
+            &env.current_contract_address(),
+            &amount,
+        );
 
         id
     }
@@ -128,11 +142,16 @@ impl EscrowVault {
         // Release when all approvers have signed off
         if vault.approvals.len() == vault.approvers.len() {
             vault.status = VaultStatus::Released;
-            soroban_sdk::token::Client::new(&env, &vault.token)
-                .transfer(&env.current_contract_address(), &vault.recipient, &vault.amount);
+            soroban_sdk::token::Client::new(&env, &vault.token).transfer(
+                &env.current_contract_address(),
+                &vault.recipient,
+                &vault.amount,
+            );
         }
 
-        env.storage().persistent().set(&DataKey::Vault(vault_id), &vault);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
         Ok(())
     }
 
@@ -159,11 +178,16 @@ impl EscrowVault {
         }
 
         // Return funds to depositor
-        soroban_sdk::token::Client::new(&env, &vault.token)
-            .transfer(&env.current_contract_address(), &vault.depositor, &vault.amount);
+        soroban_sdk::token::Client::new(&env, &vault.token).transfer(
+            &env.current_contract_address(),
+            &vault.depositor,
+            &vault.amount,
+        );
 
         vault.status = VaultStatus::Cancelled;
-        env.storage().persistent().set(&DataKey::Vault(vault_id), &vault);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("cancelled"), vault_id),
@@ -184,6 +208,24 @@ impl EscrowVault {
             .unwrap_or(0u64);
         env.storage().instance().set(&DataKey::NextId, &(id + 1));
         id
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), VaultError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(VaultError::Unauthorized)?;
+
+        if stored_admin != admin {
+            return Err(VaultError::Unauthorized);
+        }
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 }
 
@@ -246,8 +288,8 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token     = Address::generate(&env);
-        let approver  = Address::generate(&env);
+        let token = Address::generate(&env);
+        let approver = Address::generate(&env);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -262,7 +304,10 @@ mod test {
 
         // Second approval attempt should fail with NotPending
         let result = client.try_approve_release(&approver, &vault_id);
-        assert!(result.is_err(), "approve_release on already released escrow must fail");
+        assert!(
+            result.is_err(),
+            "approve_release on already released escrow must fail"
+        );
         if let Err(err) = result {
             assert_eq!(err, VaultError::NotPending);
         }
@@ -273,11 +318,11 @@ mod test {
     fn test_approve_release_from_unauthorised_caller_is_rejected() {
         let (env, client) = setup();
 
-        let depositor  = Address::generate(&env);
-        let recipient  = Address::generate(&env);
-        let token      = Address::generate(&env);
-        let approver   = Address::generate(&env);
-        let outsider   = Address::generate(&env); // NOT in approver set
+        let depositor = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let approver = Address::generate(&env);
+        let outsider = Address::generate(&env); // NOT in approver set
 
         let vault_id = client.create_vault(
             &depositor,
@@ -289,7 +334,10 @@ mod test {
 
         // Outsider attempts to approve — must fail with Unauthorized
         let result = client.try_approve_release(&outsider, &vault_id);
-        assert!(result.is_err(), "approve_release from non-approver must be rejected");
+        assert!(
+            result.is_err(),
+            "approve_release from non-approver must be rejected"
+        );
 
         // Vault must still be Pending — no fund movement
         let vault = client.get_vault(&vault_id);
@@ -303,8 +351,8 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token     = Address::generate(&env);
-        let approver  = Address::generate(&env);
+        let token = Address::generate(&env);
+        let approver = Address::generate(&env);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -326,9 +374,9 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token     = Address::generate(&env);
-        let a1        = Address::generate(&env);
-        let a2        = Address::generate(&env);
+        let token = Address::generate(&env);
+        let a1 = Address::generate(&env);
+        let a2 = Address::generate(&env);
 
         let vault_id = client.create_vault(
             &depositor,

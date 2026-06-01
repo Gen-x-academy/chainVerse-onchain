@@ -1,13 +1,12 @@
 #![no_std]
 
 const MAX_BATCH_SIZE: u32 = 100;
-const AUTH_MIN_TTL: u32 = 17_280;   // ~1 day
-const AUTH_MAX_TTL: u32 = 518_400;  // ~30 days
+const AUTH_MIN_TTL: u32 = 17_280; // ~1 day
+const AUTH_MAX_TTL: u32 = 518_400; // ~30 days
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror,
-    token::Client as TokenClient,
-    symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short,
+    token::Client as TokenClient, Address, BytesN, Env, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -18,7 +17,7 @@ use soroban_sdk::{
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum PayoutError {
-    Unauthorized  = 1,
+    Unauthorized = 1,
     NotInitialized = 2,
     BatchTooLarge = 3,
 }
@@ -32,7 +31,7 @@ pub enum PayoutError {
 #[derive(Clone)]
 pub struct PayoutEntry {
     pub recipient: Address,
-    pub amount:    i128,
+    pub amount: i128,
 }
 
 #[contracttype]
@@ -59,7 +58,9 @@ impl PayoutAutomation {
         env.storage().instance().set(&DataKey::Admin, &admin);
         let auth_key = DataKey::Authorised(admin);
         env.storage().persistent().set(&auth_key, &true);
-        env.storage().persistent().extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
     }
 
     /// Admin-only: add an address to the authorised set.
@@ -68,7 +69,9 @@ impl PayoutAutomation {
         Self::only_admin(&env, &admin)?;
         let auth_key = DataKey::Authorised(caller);
         env.storage().persistent().set(&auth_key, &true);
-        env.storage().persistent().extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&auth_key, AUTH_MIN_TTL, AUTH_MAX_TTL);
         Ok(())
     }
 
@@ -76,7 +79,9 @@ impl PayoutAutomation {
     pub fn remove_authorised(env: Env, admin: Address, caller: Address) -> Result<(), PayoutError> {
         admin.require_auth();
         Self::only_admin(&env, &admin)?;
-        env.storage().persistent().remove(&DataKey::Authorised(caller));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Authorised(caller));
         Ok(())
     }
 
@@ -123,6 +128,14 @@ impl PayoutAutomation {
         Ok(())
     }
 
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), PayoutError> {
+        admin.require_auth();
+        Self::only_admin(&env, &admin)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Internal
     // -----------------------------------------------------------------------
@@ -166,8 +179,8 @@ mod test {
         amount: i128,
     ) -> (
         Env,
-        Address,                          // admin / authorised caller
-        Address,                          // token address
+        Address, // admin / authorised caller
+        Address, // token address
         PayoutAutomationClient<'static>,
     ) {
         let env = Env::default();
@@ -197,8 +210,14 @@ mod test {
 
         let payouts = vec![
             &env,
-            PayoutEntry { recipient: r1.clone(), amount: 300 },
-            PayoutEntry { recipient: r2.clone(), amount: 700 },
+            PayoutEntry {
+                recipient: r1.clone(),
+                amount: 300,
+            },
+            PayoutEntry {
+                recipient: r2.clone(),
+                amount: 700,
+            },
         ];
 
         client.execute(&admin, &token_addr, &payouts);
@@ -213,16 +232,22 @@ mod test {
     fn test_execute_from_unauthorised_caller_is_rejected() {
         let (env, _admin, token_addr, client) = setup(1000);
 
-        let outsider  = Address::generate(&env);
+        let outsider = Address::generate(&env);
         let recipient = Address::generate(&env);
 
         let payouts = vec![
             &env,
-            PayoutEntry { recipient: recipient.clone(), amount: 100 },
+            PayoutEntry {
+                recipient: recipient.clone(),
+                amount: 100,
+            },
         ];
 
         let result = client.try_execute(&outsider, &token_addr, &payouts);
-        assert!(result.is_err(), "execute from non-authorised caller must be rejected");
+        assert!(
+            result.is_err(),
+            "execute from non-authorised caller must be rejected"
+        );
 
         // No funds must have moved
         let tc = TokenClient::new(&env, &token_addr);
@@ -252,9 +277,18 @@ mod test {
 
         let payouts = vec![
             &env,
-            PayoutEntry { recipient: recipient.clone(), amount: 0 },
-            PayoutEntry { recipient: recipient.clone(), amount: -10 },
-            PayoutEntry { recipient: recipient.clone(), amount: 250 },
+            PayoutEntry {
+                recipient: recipient.clone(),
+                amount: 0,
+            },
+            PayoutEntry {
+                recipient: recipient.clone(),
+                amount: -10,
+            },
+            PayoutEntry {
+                recipient: recipient.clone(),
+                amount: 250,
+            },
         ];
 
         client.execute(&admin, &token_addr, &payouts);

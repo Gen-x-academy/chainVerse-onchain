@@ -12,7 +12,7 @@ mod version;
 pub use errors::EscrowError;
 pub use types::{Escrow, EscrowStatus};
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String};
 
 #[contract]
 pub struct EscrowContract;
@@ -31,11 +31,22 @@ impl EscrowContract {
         Ok(())
     }
 
-        // Ensure an admin is set and has authorized this call
-        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
-        admin.require_auth();
+    /// Whitelist a token for escrow creation. Admin-only.
+    pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
+        storage::require_admin(&env)?;
         storage::whitelist_token(&env, &token);
         Ok(())
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), EscrowError> {
+        let stored_admin = storage::require_admin(&env)?;
+        if stored_admin != admin {
+            return Err(EscrowError::Unauthorized);
+        }
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
 
     /// Create a new escrow. Transfers `amount` of `token` from `buyer` into
     /// the contract and returns the new escrow ID.
@@ -81,7 +92,6 @@ impl EscrowContract {
     pub fn get_escrow_count(env: Env) -> u64 {
         storage::get_escrow_count(&env)
     }
-
 
     /// Flag an escrow as disputed. Only the buyer or seller can raise a dispute.
     /// Prevents automatic release until resolved.
