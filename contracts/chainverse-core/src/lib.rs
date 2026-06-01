@@ -34,7 +34,9 @@ use analytics::{
 };
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+
+const CONTRACT_VERSION: &str = "1.0.0";
 
 #[contract]
 pub struct ChainverseCore;
@@ -261,5 +263,10 @@ impl ChainverseCore {
     /// Calculates the protocol fee for a given amount.
     pub fn calculate_fee(env: Env, amount: i128) -> Result<i128, ContractError> {
         utils::calculate_fee(&env, amount)
+    }
+
+    /// Returns the contract version string for deployment smoke checks.
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, CONTRACT_VERSION)
     }
 }
