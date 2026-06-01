@@ -98,3 +98,21 @@ impl CHVToken {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    #[test]
+    fn test_transfer_rejects_invalid_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let from = Address::generate(&env);
+        let to = Address::generate(&env);
+
+        let result = CHVToken::transfer(env, from, to, 0);
+        assert_eq!(result, Err(TokenError::InvalidAmount));
+    }
+}
