@@ -1,9 +1,11 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror,
-    Address, Env, Symbol, panic_with_error
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
+    Symbol,
 };
+
+const CONTRACT_VERSION: &str = "1.0.0";
 
 // Errors
 #[contracterror]
@@ -151,5 +153,9 @@ impl CourseRegistryContract {
         if !course.is_active {
             panic_with_error!(&env, ContractError::CourseInactive);
         }
+    }
+
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, CONTRACT_VERSION)
     }
 }
