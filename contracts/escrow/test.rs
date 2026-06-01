@@ -3317,3 +3317,129 @@ fn test_transfer_with_royalty_events() {
     let token = client.get_token(&token_id);
     assert_eq!(token.user, new_user);
 }
+
+#[test]
+fn test_royalty_on_chain_transfer_pays_recipients() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let token_id = BytesN::<32>::random(&env);
+    let owner = Address::generate(&env);
+    client.issue_token(&token_id, &owner, &(env.ledger().timestamp() + 100_000));
+
+    // Register a real Stellar Asset Contract to use as the payment token.
+    let payment_asset = env.register_stellar_asset_contract_v2(admin.clone());
+    let sac = soroban_sdk::token::StellarAssetClient::new(&env, &payment_asset.address());
+    let token_client = soroban_sdk::token::Client::new(&env, &payment_asset.address());
+    let payment_token_addr = payment_asset.address();
+
+    // Mint tokens to the payer so they can cover the royalty amounts.
+    let payer = Address::generate(&env);
+    sac.mint(&payer, &1_000_000);
+
+    // Set up two royalty recipients: creator (5% = 500 bps) and platform (2.5% = 250 bps).
+    let creator = Address::generate(&env);
+    let platform = Address::generate(&env);
+
+    let recipients = vec![
+        &env,
+        types::RoyaltyRecipient {
+            address: creator.clone(),
+            percentage: 500, // 5%
+        },
+        types::RoyaltyRecipient {
+            address: platform.clone(),
+            percentage: 250, // 2.5%
+        },
+    ];
+
+    client.set_royalty(&admin, &token_id, &recipients);
+
+    // Record balances before the transfer.
+    let creator_balance_before = token_client.balance(&creator);
+    let platform_balance_before = token_client.balance(&platform);
+
+    let new_owner = Address::generate(&env);
+    let sale_price = 100_000i128;
+
+    // transfer_token_with_royalty uses the current token owner as the payer;
+    // we mint to `payer` but the SAC transfer is triggered by the contract on
+    // behalf of whoever authorises it — with mock_all_auths the token transfer
+    // from our minted `payer` address is approved automatically.
+    // To make the balances predictable we mint to `new_owner` so the debit
+    // for royalties comes from a funded account.
+    sac.mint(&new_owner, &1_000_000);
+
+    client.transfer_token_with_royalty(&token_id, &new_owner, &payment_token_addr, &sale_price);
+
+    // Assert each recipient received the correct proportion of the sale price.
+    // creator: 5% of 100_000 = 5_000
+    // platform: 2.5% of 100_000 = 2_500
+    let creator_balance_after = token_client.balance(&creator);
+    let platform_balance_after = token_client.balance(&platform);
+
+    assert_eq!(
+        creator_balance_after - creator_balance_before,
+        5_000,
+        "creator should receive 5% of sale price"
+    );
+    assert_eq!(
+        platform_balance_after - platform_balance_before,
+        2_500,
+        "platform should receive 2.5% of sale price"
+    );
+}
+
+#[test]
+fn test_create_subscription_token_collection() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Set the contract admin
+    client.set_admin(&admin);
+
+    // Register a real Stellar Asset Contract as the payment token
+    let payment_token = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_address = payment_token.address();
+
+    // Mint tokens to the user via the StellarAssetClient
+    let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&user, &200_000i128);
+
+    // Register the SAC address as the accepted USDC token
+    client.set_usdc_contract(&admin, &token_address);
+
+    // Create a token client for balance queries
+    let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+
+    // Record balances before the subscription is created
+    let before_user_balance = token_client.balance(&user);
+    let before_contract_balance = token_client.balance(&contract_id);
+
+    let subscription_id = String::from_str(&env, "sub_token_collect_001");
+    let amount = 100_000i128;
+    let duration = 2_592_000u64; // 30 days
+
+    // Create subscription — this should transfer `amount` from user to contract
+    client.create_subscription(&subscription_id, &user, &token_address, &amount, &duration);
+
+    // Verify user balance decreased by the subscription price
+    let after_user_balance = token_client.balance(&user);
+    assert_eq!(after_user_balance, before_user_balance - amount);
+
+    // Verify contract balance increased by the subscription price
+    let after_contract_balance = token_client.balance(&contract_id);
+    assert_eq!(after_contract_balance, before_contract_balance + amount);
+}
