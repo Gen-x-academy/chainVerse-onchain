@@ -1,26 +1,29 @@
 #![cfg(test)]
+
 extern crate soroban_sdk;
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String};
+
+use crate::{EscrowContract, EscrowContractClient, EscrowError};
+use soroban_sdk::{Address, Env, String};
 
 #[test]
-fn e2e_offchain_proof_to_onchain() {
+fn e2e_escrow_version_and_dispute_baseline() {
     let env = Env::default();
-    assert!(true, "E2E proof flow passed (stub)");
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.version(), String::from_str(&env, "1.0.0"));
+    assert_eq!(
+        client.try_resolve_dispute(&1, &true),
+        Err(Ok(EscrowError::DisputeResolutionNotImplemented))
+    );
 }
 
 #[test]
-fn e2e_add_stellar_address_and_resolve() {
+fn e2e_escrow_count_starts_at_zero() {
     let env = Env::default();
-    assert!(true, "E2E add & resolve passed (stub)");
-}
+    let contract_id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &contract_id);
 
-#[test]
-fn e2e_sdk_send_to_username() {
-    assert!(true, "E2E sdk build passed (stub)");
-}
-
-#[test]
-fn e2e_escrow_deposit_schedule_payment() {
-    let env = Env::default();
-    assert!(true, "E2E escrow passed (stub)");
+    assert_eq!(client.get_escrow_count(), 0);
+    assert_eq!(client.get_total_volume(), 0);
 }
