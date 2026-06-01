@@ -21,6 +21,7 @@ pub enum PayoutError {
     Unauthorized  = 1,
     NotInitialized = 2,
     BatchTooLarge = 3,
+    InvalidAmount = 4,
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +105,7 @@ impl PayoutAutomation {
         let mut recipient_count: u32 = 0;
         for entry in payouts.iter() {
             if entry.amount <= 0 {
-                continue;
+                return Err(PayoutError::InvalidAmount);
             }
             token_client.transfer(
                 &env.current_contract_address(),
@@ -245,21 +246,41 @@ mod test {
         assert_eq!(tc.balance(&contract_id), 500);
     }
 
+    // Issue #301 — execute with zero amount must be rejected
     #[test]
-    fn test_execute_ignores_non_positive_entries() {
-        let (env, admin, token_addr, client) = setup(250);
+    fn test_execute_with_zero_amount_is_rejected() {
+        let (env, admin, token_addr, client) = setup(500);
         let recipient = Address::generate(&env);
 
         let payouts = vec![
             &env,
             PayoutEntry { recipient: recipient.clone(), amount: 0 },
-            PayoutEntry { recipient: recipient.clone(), amount: -10 },
-            PayoutEntry { recipient: recipient.clone(), amount: 250 },
         ];
 
-        client.execute(&admin, &token_addr, &payouts);
+        let result = client.try_execute(&admin, &token_addr, &payouts);
+        assert_eq!(result, Err(Ok(PayoutError::InvalidAmount)));
 
+        // No funds must have moved
         let tc = TokenClient::new(&env, &token_addr);
-        assert_eq!(tc.balance(&recipient), 250);
+        assert_eq!(tc.balance(&recipient), 0);
+    }
+
+    // Issue #301 — execute with negative amount must be rejected
+    #[test]
+    fn test_execute_with_negative_amount_is_rejected() {
+        let (env, admin, token_addr, client) = setup(500);
+        let recipient = Address::generate(&env);
+
+        let payouts = vec![
+            &env,
+            PayoutEntry { recipient: recipient.clone(), amount: -100 },
+        ];
+
+        let result = client.try_execute(&admin, &token_addr, &payouts);
+        assert_eq!(result, Err(Ok(PayoutError::InvalidAmount)));
+
+        // No funds must have moved
+        let tc = TokenClient::new(&env, &token_addr);
+        assert_eq!(tc.balance(&recipient), 0);
     }
 }
