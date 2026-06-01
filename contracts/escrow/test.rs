@@ -3317,3 +3317,51 @@ fn test_transfer_with_royalty_events() {
     let token = client.get_token(&token_id);
     assert_eq!(token.user, new_user);
 }
+
+#[test]
+fn test_create_subscription_token_collection() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    // Set the contract admin
+    client.set_admin(&admin);
+
+    // Register a real Stellar Asset Contract as the payment token
+    let payment_token = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_address = payment_token.address();
+
+    // Mint tokens to the user via the StellarAssetClient
+    let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token_address);
+    sac.mint(&user, &200_000i128);
+
+    // Register the SAC address as the accepted USDC token
+    client.set_usdc_contract(&admin, &token_address);
+
+    // Create a token client for balance queries
+    let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+
+    // Record balances before the subscription is created
+    let before_user_balance = token_client.balance(&user);
+    let before_contract_balance = token_client.balance(&contract_id);
+
+    let subscription_id = String::from_str(&env, "sub_token_collect_001");
+    let amount = 100_000i128;
+    let duration = 2_592_000u64; // 30 days
+
+    // Create subscription — this should transfer `amount` from user to contract
+    client.create_subscription(&subscription_id, &user, &token_address, &amount, &duration);
+
+    // Verify user balance decreased by the subscription price
+    let after_user_balance = token_client.balance(&user);
+    assert_eq!(after_user_balance, before_user_balance - amount);
+
+    // Verify contract balance increased by the subscription price
+    let after_contract_balance = token_client.balance(&contract_id);
+    assert_eq!(after_contract_balance, before_contract_balance + amount);
+}
