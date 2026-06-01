@@ -127,3 +127,27 @@ fn test_tampered_proof_rejected_without_side_effects() {
     assert_eq!(env.events().all().len(), events_before);
     assert!(!client.has_certificate(&wallet, &101));
 }
+
+#[test]
+fn test_revoke_certificate_clears_state_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CertificateContract);
+    let client = CertificateContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let wallet = Address::generate(&env);
+    let signer = signing_key();
+    let public_key = public_key_bytes(&env, &signer);
+    let proof = proof_bytes(&env, &signer, &wallet, 55);
+
+    client.init(&admin, &public_key);
+    client.mint(&wallet, &55, &public_key, &proof);
+
+    let before = env.events().all().len();
+    client.revoke_certificate(&admin, &wallet, &55);
+
+    assert_eq!(env.events().all().len(), before + 1);
+    assert!(!client.has_certificate(&wallet, &55));
+}

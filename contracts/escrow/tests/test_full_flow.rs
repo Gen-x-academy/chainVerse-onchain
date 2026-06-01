@@ -1,6 +1,11 @@
 #![cfg(test)]
 
 extern crate soroban_sdk;
+use crate::{EscrowContract, EscrowContractClient, EscrowError};
+use soroban_sdk::{Address, Env, String};
+
+#[test]
+fn e2e_escrow_version_and_count_baseline() {
 
 use crate::{EscrowContract, EscrowContractClient, EscrowError};
 use soroban_sdk::{Address, Env, String};
@@ -16,6 +21,7 @@ fn e2e_escrow_version_and_dispute_baseline() {
         client.try_resolve_dispute(&1, &true),
         Err(Ok(EscrowError::DisputeResolutionNotImplemented))
     );
+    assert_eq!(client.get_escrow_count(), 0u64);
 }
 
 #[test]

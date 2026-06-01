@@ -244,4 +244,22 @@ mod test {
         let tc = TokenClient::new(&env, &token_addr);
         assert_eq!(tc.balance(&contract_id), 500);
     }
+
+    #[test]
+    fn test_execute_ignores_non_positive_entries() {
+        let (env, admin, token_addr, client) = setup(250);
+        let recipient = Address::generate(&env);
+
+        let payouts = vec![
+            &env,
+            PayoutEntry { recipient: recipient.clone(), amount: 0 },
+            PayoutEntry { recipient: recipient.clone(), amount: -10 },
+            PayoutEntry { recipient: recipient.clone(), amount: 250 },
+        ];
+
+        client.execute(&admin, &token_addr, &payouts);
+
+        let tc = TokenClient::new(&env, &token_addr);
+        assert_eq!(tc.balance(&recipient), 250);
+    }
 }
