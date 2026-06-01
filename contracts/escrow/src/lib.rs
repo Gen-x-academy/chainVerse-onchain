@@ -31,12 +31,11 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Whitelist a token so it can be used in escrows.
-    pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
-        storage::require_admin(&env)?;
+        // Ensure an admin is set and has authorized this call
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
         storage::whitelist_token(&env, &token);
         Ok(())
-    }
 
     /// Create a new escrow. Transfers `amount` of `token` from `buyer` into
     /// the contract and returns the new escrow ID.

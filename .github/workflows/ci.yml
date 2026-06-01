@@ -19,11 +19,17 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Security audit
+        working-directory: contracts
+        run: cargo audit
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
             contracts/target
@@ -35,6 +41,16 @@ jobs:
 
       - name: Install Stellar CLI
         run: cargo install --locked stellar-cli --features opt
+
+      - name: Set up Stellar CLI identity
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
+        run: |
+          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
+            echo "error: STELLAR_SECRET_KEY secret is required" >&2
+            exit 1
+          fi
+          stellar keys generate ci --secret-key "$STELLAR_SECRET_KEY"
 
       - name: Security audit
         working-directory: contracts

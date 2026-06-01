@@ -237,6 +237,7 @@ mod test {
         });
 
         assert!(result.is_err(), "duplicate approver list must be rejected");
+        assert!(result.is_err());
     }
 
     #[test]
