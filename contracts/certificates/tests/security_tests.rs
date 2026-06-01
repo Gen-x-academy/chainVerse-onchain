@@ -26,6 +26,24 @@ fn proof_bytes(env: &Env, signing_key: &SigningKey, wallet: &Address, course_id:
 }
 
 #[test]
+fn test_init_rejects_reinitialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, CertificateContract);
+    let client = CertificateContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let signer = signing_key();
+    let backend_key = public_key_bytes(&env, &signer);
+
+    client.init(&admin, &backend_key);
+
+    let result = client.try_init(&admin, &backend_key);
+    assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
+}
+
+#[test]
 fn test_structurally_invalid_proof_rejected_without_side_effects() {
     let env = Env::default();
     env.mock_all_auths();

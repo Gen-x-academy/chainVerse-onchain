@@ -2,6 +2,9 @@
 
 extern crate soroban_sdk;
 use crate::{EscrowContract, EscrowContractClient, EscrowError};
+use soroban_sdk::{Env, String};
+
+#[test]
 use soroban_sdk::{Address, Env, String};
 
 #[test]
