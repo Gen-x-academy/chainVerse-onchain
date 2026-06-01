@@ -219,6 +219,27 @@ mod test {
     }
 
     #[test]
+    fn test_create_vault_rejects_duplicate_approvers() {
+        let (env, client) = setup();
+        let depositor = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let approver = Address::generate(&env);
+
+        let result = std::panic::catch_unwind(|| {
+            client.create_vault(
+                &depositor,
+                &recipient,
+                &token,
+                &100,
+                &vec![&env, approver.clone(), approver.clone()],
+            );
+        });
+
+        assert!(result.is_err(), "duplicate approver list must be rejected");
+    }
+
+    #[test]
     fn test_approve_release_on_already_released_escrow_fails() {
         let (env, client) = setup();
 
