@@ -1,12 +1,13 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Symbol, Vec, symbol_short
+    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec,
 };
 
 mod error;
 use error::TokenError;
 
+const CONTRACT_VERSION: &str = "1.0.0";
 const DECIMALS: u32 = 7;
 const TOTAL_SUPPLY: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
 const BALANCE_MIN_TTL: u32 = 100_000;
@@ -96,5 +97,9 @@ impl CHVToken {
             .extend_ttl(&DataKey::Balance(to), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
 
         Ok(())
+    }
+
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, CONTRACT_VERSION)
     }
 }

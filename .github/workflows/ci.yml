@@ -36,6 +36,26 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --features opt
+
+      - name: Set up Stellar CLI identity
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
+        run: |
+          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
+            echo "error: STELLAR_SECRET_KEY secret is required" >&2
+            exit 1
+          fi
+          stellar keys generate ci --secret-key "$STELLAR_SECRET_KEY"
+
+      - name: Security audit
+        working-directory: contracts
+        run: cargo audit
+
       - name: Build all contracts
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
