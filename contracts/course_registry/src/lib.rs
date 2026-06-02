@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
-    Symbol,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, BytesN, Env,
+    String, Symbol,
 };
 
 const CONTRACT_VERSION: &str = "1.0.0";
@@ -42,7 +42,6 @@ pub struct CourseRegistryContract;
 
 #[contractimpl]
 impl CourseRegistryContract {
-
     // Initialize Admin (run once)
     pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
@@ -107,8 +106,7 @@ impl CourseRegistryContract {
             panic_with_error!(&env, ContractError::CourseNotFound);
         }
 
-        let mut course: Course =
-            env.storage().persistent().get(&key).unwrap();
+        let mut course: Course = env.storage().persistent().get(&key).unwrap();
 
         course.is_active = is_active;
 
@@ -133,7 +131,6 @@ impl CourseRegistryContract {
         Ok(())
     }
 
-
     // Get Course
     pub fn get_course(env: Env, course_id: Symbol) -> Course {
         let key = DataKey::Course(course_id);
@@ -157,5 +154,27 @@ impl CourseRegistryContract {
 
     pub fn version(env: Env) -> String {
         String::from_str(&env, CONTRACT_VERSION)
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::NotInitialized)?;
+
+        if stored_admin != admin {
+            return Err(ContractError::NotAdmin);
+        }
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 }

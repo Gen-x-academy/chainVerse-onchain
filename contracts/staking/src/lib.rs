@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, String,
 };
 
 // ---------------------------------------------------------------------------
@@ -309,6 +309,13 @@ impl StakingContract {
 
     pub fn get_staking_config(env: Env) -> Result<StakingConfig, Error> {
         Self::load_config(&env)
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        Self::assert_admin(&env, &admin)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

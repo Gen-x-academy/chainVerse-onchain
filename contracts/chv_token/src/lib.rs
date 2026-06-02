@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 mod error;
@@ -25,7 +25,6 @@ pub struct CHVToken;
 
 #[contractimpl]
 impl CHVToken {
-
     /// Initialize contract and mint fixed supply to treasury
     pub fn initialize(env: Env, admin: Address) -> Result<(), TokenError> {
         if env.storage().instance().has(&DataKey::Initialized) {
@@ -40,9 +39,11 @@ impl CHVToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(admin.clone()), &TOTAL_SUPPLY);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Balance(admin.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Balance(admin.clone()),
+            BALANCE_MIN_TTL,
+            BALANCE_MAX_TTL,
+        );
 
         env.storage().instance().set(&DataKey::Initialized, &true);
 
@@ -71,6 +72,10 @@ impl CHVToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         from.require_auth();
 
+        if from == to {
+            return Err(TokenError::SelfTransfer);
+        }
+
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
@@ -85,22 +90,44 @@ impl CHVToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Balance(from), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Balance(from),
+            BALANCE_MIN_TTL,
+            BALANCE_MAX_TTL,
+        );
 
         env.storage()
             .persistent()
             .set(&DataKey::Balance(to.clone()), &(to_balance + amount));
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Balance(to), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Balance(to),
+            BALANCE_MIN_TTL,
+            BALANCE_MAX_TTL,
+        );
 
         Ok(())
     }
 
     pub fn version(env: Env) -> String {
         String::from_str(&env, CONTRACT_VERSION)
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+
+        if stored_admin != admin {
+            return Err(TokenError::Unauthorized);
+        }
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 }
 
