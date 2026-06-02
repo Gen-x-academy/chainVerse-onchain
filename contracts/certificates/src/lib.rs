@@ -11,8 +11,8 @@ mod test;
 pub use errors::ContractError;
 pub use types::Certificate;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, xdr::ToXdr, Address, Bytes, Env};
-use storage::{MIN_TTL, MAX_TTL};
+use soroban_sdk::{contract, contractimpl, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env};
+use storage::{MAX_TTL, MIN_TTL};
 
 #[contract]
 pub struct CertificateContract;
@@ -60,8 +60,8 @@ impl CertificateContract {
             return Err(ContractError::CertificateExists);
         }
 
-        let backend_public_key = storage::get_backend_pubkey(&env)
-            .ok_or(ContractError::NotInitialized)?;
+        let backend_public_key =
+            storage::get_backend_pubkey(&env).ok_or(ContractError::NotInitialized)?;
 
         let payload = (wallet.clone(), course_id).to_xdr(&env);
         verify::verify_backend_proof(&env, &backend_public_key, &payload, &proof)?;
@@ -116,5 +116,17 @@ impl CertificateContract {
         _course_id: u64,
     ) -> Result<(), ContractError> {
         Err(ContractError::SoulboundTransferNotAllowed)
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        storage::require_admin(&env, &admin)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
     }
 }

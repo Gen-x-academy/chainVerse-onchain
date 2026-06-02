@@ -34,7 +34,7 @@ use analytics::{
 };
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 const CONTRACT_VERSION: &str = "1.0.0";
 
@@ -67,7 +67,9 @@ impl ChainverseCore {
         };
 
         env.storage().persistent().set(&DataKey::Config, &config);
-        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         Ok(())
     }
 
@@ -128,8 +130,21 @@ impl ChainverseCore {
         }
 
         env.storage().persistent().set(&DataKey::Config, &config);
-        env.storage().persistent().extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_CONFIG_UPDATED);
+        Ok(())
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        admin::only_admin(&env, &caller)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 
@@ -152,7 +167,8 @@ impl ChainverseCore {
 
         env.storage().persistent().set(&DataKey::Config, &config);
         analytics::record(&env, EVT_ADMIN_CHANGED);
-        env.events().publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
+        env.events()
+            .publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
         Ok(())
     }
 
