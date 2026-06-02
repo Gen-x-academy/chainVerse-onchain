@@ -9,4 +9,5 @@ pub enum TokenError {
     InvalidAmount = 2,
     InsufficientBalance = 3,
     Unauthorized = 4,
+    SelfTransfer = 4,
 }

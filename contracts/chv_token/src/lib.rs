@@ -72,6 +72,10 @@ impl CHVToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         from.require_auth();
 
+        if from == to {
+            return Err(TokenError::SelfTransfer);
+        }
+
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
