@@ -8,4 +8,5 @@ pub enum TokenError {
     NotInitialized = 1,
     InvalidAmount = 2,
     InsufficientBalance = 3,
+    SelfTransfer = 4,
 }
