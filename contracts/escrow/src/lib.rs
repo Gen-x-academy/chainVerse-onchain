@@ -285,6 +285,22 @@ mod test {
         assert_eq!(result, Err(Ok(EscrowError::InvalidParties)));
     }
 
+    #[test]
+    fn test_create_escrow_rejects_zero_amount() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &0, &9000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_negative_amount() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &-1, &9000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidAmount)));
+    }
+
     // -----------------------------------------------------------------------
     // release_funds
     // -----------------------------------------------------------------------
