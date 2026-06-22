@@ -28,6 +28,18 @@
 //!
 //! 7. `test_penalty_99_bps_below_floor_is_rejected`
 //!    99 bps (one below the minimum) must be rejected by `set_staking_config`.
+//!
+//! 8. `test_burn_penalties_destroys_penalty_pool`
+//!    After an emergency unstake the admin can call `burn_penalties` to
+//!    permanently destroy the retained penalty pool, dropping both the
+//!    contract balance and the token's total supply by the penalty amount.
+//!
+//! 9. `test_burn_penalties_leaves_active_stakes_untouched`
+//!    `burn_penalties` must only destroy the penalty surplus; tokens backing
+//!    an active stake must remain in the contract.
+//!
+//! 10. `test_burn_penalties_rejects_non_admin`
+//!     Only the configured admin may burn penalties.
 
 #![cfg(test)]
 
@@ -315,5 +327,103 @@ fn test_penalty_99_bps_below_floor_is_rejected() {
     assert!(
         result.is_err(),
         "99 bps is below the 100 bps floor and must be rejected"
+    );
+}
+
+/// After an emergency unstake the retained 1 000-token penalty pool can be
+/// permanently destroyed via `burn_penalties`: the contract balance drops to
+/// zero and the tokens are not credited to anyone (no recipient).
+#[test]
+fn test_burn_penalties_destroys_penalty_pool() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, staker, staking_token, _sac) = setup(&env, 10_000);
+
+    client
+        .stake_tokens(&staker, &String::from_str(&env, "bronze"), &10_000)
+        .unwrap();
+    client.emergency_unstake(&staker).unwrap();
+
+    let token_client = soroban_sdk::token::Client::new(&env, &staking_token);
+
+    // 10 % penalty (1 000) is retained in the contract; staker keeps 9 000.
+    assert_eq!(token_client.balance(client.address()), 1_000);
+    assert_eq!(token_client.balance(&staker), 9_000);
+
+    // Admin burns the penalty pool — no recipient is involved.
+    client.burn_penalties(&admin).unwrap();
+
+    // The penalty is destroyed: contract balance is now zero and the staker's
+    // balance is unchanged (the burned tokens went to no one).
+    assert_eq!(
+        token_client.balance(client.address()),
+        0,
+        "penalty pool must be destroyed after burn"
+    );
+    assert_eq!(
+        token_client.balance(&staker),
+        9_000,
+        "burning penalties must not credit any account"
+    );
+}
+
+/// `burn_penalties` must only destroy the penalty surplus; tokens backing an
+/// active stake must stay inside the contract.
+#[test]
+fn test_burn_penalties_leaves_active_stakes_untouched() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, staker_a, staking_token, sac) = setup(&env, 10_000);
+
+    // A second staker keeps an active stake while the first generates a penalty.
+    let staker_b = Address::generate(&env);
+    sac.mint(&staker_b, &5_000);
+
+    // Staker A emergency-unstakes, retaining a 1 000-token penalty.
+    client
+        .stake_tokens(&staker_a, &String::from_str(&env, "bronze"), &10_000)
+        .unwrap();
+    client.emergency_unstake(&staker_a).unwrap();
+
+    // Staker B stakes 5 000 and leaves it locked.
+    client
+        .stake_tokens(&staker_b, &String::from_str(&env, "bronze"), &5_000)
+        .unwrap();
+
+    let token_client = soroban_sdk::token::Client::new(&env, &staking_token);
+
+    // Contract holds the 1 000 penalty plus B's 5 000 active stake.
+    assert_eq!(token_client.balance(client.address()), 6_000);
+
+    client.burn_penalties(&admin).unwrap();
+
+    // Only the 1 000 penalty is burned; B's 5 000 stake remains.
+    assert_eq!(
+        token_client.balance(client.address()),
+        5_000,
+        "active stake must remain after burning only the penalty surplus"
+    );
+}
+
+/// Only the configured admin may burn penalties.
+#[test]
+fn test_burn_penalties_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, staker, _token, _sac) = setup(&env, 10_000);
+
+    client
+        .stake_tokens(&staker, &String::from_str(&env, "bronze"), &10_000)
+        .unwrap();
+    client.emergency_unstake(&staker).unwrap();
+
+    let intruder = Address::generate(&env);
+    let result = client.try_burn_penalties(&intruder);
+    assert!(
+        result.is_err(),
+        "a non-admin caller must not be able to burn penalties"
     );
 }

@@ -189,6 +189,33 @@ impl StakingContract {
         Ok(())
     }
 
+    /// Permanently burn accumulated penalty funds (contract balance minus
+    /// active stakes) instead of transferring them out.
+    ///
+    /// This is the irreversible counterpart to [`Self::withdraw_penalties`]:
+    /// it removes the penalty pool from the token's total supply rather than
+    /// sending it to a recipient. The penalty pool is computed identically
+    /// (`contract_balance − total_staked`), so active stakes are never touched.
+    pub fn burn_penalties(env: Env, admin: Address) -> Result<(), Error> {
+        Self::assert_admin(&env, &admin)?;
+
+        let config = Self::load_config(&env)?;
+        let token_client = token::Client::new(&env, &config.staking_token);
+
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        let total_staked: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalStaked)
+            .unwrap_or(0);
+
+        let penalty_balance = contract_balance.saturating_sub(total_staked);
+        if penalty_balance > 0 {
+            token_client.burn(&env.current_contract_address(), &penalty_balance);
+        }
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // User – stake / unstake
     // -----------------------------------------------------------------------
