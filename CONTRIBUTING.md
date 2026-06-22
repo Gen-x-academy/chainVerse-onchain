@@ -52,7 +52,116 @@ The template location is at [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQU
 ## Steps to apply
 
 1. Apply for an Issue
-   -Look for an open issue and comment expressing your interest in working on it.
+   -Look for an open issue and comment expressing your interest in working on it.## Smart Contract Development
+
+Smart contract changes live under `contracts/`. Use this workflow when you are
+working on Soroban contracts, shared contract utilities, contract tests, or
+deployment docs.
+
+### Toolchain setup
+
+1. Install Rust with `rustup` if it is not already available:
+
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   rustup update
+   ```
+
+2. Install the WebAssembly target used by Soroban builds:
+
+   ```bash
+   rustup target add wasm32-unknown-unknown
+   ```
+
+   The repository also includes `rust-toolchain.toml`, which pins the stable
+   Rust channel and requests `rustfmt`, `clippy`, and the WASM target.
+
+3. Install the Stellar CLI. If your local toolchain still uses the legacy
+   Soroban binary, the same network and contract commands may be available as
+   `soroban`.
+
+   ```bash
+   cargo install --locked stellar-cli
+   ```
+
+### Build, test, and format
+
+Run contract commands from the `contracts/` directory:
+
+```bash
+cd contracts
+make build
+make test
+make fmt
+make check
+```
+
+The Makefile maps these targets to the workspace commands contributors should
+use before opening a PR:
+
+- `make build` builds the full workspace for `wasm32-unknown-unknown`.
+- `make test` runs `cargo test --workspace`.
+- `make fmt` runs `cargo fmt --all`.
+- `make check` runs `cargo clippy --workspace -- -D warnings`.
+
+If you only change one contract, you can run focused checks with Cargo as well:
+
+```bash
+cd contracts
+cargo test -p chainverse-core
+cargo build -p chainverse-core --release --target wasm32-unknown-unknown
+```
+
+Replace `chainverse-core` with the contract crate you changed.
+
+### Manual testnet deployment
+
+Manual deployment is useful for validating a compiled WASM against a live
+network before asking for review. Never commit private keys, seed phrases, or
+funded account secrets.
+
+```bash
+cd contracts
+make build
+
+stellar network add testnet \
+  --rpc-url https://soroban-testnet.stellar.org \
+  --network-passphrase "Test SDF Network ; September 2015"
+
+stellar keys generate deployer --network testnet
+
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/chainverse_core.wasm \
+  --source deployer \
+  --network testnet
+```
+
+If your installed CLI exposes the older command name, replace `stellar` with
+`soroban` and keep the same network passphrase and WASM path.
+
+### Writing a new contract test
+
+1. Put unit tests next to the contract module when the crate already follows
+   that pattern, for example `contracts/<crate>/src/test.rs` or
+   `contracts/<crate>/src/tests/`.
+2. Put integration-style tests in `contracts/<crate>/tests/` when the crate
+   already has that directory.
+3. Use `soroban_sdk::Env::default()` and register the contract with the test
+   environment before calling contract methods.
+4. Cover both the success path and at least one failure path, especially for
+   authorization, initialization, storage, and token-transfer behavior.
+5. Run the focused crate test first, then the full workspace:
+
+   ```bash
+   cd contracts
+   cargo test -p <crate-name>
+   make test
+   ```
+
+For PRs that touch contract behavior, include the exact build/test commands you
+ran and mention whether a testnet deployment was performed.
+
+## Code of Conduct
    -Wait for the maintainer to assign the issue to you.
    -Remember to apply only if you can solve the issue.
    Again, In the comment, Add a quick introduction about yourself, The ETA, and how you plan to tackle the issue.
