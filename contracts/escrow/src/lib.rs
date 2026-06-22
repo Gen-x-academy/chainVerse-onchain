@@ -26,13 +26,18 @@ impl EscrowContract {
     /// authorize the call; otherwise the proposed admin must authorize the
     /// initial setup. This function does not return contract-defined errors.
     pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
-        if let Some(current_admin) = storage::get_admin(&env) {
+        let old_admin = storage::get_admin(&env);
+        if let Some(current_admin) = old_admin.clone() {
             current_admin.require_auth();
         } else {
             admin.require_auth();
         }
 
         storage::set_admin(&env, &admin);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ADM_CHNG"),),
+            (old_admin, admin),
+        );
         Ok(())
     }
 

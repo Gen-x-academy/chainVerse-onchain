@@ -58,12 +58,17 @@ pub struct EscrowVault;
 impl EscrowVault {
     /// Sets or rotates the contract admin.
     pub fn set_admin(env: Env, admin: Address) {
-        if let Some(current_admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin) {
+        let old_admin = env.storage().instance().get::<_, Address>(&DataKey::Admin);
+        if let Some(current_admin) = old_admin.clone() {
             current_admin.require_auth();
         } else {
             admin.require_auth();
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ADM_CHNG"),),
+            (old_admin, admin),
+        );
     }
 
     /// Create a new vault. The depositor provides the approver set.
