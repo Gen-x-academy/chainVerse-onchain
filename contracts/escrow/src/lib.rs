@@ -19,7 +19,12 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Sets or rotates the escrow admin.
+    /// Sets the initial escrow admin or rotates the admin after deployment.
+    ///
+    /// The `admin` parameter is the address that will be stored as the new
+    /// administrator. If an admin is already configured, the current admin must
+    /// authorize the call; otherwise the proposed admin must authorize the
+    /// initial setup. This function does not return contract-defined errors.
     pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
         if let Some(current_admin) = storage::get_admin(&env) {
             current_admin.require_auth();
@@ -31,14 +36,24 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Whitelist a token for escrow creation. Admin-only.
+    /// Allows a token address to be used when creating new escrows.
+    ///
+    /// The `token` parameter identifies the token contract to whitelist.
+    /// Security requirement: only the configured admin may call this function.
+    /// Returns `EscrowError::Unauthorized` if no admin exists or the admin does
+    /// not authorize the call.
     pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
         storage::require_admin(&env)?;
         storage::whitelist_token(&env, &token);
         Ok(())
     }
 
-    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    /// Upgrades the current escrow contract to `new_wasm_hash`.
+    ///
+    /// The `admin` parameter must match the stored admin and authorize through
+    /// `storage::require_admin`; `new_wasm_hash` is the target WASM hash.
+    /// Returns `EscrowError::Unauthorized` if the stored admin is missing, the
+    /// authorization fails, or the supplied `admin` is not the stored admin.
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), EscrowError> {
         let stored_admin = storage::require_admin(&env)?;
         if stored_admin != admin {
@@ -48,8 +63,14 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Create a new escrow. Transfers `amount` of `token` from `buyer` into
-    /// the contract and returns the new escrow ID.
+    /// Creates a new pending escrow and transfers the buyer's tokens into it.
+    ///
+    /// The `buyer` funds the escrow, `seller` receives funds when released,
+    /// `token` must be whitelisted, `amount` is the deposited token quantity,
+    /// and `expiration` is the ledger timestamp after which refunds may occur.
+    /// Security requirement: the buyer must authorize the token transfer.
+    /// Returns `InvalidAmount`, `InvalidParties`, `InvalidExpiration`, or
+    /// `TokenNotAllowed` when validation fails.
     pub fn create_escrow(
         env: Env,
         buyer: Address,
@@ -61,40 +82,67 @@ impl EscrowContract {
         create::create_escrow(&env, buyer, seller, token, amount, expiration)
     }
 
-    /// Release escrowed funds to the seller.
-    /// Must be called by the buyer.
+    /// Releases escrowed funds to the seller for an active escrow.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to release. Security
+    /// requirement: the escrow buyer must authorize the call. Returns `NotFound`
+    /// if the escrow does not exist, `AlreadyReleased` for completed escrows,
+    /// `NotPending` for disputed or otherwise non-pending escrows, and `Expired`
+    /// if the escrow has already expired.
     pub fn release_funds(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
         release::release_funds(&env, escrow_id)
     }
 
-    /// Refund escrowed funds to the buyer after the escrow has expired.
-    /// Must be called by the buyer.
+    /// Refunds escrowed funds to the buyer after expiration.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to refund. Security
+    /// requirement: the escrow buyer must authorize the call. Returns `NotFound`
+    /// if the escrow does not exist, `NotPending` when it is not refundable, and
+    /// `NotExpired` if the current ledger timestamp is still before expiration.
     pub fn refund_buyer(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
         refund::refund_buyer(&env, escrow_id)
     }
 
-    /// Returns the escrow record for the given ID.
+    /// Loads the escrow record for `escrow_id`.
+    ///
+    /// This read-only helper has no authorization requirement. It returns
+    /// `EscrowError::NotFound` when no escrow exists for the supplied ID.
     pub fn get_escrow(env: Env, escrow_id: u64) -> Result<Escrow, EscrowError> {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
-    /// Returns the total token volume that has been deposited into escrow.
+    /// Returns the total token amount ever deposited through escrow creation.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and does not return contract-defined errors.
     pub fn get_total_volume(env: Env) -> i128 {
         storage::get_total_volume(&env)
     }
 
-    /// Returns the total protocol fees accumulated for a given token.
+    /// Returns the accumulated protocol fees for `token`.
+    ///
+    /// The `token` parameter identifies the token whose fee balance should be
+    /// read. This read-only helper has no authorization requirement and returns
+    /// zero when no fees have been recorded.
     pub fn get_protocol_fee(env: Env, token: Address) -> i128 {
         storage::get_protocol_fee(&env, &token)
     }
 
-    /// Returns the total number of escrows created.
+    /// Returns the total number of escrow IDs that have been created.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and returns zero before the first escrow is
+    /// created.
     pub fn get_escrow_count(env: Env) -> u64 {
         storage::get_escrow_count(&env)
     }
 
-    /// Flag an escrow as disputed. Only the buyer or seller can raise a dispute.
-    /// Prevents automatic release until resolved.
+    /// Marks a pending escrow as disputed to block normal release or refund flow.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to dispute. Security
+    /// requirement: the current implementation requires buyer authorization.
+    /// Returns `NotFound` when the escrow is missing, `AlreadyDisputed` when it
+    /// is already disputed, and `NotPending` when it is not pending.
     pub fn flag_dispute(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
         let mut escrow = storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)?;
 
@@ -112,13 +160,12 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Resolve a disputed escrow.
+    /// Placeholder entry point for resolving a disputed escrow.
     ///
-    /// # Placeholder
-    /// Full arbitration logic (arbiter selection, evidence submission, ruling
-    /// enforcement) is not yet implemented. Calling this function will always
-    /// return `EscrowError::DisputeResolutionNotImplemented` until the feature
-    /// is built out.
+    /// The `_escrow_id` parameter identifies the escrow and `_release_to_seller`
+    /// will eventually choose the ruling direction. Security requirements are
+    /// not yet implemented because arbitration is still a placeholder. This
+    /// function always returns `EscrowError::DisputeResolutionNotImplemented`.
     pub fn resolve_dispute(
         _env: Env,
         _escrow_id: u64,
@@ -127,8 +174,12 @@ impl EscrowContract {
         Err(EscrowError::DisputeResolutionNotImplemented)
     }
 
-    /// Withdraw accumulated protocol fees for a token to the admin's address.
-    /// Only callable by the admin.
+    /// Withdraws accumulated protocol fees for `token` to the admin address.
+    ///
+    /// The `token` parameter identifies which token's fee balance to withdraw.
+    /// Security requirement: the configured admin must authorize the call.
+    /// Returns `Unauthorized` if no admin is configured or authorization fails,
+    /// and `NoFeesAvailable` when the token has no accumulated fees.
     pub fn withdraw_fees(env: Env, token: Address) -> Result<(), EscrowError> {
         let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
         admin.require_auth();
@@ -148,7 +199,10 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Returns the contract version string.
+    /// Returns the static contract version string.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and does not return contract-defined errors.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
     }
