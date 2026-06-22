@@ -10,6 +10,9 @@ mod events;
 mod admin;
 mod crypto;
 
+#[cfg(test)]
+mod test;
+
 use storage::{set_treasury, set_token, set_reward_amount, MIN_TTL, MAX_TTL};
 pub use crate::storage::DataKey;
 use admin::require_admin;
@@ -45,6 +48,9 @@ impl RewardContract {
 
     pub fn rotate_backend_pubkey(env: Env, new_pubkey: BytesN<32>) -> Result<(), Error> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(Error::NotInitialized);
+        }
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::BackendPubKey, &new_pubkey);
         Ok(())
