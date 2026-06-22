@@ -1238,7 +1238,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "ESC_CRTD"
+                "symbol": "ESC_CRE"
               }
             ],
             "data": {
@@ -1251,6 +1251,9 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                },
+                {
+                  "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
                 },
                 {
                   "i128": {
