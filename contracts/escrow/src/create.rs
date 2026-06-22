@@ -23,6 +23,9 @@ pub fn create_escrow(
         return Err(EscrowError::InvalidParties);
     }
 
+    // Security: expiration must be strictly in the future.
+    // An escrow with a past or current timestamp is immediately refundable,
+    // giving the seller no window to deliver.
     if expiration <= env.ledger().timestamp() {
         return Err(EscrowError::InvalidExpiration);
     }
