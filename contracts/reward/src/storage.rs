@@ -35,6 +35,7 @@ pub fn set_treasury(env: &Env, treasury: &Address) {
     env.storage().instance().set(&TREASURY, treasury);
 }
 
+/// Returns `Error::NotInitialized` instead of panicking if treasury has not been set.
 pub fn get_treasury(env: &Env) -> Result<Address, Error> {
     env.storage().instance().get(&TREASURY).ok_or(Error::NotInitialized)
 }
@@ -43,6 +44,7 @@ pub fn set_token(env: &Env, token: &Address) {
     env.storage().instance().set(&TOKEN, token);
 }
 
+/// Returns `Error::NotInitialized` instead of panicking if token has not been set.
 pub fn get_token(env: &Env) -> Result<Address, Error> {
     env.storage().instance().get(&TOKEN).ok_or(Error::NotInitialized)
 }
@@ -51,6 +53,7 @@ pub fn set_reward_amount(env: &Env, amount: i128) {
     env.storage().instance().set(&REWARD_AMOUNT, &amount);
 }
 
+/// Returns `Error::NotInitialized` instead of panicking if reward amount has not been set.
 pub fn get_reward_amount(env: &Env) -> Result<i128, Error> {
     env.storage().instance().get(&REWARD_AMOUNT).ok_or(Error::NotInitialized)
 }
