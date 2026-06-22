@@ -81,10 +81,18 @@ pub enum Error {
 }
 
 // ---------------------------------------------------------------------------
-// TTL constant
+// Constants
 // ---------------------------------------------------------------------------
 
 const STAKE_TTL_LEDGERS: u32 = 518_400; // ~30 days
+
+/// Minimum allowed emergency-unstake penalty.
+///
+/// A penalty of 0 bps makes emergency-unstake identical to normal unstake,
+/// giving stakers a free exit and rendering the lock period meaningless.
+/// Enforced both at config time (`set_staking_config`) and at execution time
+/// (`emergency_unstake`) as defense-in-depth.
+const MIN_PENALTY_BPS: u32 = 100; // 1 %
 
 // ---------------------------------------------------------------------------
 // Contract
@@ -112,8 +120,8 @@ impl StakingContract {
     /// Set the global staking configuration.
     ///
     /// `emergency_unstake_penalty_bps` must be in the range 100–10 000
-    /// (i.e. 1 %–100 %); zero is rejected so that emergency-unstake always
-    /// carries a meaningful disincentive.
+    /// (i.e. 1 %–100 %); values below `MIN_PENALTY_BPS` are rejected so that
+    /// emergency-unstake always carries a meaningful disincentive.
     pub fn set_staking_config(
         env: Env,
         admin: Address,
@@ -121,7 +129,6 @@ impl StakingContract {
     ) -> Result<(), Error> {
         Self::assert_admin(&env, &admin)?;
 
-        const MIN_PENALTY_BPS: u32 = 100;
         if config.emergency_unstake_penalty_bps < MIN_PENALTY_BPS
             || config.emergency_unstake_penalty_bps > 10_000
         {
@@ -262,12 +269,20 @@ impl StakingContract {
     }
 
     /// Emergency unstake: return `amount - penalty` immediately (no rewards).
-    /// The penalty stays in the contract until an admin calls
-    /// `withdraw_penalties`.
+    ///
+    /// Defense-in-depth: re-checks the penalty floor even though
+    /// `set_staking_config` already enforces it, guarding against any future
+    /// path that could store a zero-penalty config.
     pub fn emergency_unstake(env: Env, staker: Address) -> Result<(), Error> {
         staker.require_auth();
 
         let config = Self::load_config(&env)?;
+
+        // Defense-in-depth: verify the stored penalty still meets the floor
+        // even if config validation is somehow bypassed in the future.
+        if config.emergency_unstake_penalty_bps < MIN_PENALTY_BPS {
+            return Err(Error::InvalidPenaltyBps);
+        }
 
         let stake: StakeInfo = env
             .storage()

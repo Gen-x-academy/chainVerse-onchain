@@ -22,6 +22,12 @@
 //!    After an emergency unstake the penalty amount must remain inside the
 //!    contract.  Only when the admin calls `withdraw_penalties` is the
 //!    surplus transferred to the designated recipient.
+//!
+//! 6. `test_penalty_floor_boundary_100_bps_is_accepted`
+//!    Exactly 100 bps (the minimum) must be accepted by `set_staking_config`.
+//!
+//! 7. `test_penalty_99_bps_below_floor_is_rejected`
+//!    99 bps (one below the minimum) must be rejected by `set_staking_config`.
 
 #![cfg(test)]
 
@@ -229,7 +235,6 @@ fn test_penalty_stays_in_contract_until_admin_withdraws() {
 
     // After emergency unstake the contract balance must equal the retained
     // penalty (1 000 tokens = 10 % of 10 000).
-    // `client.address()` is the actual staking contract address.
     let contract_balance = token_client.balance(client.address());
     assert_eq!(
         contract_balance, 1_000,
@@ -252,5 +257,63 @@ fn test_penalty_stays_in_contract_until_admin_withdraws() {
     assert_eq!(
         contract_balance_after, 0,
         "contract balance must be zero after penalty withdrawal"
+    );
+}
+
+/// Exactly 100 bps (the minimum floor) must be accepted by `set_staking_config`.
+#[test]
+fn test_penalty_floor_boundary_100_bps_is_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StakingContract, ());
+    let client = StakingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let staking_token = env.register_stellar_asset_contract_v2(admin.clone());
+    let reward_token = env.register_stellar_asset_contract_v2(admin.clone());
+
+    let config = StakingConfig {
+        staking_enabled: true,
+        emergency_unstake_penalty_bps: 100, // exactly the minimum floor — must be accepted
+        staking_token: staking_token.address(),
+        reward_pool: reward_token.address(),
+    };
+
+    let result = client.set_staking_config(&admin, &config);
+    assert!(
+        result.is_ok(),
+        "100 bps is the minimum floor and must be accepted"
+    );
+}
+
+/// 99 bps (one below the minimum floor) must be rejected by `set_staking_config`.
+#[test]
+fn test_penalty_99_bps_below_floor_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StakingContract, ());
+    let client = StakingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let staking_token = env.register_stellar_asset_contract_v2(admin.clone());
+    let reward_token = env.register_stellar_asset_contract_v2(admin.clone());
+
+    let config = StakingConfig {
+        staking_enabled: true,
+        emergency_unstake_penalty_bps: 99, // one below minimum — must be rejected
+        staking_token: staking_token.address(),
+        reward_pool: reward_token.address(),
+    };
+
+    let result = client.try_set_staking_config(&admin, &config);
+    assert!(
+        result.is_err(),
+        "99 bps is below the 100 bps floor and must be rejected"
     );
 }
