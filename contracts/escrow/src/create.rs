@@ -17,6 +17,8 @@ pub fn create_escrow(
         return Err(EscrowError::InvalidAmount);
     }
 
+    // Security: buyer and seller must be distinct addresses.
+    // A self-escrow is economically meaningless and a source of edge-case bugs.
     if buyer == seller {
         return Err(EscrowError::InvalidParties);
     }
