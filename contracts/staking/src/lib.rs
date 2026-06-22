@@ -109,8 +109,13 @@ impl StakingContract {
 
     /// Store the contract admin (call once after deployment).
     pub fn set_admin(env: Env, admin: Address) {
+        let old_admin = env.storage().instance().get::<_, Address>(&DataKey::Admin);
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ADM_CHNG"),),
+            (old_admin, admin),
+        );
     }
 
     // -----------------------------------------------------------------------
