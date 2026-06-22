@@ -19,6 +19,7 @@ pub struct CertificateContract;
 
 #[contractimpl]
 impl CertificateContract {
+    /// Initializes the certificates contract with the admin and backend proof key.
     pub fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() {
@@ -33,6 +34,7 @@ impl CertificateContract {
         Ok(())
     }
 
+    /// Updates the paused state for certificate minting and admin actions.
     pub fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::require_admin(&env, &caller)?;
@@ -41,11 +43,13 @@ impl CertificateContract {
         Ok(())
     }
 
+    /// Returns whether the certificates contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::is_paused(&env)
     }
 
+    /// Mints a soulbound certificate for a wallet after validating the backend proof.
     pub fn mint(
         env: Env,
         wallet: Address,
@@ -79,6 +83,7 @@ impl CertificateContract {
         Ok(())
     }
 
+    /// Revokes an existing certificate for a wallet and course.
     pub fn revoke_certificate(
         env: Env,
         caller: Address,
@@ -99,16 +104,19 @@ impl CertificateContract {
         Ok(())
     }
 
+    /// Loads the certificate issued to a wallet for a course, if one exists.
     pub fn get_certificate(env: Env, wallet: Address, course_id: u64) -> Option<Certificate> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::load_certificate(&env, &wallet, course_id)
     }
 
+    /// Returns whether a wallet already has a certificate for a course.
     pub fn has_certificate(env: Env, wallet: Address, course_id: u64) -> bool {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::has_certificate(&env, &wallet, course_id)
     }
 
+    /// Rejects certificate transfers because certificates are soulbound.
     pub fn transfer(
         _env: Env,
         _from: Address,
@@ -118,7 +126,7 @@ impl CertificateContract {
         Err(ContractError::SoulboundTransferNotAllowed)
     }
 
-    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    /// Upgrades the current contract to the provided WASM hash after admin authorization.
     pub fn upgrade(
         env: Env,
         admin: Address,
