@@ -431,6 +431,24 @@ mod test {
     }
 
     #[test]
+    fn test_escrow_created_event_includes_token() {
+        let (env, buyer, seller, token_addr, client) = setup(1000);
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+
+        // Verify ESC_CRE event is emitted with symbol as first topic
+        let sym_val = Symbol::new(&env, "ESC_CRE").into_val(&env);
+        let events = env.events().all();
+        let found = events.iter().any(|(_, topics, _)| {
+            topics.get(0).map_or(false, |v| v == sym_val)
+        });
+        assert!(found, "ESC_CRE event must be emitted by create_escrow");
+
+        // Verify the stored escrow record holds the correct token address
+        let escrow = client.get_escrow(&escrow_id);
+        assert_eq!(escrow.token, token_addr, "escrow token must match deposit token");
+    }
+
+    #[test]
     fn test_refund_buyer_fails_if_already_released() {
         // Create escrow and release it, then try to refund — must fail.
         let (env, buyer, seller, token_addr, client) = setup(1000);
