@@ -9,6 +9,7 @@ pub enum DataKey {
     BackendPubKey,
     BackendSigner,
     UsedNonce(BytesN<32>),
+    Paused,
 }
 
 const REWARDED: soroban_sdk::Symbol = symbol_short!("REWARDED");
@@ -56,4 +57,15 @@ pub fn set_reward_amount(env: &Env, amount: i128) {
 /// Returns `Error::NotInitialized` instead of panicking if reward amount has not been set.
 pub fn get_reward_amount(env: &Env) -> Result<i128, Error> {
     env.storage().instance().get(&REWARD_AMOUNT).ok_or(Error::NotInitialized)
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
 }

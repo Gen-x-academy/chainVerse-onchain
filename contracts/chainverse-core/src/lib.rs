@@ -34,9 +34,11 @@ use analytics::{
 };
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
 
 const CONTRACT_VERSION: &str = "1.0.0";
+const MIN_TTL: u32 = 4096;
+const MAX_TTL: u32 = 100_000;
 
 #[contract]
 pub struct ChainverseCore;
@@ -231,12 +233,12 @@ impl ChainverseCore {
 
     /// Returns all escrows where `buyer` is the depositor.
     pub fn get_escrows_by_buyer(env: Env, buyer: Address) -> Vec<EscrowRecord> {
-        escrow::get_by_buyer(&env, &buyer)
+        escrow::get_by_buyer(&env, &buyer, 0, u64::MAX)
     }
 
     /// Returns all escrows where `seller` is the recipient.
     pub fn get_escrows_by_seller(env: Env, seller: Address) -> Vec<EscrowRecord> {
-        escrow::get_by_seller(&env, &seller)
+        escrow::get_by_seller(&env, &seller, 0, u64::MAX)
     }
 
     // -----------------------------------------------------------------------
@@ -259,7 +261,7 @@ impl ChainverseCore {
         token: Option<Address>,
         status: Option<EscrowStatus>,
     ) -> Vec<EscrowRecord> {
-        escrow::search(&env, token, status)
+        escrow::search(&env, token, status, 0, u64::MAX)
     }
 
     /// Returns all escrows currently in the Pending (active) state.

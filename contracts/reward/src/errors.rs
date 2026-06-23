@@ -9,4 +9,5 @@ pub enum Error {
     AlreadyRewarded    = 4,
     NotInitialized     = 5,
     InsufficientTreasuryAllowance = 6,
+    ContractPaused     = 7,
 }

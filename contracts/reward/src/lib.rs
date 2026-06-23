@@ -63,6 +63,56 @@ impl RewardContract {
 
     pub fn claim_reward(env: Env, user: Address) -> Result<(), errors::Error> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        if storage::is_paused(&env) {
+            return Err(errors::Error::ContractPaused);
+        }
         reward::claim_reward(env, user)
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
+    }
+
+    /// Admin-only: pause the contract.
+    pub fn pause(env: Env, caller: Address) -> Result<(), errors::Error> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(errors::Error::NotInitialized);
+        }
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(errors::Error::Unauthorized)?;
+        if caller != admin {
+            return Err(errors::Error::Unauthorized);
+        }
+        caller.require_auth();
+        storage::set_paused(&env, true);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("PAUSED"),), (caller,));
+        Ok(())
+    }
+
+    /// Admin-only: unpause the contract.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), errors::Error> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        if !env.storage().instance().has(&DataKey::Initialized) {
+            return Err(errors::Error::NotInitialized);
+        }
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(errors::Error::Unauthorized)?;
+        if caller != admin {
+            return Err(errors::Error::Unauthorized);
+        }
+        caller.require_auth();
+        storage::set_paused(&env, false);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("UNPAUSED"),), (caller,));
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
-use crate::storage::{add_to_total_volume, is_token_whitelisted, next_escrow_id, save_escrow};
+use crate::storage::{add_to_total_volume, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow};
 use crate::types::{Escrow, EscrowStatus};
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
 
@@ -12,22 +12,17 @@ pub fn create_escrow(
     amount: i128,
     expiration: u64,
 ) -> Result<u64, EscrowError> {
-    // Validate: amount must be greater than zero
+    // Validate order per spec: amount → expiration → self-transfer → whitelist
     if amount <= 0 {
         return Err(EscrowError::InvalidAmount);
     }
 
-    // Security: buyer and seller must be distinct addresses.
-    // A self-escrow is economically meaningless and a source of edge-case bugs.
-    if buyer == seller {
-        return Err(EscrowError::InvalidParties);
-    }
-
-    // Security: expiration must be strictly in the future.
-    // An escrow with a past or current timestamp is immediately refundable,
-    // giving the seller no window to deliver.
     if expiration <= env.ledger().timestamp() {
         return Err(EscrowError::InvalidExpiration);
+    }
+
+    if buyer == seller {
+        return Err(EscrowError::InvalidRecipient);
     }
 
     // Validate: buyer must authorize this call
@@ -52,6 +47,9 @@ pub fn create_escrow(
         expiration,
     };
     save_escrow(env, escrow_id, &escrow);
+
+    // Update the per-token index
+    append_to_token_index(env, &escrow.token, escrow_id);
 
     // Track total volume processed
     add_to_total_volume(env, amount);
