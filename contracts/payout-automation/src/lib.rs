@@ -319,4 +319,48 @@ mod test {
         let tc = TokenClient::new(&env, &token_addr);
         assert_eq!(tc.balance(&recipient), 0);
     }
+
+    // Issue #418 — execute with batch exceeding MAX_BATCH_SIZE must be rejected
+    #[test]
+    fn test_execute_batch_too_large_is_rejected() {
+        // Mint enough for 101 payouts of 1 each
+        let (env, admin, token_addr, client) = setup(101);
+        let recipient = Address::generate(&env);
+
+        // Build a batch of MAX_BATCH_SIZE + 1 = 101 entries
+        let mut entries: soroban_sdk::Vec<PayoutEntry> = soroban_sdk::Vec::new(&env);
+        for _ in 0..=MAX_BATCH_SIZE {
+            entries.push_back(PayoutEntry {
+                recipient: recipient.clone(),
+                amount: 1,
+            });
+        }
+
+        let result = client.try_execute(&admin, &token_addr, &entries);
+        assert_eq!(result, Err(Ok(PayoutError::BatchTooLarge)));
+
+        // No funds must have moved
+        let tc = TokenClient::new(&env, &token_addr);
+        assert_eq!(tc.balance(&recipient), 0);
+    }
+
+    // Issue #418 — execute with exactly MAX_BATCH_SIZE entries must succeed
+    #[test]
+    fn test_execute_at_max_batch_size_succeeds() {
+        let (env, admin, token_addr, client) = setup(MAX_BATCH_SIZE as i128);
+        let recipient = Address::generate(&env);
+
+        let mut entries: soroban_sdk::Vec<PayoutEntry> = soroban_sdk::Vec::new(&env);
+        for _ in 0..MAX_BATCH_SIZE {
+            entries.push_back(PayoutEntry {
+                recipient: recipient.clone(),
+                amount: 1,
+            });
+        }
+
+        client.execute(&admin, &token_addr, &entries);
+
+        let tc = TokenClient::new(&env, &token_addr);
+        assert_eq!(tc.balance(&recipient), MAX_BATCH_SIZE as i128);
+    }
 }
