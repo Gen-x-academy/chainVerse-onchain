@@ -47,6 +47,10 @@ impl EscrowContract {
     /// Security requirement: only the configured admin may call this function.
     /// Returns `EscrowError::Unauthorized` if no admin exists or the admin does
     /// not authorize the call.
+    ///
+    /// # Security Note
+    /// This function requires admin authorization to prevent reentrancy or
+    /// infinite-mint attacks from malicious token contracts.
     pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
         storage::require_admin(&env)?;
         storage::whitelist_token(&env, &token);
