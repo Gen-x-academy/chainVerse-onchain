@@ -14,7 +14,7 @@ mod crypto;
 mod test;
 
 use storage::{set_treasury, set_token, set_reward_amount, MIN_TTL, MAX_TTL};
-pub use crate::storage::DataKey;
+use crate::storage::DataKey;
 use admin::require_admin;
 use errors::Error;
 
