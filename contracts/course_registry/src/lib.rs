@@ -16,6 +16,7 @@ pub enum ContractError {
     CourseNotFound = 3,
     CourseInactive = 4,
     NotInitialized = 5,
+    ContractPaused = 6,
 }
 
 // Storage Keys
@@ -24,6 +25,7 @@ pub enum ContractError {
 pub enum DataKey {
     Admin,
     Course(Symbol),
+    Paused,
 }
 
 // Course Struct
@@ -73,6 +75,15 @@ impl CourseRegistryContract {
         is_active: bool,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env)?;
+
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
+            return Err(ContractError::ContractPaused);
+        }
 
         // Validate: prices must be non-negative
         if price_xlm < 0 || price_chv < 0 {
@@ -154,6 +165,48 @@ impl CourseRegistryContract {
 
     pub fn version(env: Env) -> String {
         String::from_str(&env, CONTRACT_VERSION)
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Admin-only: pause the contract.
+    pub fn pause(env: Env, caller: Address) -> Result<(), ContractError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::NotInitialized)?;
+        if caller != admin {
+            return Err(ContractError::NotAdmin);
+        }
+        caller.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("PAUSED"),), (caller,));
+        Ok(())
+    }
+
+    /// Admin-only: unpause the contract.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), ContractError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::NotInitialized)?;
+        if caller != admin {
+            return Err(ContractError::NotAdmin);
+        }
+        caller.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("UNPAUSED"),), (caller,));
+        Ok(())
     }
 
     /// Admin-only: upgrade the current contract to `new_wasm_hash`.

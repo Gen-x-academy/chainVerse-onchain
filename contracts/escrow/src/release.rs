@@ -1,50 +1,66 @@
 use crate::errors::EscrowError;
-use crate::events::escrow_released;
-use crate::storage::{load_escrow, save_escrow};
-use crate::types::EscrowStatus;
+use crate::events::{escrow_released, fee_collected};
+use crate::storage::{
+    accumulate_protocol_fee, append_fee_record, get_protocol_fee_bps, load_escrow, save_escrow,
+};
+use crate::types::{EscrowStatus, FeeRecord};
 use soroban_sdk::{token::Client as TokenClient, Env};
 
-
 pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
-    // Load escrow, return NotFound if missing
     let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
 
-    // Validate: only buyer can release funds to seller
     escrow.buyer.require_auth();
 
-    // Explicit guard: prevent double release
     if escrow.status == EscrowStatus::Completed {
         return Err(EscrowError::AlreadyReleased);
     }
 
-    // Validate: escrow must not be disputed
     if escrow.status == EscrowStatus::Disputed {
         return Err(EscrowError::NotPending);
     }
 
-    // Validate: escrow must be in Pending state
     if escrow.status != EscrowStatus::Pending {
         return Err(EscrowError::NotPending);
     }
 
-    // Validate: escrow must not be expired
     if env.ledger().timestamp() >= escrow.expiration {
         return Err(EscrowError::Expired);
     }
 
-    // Transfer tokens from this contract to the seller
-    TokenClient::new(env, &escrow.token).transfer(
+    // Compute protocol fee
+    let fee_bps = get_protocol_fee_bps(env) as i128;
+    let fee_amount = escrow.amount * fee_bps / 10_000;
+    let seller_amount = escrow.amount - fee_amount;
+
+    let token_client = TokenClient::new(env, &escrow.token);
+
+    // Transfer seller's share
+    token_client.transfer(
         &env.current_contract_address(),
         &escrow.seller,
-        &escrow.amount,
+        &seller_amount,
     );
 
-    // Update status to Completed
+    // Accumulate the protocol fee
+    accumulate_protocol_fee(env, &escrow.token, fee_amount);
+
+    // Persist fee record
+    let record = FeeRecord {
+        escrow_id,
+        token: escrow.token.clone(),
+        amount: fee_amount,
+        timestamp: env.ledger().timestamp(),
+    };
+    append_fee_record(env, &record);
+
+    // Emit fee event
+    fee_collected(env, escrow_id, &escrow.token, fee_amount);
+
+    // Update escrow status
     escrow.status = EscrowStatus::Completed;
     save_escrow(env, escrow_id, &escrow);
 
-    // Emit release event
-    escrow_released(env, escrow_id, &escrow.seller, escrow.amount);
+    escrow_released(env, escrow_id, &escrow.seller, seller_amount);
 
     Ok(())
 }
