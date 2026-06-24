@@ -114,6 +114,22 @@ mod test {
         assert_eq!(config.admin, new_admin);
     }
 
+    #[test]
+    fn test_transfer_admin_emits_adm_chng_event() {
+        let (env, _, client) = setup();
+        let admin = init(&env, &client);
+        let new_admin = Address::generate(&env);
+
+        let events_before = env.events().all().len();
+        client.transfer_admin(&admin, &new_admin);
+        let events_after = env.events().all().len();
+
+        assert!(
+            events_after > events_before,
+            "ADM_CHNG event must be emitted on transfer_admin"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // only_admin guard — unauthorized paths
     // -----------------------------------------------------------------------
