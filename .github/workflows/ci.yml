@@ -21,6 +21,9 @@ jobs:
 
       - name: Install cargo-audit
         run: cargo install cargo-audit
+      - name: Cargo audit
+        working-directory: contracts
+        run: cargo audit
 
       - name: Security audit
         working-directory: contracts
@@ -56,9 +59,21 @@ jobs:
         working-directory: contracts
         run: cargo audit
 
+      - name: Format check
+        run: cargo fmt --all -- --check
       - name: Build all contracts
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
+      - name: WASM size check
+        working-directory: contracts
+        run: |
+          for wasm in target/wasm32-unknown-unknown/release/*.wasm; do
+            size=$(stat -c%s "$wasm")
+            echo "$wasm: $size bytes"
+            if [ $size -gt 102400 ]; then
+              echo "WARNING: $wasm exceeds 100KB"
+            fi
+          done
 
       - name: Run tests
         working-directory: contracts
