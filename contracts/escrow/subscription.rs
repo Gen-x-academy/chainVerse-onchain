@@ -481,6 +481,7 @@ impl SubscriptionContract {
         subscription.status = MembershipStatus::Inactive;
         subscription.paused_at = None;
         env.storage().persistent().set(&key, &subscription);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit subscription cancelled event
         env.events().publish(
@@ -772,6 +773,7 @@ impl SubscriptionContract {
 
         // Store updated tier
         env.storage().persistent().set(&key, &tier);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit tier updated event
         env.events().publish(
@@ -839,6 +841,7 @@ impl SubscriptionContract {
         tier.updated_at = env.ledger().timestamp();
 
         env.storage().persistent().set(&key, &tier);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit tier deactivated event
         env.events().publish(
