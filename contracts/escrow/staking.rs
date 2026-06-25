@@ -28,8 +28,8 @@ pub enum StakingDataKey {
 // TTL constants (in ledgers; Stellar produces ~1 ledger / 5 s)
 // ---------------------------------------------------------------------------
 
-/// Keep stake records for ~30 days.
-const STAKE_TTL_LEDGERS: u32 = 518_400;
+const MIN_TTL: u32 = 17_280; // ~1 day
+const MAX_TTL: u32 = 518_400; // ~30 days
 
 // ---------------------------------------------------------------------------
 // Module
@@ -106,8 +106,8 @@ impl StakingModule {
             .set(&StakingDataKey::Tier(tier.id.clone()), &tier);
         env.storage().persistent().extend_ttl(
             &StakingDataKey::Tier(tier.id.clone()),
-            STAKE_TTL_LEDGERS,
-            STAKE_TTL_LEDGERS,
+            MIN_TTL,
+            MAX_TTL,
         );
 
         // Append tier ID to the tier list.
@@ -450,8 +450,8 @@ impl StakingModule {
             .set(&StakingDataKey::Stake(staker.clone()), stake);
         env.storage().persistent().extend_ttl(
             &StakingDataKey::Stake(staker.clone()),
-            STAKE_TTL_LEDGERS,
-            STAKE_TTL_LEDGERS,
+            MIN_TTL,
+            MAX_TTL,
         );
     }
 
