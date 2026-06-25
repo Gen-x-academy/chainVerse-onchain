@@ -4,14 +4,14 @@ resolver = "2"
 members = [
     "certificates",
     "chainverse-core",
-    "common",
-    "course_registry",
     "escrow",
     "escrow-vault",
     "payout-automation",
-    "shared",
+    "reward",
+    "course_registry",
     "chv_token",
-    "staking"
+    "shared",
+    "common",
 ]
 
 [workspace.dependencies]
