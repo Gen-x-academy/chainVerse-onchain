@@ -58,6 +58,12 @@ jobs:
           fi
           stellar keys generate ci --secret-key "$STELLAR_SECRET_KEY"
 
+      - name: Configure Stellar testnet network
+        run: |
+          stellar network add testnet \
+            --rpc-url https://soroban-testnet.stellar.org \
+            --network-passphrase 'Test SDF Network ; September 2015'
+
       - name: Security audit
         working-directory: contracts
         run: cargo audit

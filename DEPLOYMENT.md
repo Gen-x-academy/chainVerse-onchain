@@ -51,6 +51,38 @@ Once secrets are configured, build and deploy all contracts to testnet:
 
 Deployed contract addresses are recorded in `deployments/testnet.json` and can be referenced by the frontend and backend.
 
+## Initializing Contracts After Deployment
+
+After deploying, each contract's `initialize()` function must be called to set the admin and initial configuration. Run the initialization script:
+
+```bash
+# Initialize all deployed contracts (reads from deployments/testnet.json)
+./scripts/initialize-contracts.sh
+```
+
+The script reads contract addresses from `deployments/testnet.json` and calls the appropriate initialization function on each contract. Extra configuration is supplied via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADMIN_ADDRESS` | Derived from `deployer` key | Admin address set on all contracts |
+| `STELLAR_SOURCE` | `deployer` | Stellar CLI key name used to sign transactions |
+| `BACKEND_PUBLIC_KEY` | — | Hex-encoded public key for certificate proof verification (required for `certificates` contract) |
+| `TREASURY_ADDRESS` | Same as `ADMIN_ADDRESS` | Treasury address for the `reward` contract |
+| `CHV_TOKEN_ADDRESS` | Read from `deployments/testnet.json` | CHV token contract address (used by `reward` and `chainverse_core`) |
+| `PROTOCOL_FEE_BPS` | `100` | Protocol fee in basis points for `chainverse_core` (100 = 1%) |
+| `REWARD_AMOUNT` | `10000000` | Per-claim reward amount (stroops) for the `reward` contract |
+
+Example with all variables set:
+
+```bash
+ADMIN_ADDRESS="GABC...XYZ" \
+BACKEND_PUBLIC_KEY="deadbeef..." \
+TREASURY_ADDRESS="GABC...XYZ" \
+PROTOCOL_FEE_BPS=100 \
+REWARD_AMOUNT=10000000 \
+./scripts/initialize-contracts.sh
+```
+
 ## Network Details
 
 | Property | Value |
