@@ -168,6 +168,9 @@ impl ChainverseCore {
         config.admin = new_admin.clone();
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_ADMIN_CHANGED);
         env.events()
             .publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
