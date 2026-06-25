@@ -365,6 +365,11 @@ impl StakingContract {
         Ok(())
     }
 
+    /// Returns the contract version for post-deploy verification.
+    pub fn version(_env: Env) -> u32 {
+        1
+    }
+
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
