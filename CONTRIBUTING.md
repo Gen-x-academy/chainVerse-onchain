@@ -60,3 +60,4 @@ The template location is at `.github/PULL_REQUEST_TEMPLATE.md` and provides a st
 
    ```bash
    rustup target add wasm32-unknown-unknown
+   ```
