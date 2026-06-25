@@ -118,11 +118,12 @@ impl CertificateContract {
 
     /// Rejects certificate transfers because certificates are soulbound.
     pub fn transfer(
-        _env: Env,
+        env: Env,
         _from: Address,
         _to: Address,
         _course_id: u64,
     ) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         Err(ContractError::SoulboundTransferNotAllowed)
     }
 
