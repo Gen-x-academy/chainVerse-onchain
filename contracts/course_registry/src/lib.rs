@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, BytesN, Env,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env,
     String, Symbol,
 };
 
@@ -17,6 +17,7 @@ pub enum ContractError {
     CourseInactive = 4,
     NotInitialized = 5,
     ContractPaused = 6,
+    InvalidPrice = 7,
 }
 
 // Storage Keys
@@ -87,7 +88,7 @@ impl CourseRegistryContract {
 
         // Validate: prices must be non-negative
         if price_xlm < 0 || price_chv < 0 {
-            panic!("prices must be non-negative");
+            return Err(ContractError::InvalidPrice);
         }
 
         let course = Course {
@@ -113,11 +114,11 @@ impl CourseRegistryContract {
 
         let key = DataKey::Course(course_id.clone());
 
-        if !env.storage().persistent().has(&key) {
-            panic_with_error!(&env, ContractError::CourseNotFound);
-        }
-
-        let mut course: Course = env.storage().persistent().get(&key).unwrap();
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::CourseNotFound)?;
 
         course.is_active = is_active;
 
@@ -131,11 +132,11 @@ impl CourseRegistryContract {
 
         let key = DataKey::Course(course_id.clone());
 
-        if !env.storage().persistent().has(&key) {
-            panic_with_error!(&env, ContractError::CourseNotFound);
-        }
-
-        let mut course: Course = env.storage().persistent().get(&key).unwrap();
+        let mut course: Course = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::CourseNotFound)?;
         course.is_active = false;
 
         env.storage().persistent().set(&key, &course);
@@ -143,24 +144,24 @@ impl CourseRegistryContract {
     }
 
     // Get Course
-    pub fn get_course(env: Env, course_id: Symbol) -> Course {
+    pub fn get_course(env: Env, course_id: Symbol) -> Result<Course, ContractError> {
         let key = DataKey::Course(course_id);
 
-        if !env.storage().persistent().has(&key) {
-            panic_with_error!(&env, ContractError::CourseNotFound);
-        }
-
-        env.storage().persistent().get(&key).unwrap()
+        env.storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::CourseNotFound)
     }
 
     // Purchase Check
     // (Used by payment contract later)
-    pub fn assert_course_active(env: Env, course_id: Symbol) {
-        let course = Self::get_course(env.clone(), course_id);
+    pub fn assert_course_active(env: Env, course_id: Symbol) -> Result<(), ContractError> {
+        let course = Self::get_course(env.clone(), course_id)?;
 
         if !course.is_active {
-            panic_with_error!(&env, ContractError::CourseInactive);
+            return Err(ContractError::CourseInactive);
         }
+        Ok(())
     }
 
     pub fn version(env: Env) -> String {
