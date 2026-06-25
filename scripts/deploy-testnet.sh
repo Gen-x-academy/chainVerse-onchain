@@ -3,6 +3,8 @@ set -e
 
 NETWORK="testnet"
 SOURCE="deployer"
+RPC_URL="https://soroban-testnet.stellar.org"
+PASSPHRASE="Test SDF Network ; September 2015"
 WASM_DIR="contracts/target/wasm32-unknown-unknown/release"
 OUTPUT_DIR="deployments"
 OUTPUT_FILE="$OUTPUT_DIR/testnet.json"
@@ -24,6 +26,8 @@ mkdir -p "$OUTPUT_DIR"
 # Start JSON output
 echo "{" > "$OUTPUT_FILE"
 echo "  \"network\": \"$NETWORK\"," >> "$OUTPUT_FILE"
+echo "  \"rpc_url\": \"$RPC_URL\"," >> "$OUTPUT_FILE"
+echo "  \"passphrase\": \"$PASSPHRASE\"," >> "$OUTPUT_FILE"
 echo "  \"deployed_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"," >> "$OUTPUT_FILE"
 echo "  \"contracts\": {" >> "$OUTPUT_FILE"
 
