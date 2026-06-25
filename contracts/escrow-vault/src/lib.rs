@@ -1,5 +1,8 @@
 #![no_std]
 
+const VAULT_MIN_TTL: u32 = 100_000;
+const VAULT_MAX_TTL: u32 = 500_000;
+
 use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
 // ---------------------------------------------------------------------------
@@ -106,6 +109,9 @@ impl EscrowVault {
             status: VaultStatus::Pending,
         };
         env.storage().persistent().set(&DataKey::Vault(id), &vault);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Vault(id), VAULT_MIN_TTL, VAULT_MAX_TTL);
 
         // Pull funds from depositor into the contract
         soroban_sdk::token::Client::new(&env, &token).transfer(
@@ -161,6 +167,9 @@ impl EscrowVault {
         env.storage()
             .persistent()
             .set(&DataKey::Vault(vault_id), &vault);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Vault(vault_id), VAULT_MIN_TTL, VAULT_MAX_TTL);
         Ok(())
     }
 
@@ -197,6 +206,9 @@ impl EscrowVault {
         env.storage()
             .persistent()
             .set(&DataKey::Vault(vault_id), &vault);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Vault(vault_id), VAULT_MIN_TTL, VAULT_MAX_TTL);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("cancelled"), vault_id),
