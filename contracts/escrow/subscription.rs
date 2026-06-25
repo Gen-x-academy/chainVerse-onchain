@@ -90,7 +90,7 @@ impl SubscriptionContract {
         env: &Env,
         payment_token: &Address,
         amount: i128,
-        _payer: &Address,
+        payer: &Address,
     ) -> Result<bool, Error> {
         // Check for non-negative amount
         if amount <= 0 {
@@ -105,11 +105,11 @@ impl SubscriptionContract {
             return Err(Error::InvalidPaymentToken);
         }
 
-        // Note: Balance checking is omitted in this implementation.
-        // In production, you would check the token balance using:
-        // let token_client = token::Client::new(env, payment_token);
-        // let balance = token_client.balance(payer);
-        // if balance < amount { return Err(Error::InsufficientBalance); }
+        let token_client = token::Client::new(env, payment_token);
+        let balance = token_client.balance(payer);
+        if balance < amount {
+            return Err(Error::InsufficientBalance);
+        }
 
         Ok(true)
     }

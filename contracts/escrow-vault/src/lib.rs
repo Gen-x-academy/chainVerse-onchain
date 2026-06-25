@@ -152,6 +152,10 @@ impl EscrowVault {
                 &vault.recipient,
                 &vault.amount,
             );
+            env.events().publish(
+                (soroban_sdk::symbol_short!("released"), vault_id),
+                (vault.recipient.clone(), vault.amount),
+            );
         }
 
         env.storage()
