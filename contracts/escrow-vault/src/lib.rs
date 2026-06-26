@@ -262,7 +262,7 @@ impl EscrowVault {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, vec, Env};
+    use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, vec, Env};
 
     fn setup() -> (Env, EscrowVaultClient<'static>) {
         let env = Env::default();
@@ -270,6 +270,16 @@ mod test {
         let id = env.register_contract(None, EscrowVault);
         let client = EscrowVaultClient::new(&env, &id);
         (env, client)
+    }
+
+    // Register a real Stellar Asset Contract, mint `amount` tokens to `to`,
+    // and return the token address. Required so the on-chain transfer inside
+    // create_vault (issue #501) actually executes against a live contract.
+    fn make_token(env: &Env, to: &Address, amount: i128) -> Address {
+        let admin = Address::generate(env);
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        StellarAssetClient::new(env, &sac.address()).mint(to, &amount);
+        sac.address()
     }
 
     #[test]
@@ -305,7 +315,29 @@ mod test {
         });
 
         assert!(result.is_err(), "duplicate approver list must be rejected");
-        assert!(result.is_err());
+    }
+
+    // #501 — create_vault must pull tokens from the depositor into the contract.
+    // Uses a registered SAC so the transfer is real and balance assertions are meaningful.
+    #[test]
+    fn test_create_vault_pulls_tokens_from_depositor() {
+        let (env, client) = setup();
+        let depositor = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let approver = Address::generate(&env);
+        let amount: i128 = 500;
+
+        let token = make_token(&env, &depositor, amount);
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+
+        let contract_addr = client.address.clone();
+        let depositor_before = token_client.balance(&depositor);
+        let contract_before = token_client.balance(&contract_addr);
+
+        client.create_vault(&depositor, &recipient, &token, &amount, &vec![&env, approver]);
+
+        assert_eq!(token_client.balance(&depositor), depositor_before - amount);
+        assert_eq!(token_client.balance(&contract_addr), contract_before + amount);
     }
 
     #[test]
@@ -314,8 +346,8 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
         let approver = Address::generate(&env);
+        let token = make_token(&env, &depositor, 100);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -325,10 +357,8 @@ mod test {
             &vec![&env, approver.clone()],
         );
 
-        // First approval should succeed and release the vault
         client.approve_release(&approver, &vault_id);
 
-        // Second approval attempt should fail with NotPending
         let result = client.try_approve_release(&approver, &vault_id);
         assert!(
             result.is_err(),
@@ -346,9 +376,9 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
         let approver = Address::generate(&env);
-        let outsider = Address::generate(&env); // NOT in approver set
+        let outsider = Address::generate(&env);
+        let token = make_token(&env, &depositor, 1000);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -358,14 +388,12 @@ mod test {
             &vec![&env, approver.clone()],
         );
 
-        // Outsider attempts to approve — must fail with Unauthorized
         let result = client.try_approve_release(&outsider, &vault_id);
         assert!(
             result.is_err(),
             "approve_release from non-approver must be rejected"
         );
 
-        // Vault must still be Pending — no fund movement
         let vault = client.get_vault(&vault_id);
         assert_eq!(vault.status, VaultStatus::Pending);
         assert_eq!(vault.approvals.len(), 0);
@@ -377,8 +405,8 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
         let approver = Address::generate(&env);
+        let token = make_token(&env, &depositor, 500);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -400,9 +428,9 @@ mod test {
 
         let depositor = Address::generate(&env);
         let recipient = Address::generate(&env);
-        let token = Address::generate(&env);
         let a1 = Address::generate(&env);
         let a2 = Address::generate(&env);
+        let token = make_token(&env, &depositor, 200);
 
         let vault_id = client.create_vault(
             &depositor,
@@ -421,5 +449,35 @@ mod test {
         client.approve_release(&a2, &vault_id);
         let vault = client.get_vault(&vault_id);
         assert_eq!(vault.status, VaultStatus::Released);
+    }
+
+    // #501 — funds released to recipient on full approval, contract balance zeroes out.
+    #[test]
+    fn test_approve_release_transfers_funds_to_recipient() {
+        let (env, client) = setup();
+
+        let depositor = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let approver = Address::generate(&env);
+        let amount: i128 = 300;
+        let token = make_token(&env, &depositor, amount);
+        let token_client = soroban_sdk::token::Client::new(&env, &token);
+
+        let contract_addr = client.address.clone();
+        let vault_id = client.create_vault(
+            &depositor,
+            &recipient,
+            &token,
+            &amount,
+            &vec![&env, approver.clone()],
+        );
+
+        assert_eq!(token_client.balance(&contract_addr), amount);
+        assert_eq!(token_client.balance(&recipient), 0);
+
+        client.approve_release(&approver, &vault_id);
+
+        assert_eq!(token_client.balance(&contract_addr), 0);
+        assert_eq!(token_client.balance(&recipient), amount);
     }
 }
