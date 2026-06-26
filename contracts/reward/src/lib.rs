@@ -216,4 +216,9 @@ fn require_admin_internal(env: &Env, caller: &Address) -> Result<(), Error> {
             .publish((soroban_sdk::symbol_short!("UNPAUSED"),), (caller,));
         Ok(())
     }
+
+    /// Returns the contract version for post-deploy verification.
+    pub fn version(_env: Env) -> u32 {
+        1
+    }
 }
