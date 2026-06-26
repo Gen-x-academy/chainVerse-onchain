@@ -37,6 +37,7 @@ pub struct Vault {
 
 #[contracttype]
 pub enum DataKey { Vault(BytesN<32>), VaultCount }
+pub enum DataKey { Vault(BytesN<32>) }
 
 #[contract]
 pub struct EscrowVault;
@@ -65,6 +66,9 @@ impl EscrowVault {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
         depositor.require_auth();
         soroban_sdk::token::Client::new(&env, &token)
             .transfer(&depositor, &env.current_contract_address(), &amount);
@@ -73,6 +77,8 @@ impl EscrowVault {
         ).into();
         let vault = Vault {
             depositor, recipient, token, amount, approvers, approvals: 0, threshold, status: VaultStatus::Pending,
+            depositor, recipient, token, amount, approvers, approvals: 0, threshold,
+            status: VaultStatus::Pending,
         };
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
