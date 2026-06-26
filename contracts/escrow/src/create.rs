@@ -15,11 +15,9 @@ pub fn create_escrow(
     if amount <= 0 {
         return Err(EscrowError::InvalidAmount);
     }
-
     if expiration <= env.ledger().timestamp() {
         return Err(EscrowError::InvalidExpiration);
     }
-
     if buyer == seller {
         return Err(EscrowError::InvalidRecipient);
     }
@@ -32,6 +30,11 @@ pub fn create_escrow(
 
     TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
 
+    buyer.require_auth();
+    if !is_token_whitelisted(env, &token) {
+        return Err(EscrowError::TokenNotAllowed);
+    }
+    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
     let escrow_id = next_escrow_id(env);
     let escrow = Escrow {
         buyer: buyer.clone(),
