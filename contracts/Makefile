@@ -14,4 +14,4 @@ check:
 	$(CARGO) clippy --workspace -- -D warnings
 
 clean:
-	$(CARGO) clean
+	cd contracts && $(CARGO) clean

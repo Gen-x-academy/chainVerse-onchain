@@ -896,6 +896,9 @@ impl SubscriptionContract {
         // Validate payment
         Self::validate_payment(&env, &payment_token, final_price, &user)?;
 
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&user, &env.current_contract_address(), &final_price);
+
         // Calculate duration based on billing cycle
         let duration = match billing_cycle {
             BillingCycle::Monthly => 30 * 24 * 60 * 60, // 30 days in seconds

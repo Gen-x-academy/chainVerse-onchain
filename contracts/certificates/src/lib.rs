@@ -138,4 +138,9 @@ impl CertificateContract {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
+
+    /// Returns the contract version for post-deploy verification.
+    pub fn version(_env: Env) -> u32 {
+        1
+    }
 }
