@@ -15,7 +15,7 @@ This directory contains deployment metadata for ChainVerse smart contracts on St
 | course_registry    | TBD     | Registry of courses and enrollment records       |
 | payout_automation  | TBD     | Automated instructor payout processing           |
 
-> Addresses are populated in [`testnet.json`](./testnet.json) after each deployment.
+> Addresses are populated automatically in [`testnet.json`](./testnet.json) by `scripts/deploy-testnet.sh` after each deployment.
 
 ## Network Details
 
