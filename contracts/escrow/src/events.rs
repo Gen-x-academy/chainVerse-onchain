@@ -1,9 +1,16 @@
-use soroban_sdk::{Address, Env, symbol_short};
+use soroban_sdk::{symbol_short, Address, Env};
 
-pub fn escrow_created(env: &Env, escrow_id: u64, buyer: &Address, seller: &Address, amount: i128) {
+pub fn escrow_created(env: &Env, escrow_id: u64, buyer: &Address, seller: &Address, token: &Address, amount: i128) {
     env.events().publish(
-        (symbol_short!("ESC_CRTD"),),
-        (escrow_id, buyer.clone(), seller.clone(), amount),
+        (symbol_short!("ESC_CRE"),),
+        (escrow_id, buyer.clone(), seller.clone(), token.clone(), amount),
+    );
+}
+
+pub fn escrow_released(env: &Env, escrow_id: u64, seller: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("ESC_RLSD"),),
+        (escrow_id, seller.clone(), amount),
     );
 }
 
@@ -11,5 +18,19 @@ pub fn escrow_refunded(env: &Env, escrow_id: u64, buyer: &Address, amount: i128)
     env.events().publish(
         (symbol_short!("ESC_RFND"),),
         (escrow_id, buyer.clone(), amount),
+    );
+}
+
+pub fn fee_collected(env: &Env, escrow_id: u64, token: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("FEE_COL"),),
+        (escrow_id, token.clone(), amount),
+    );
+}
+
+pub fn fee_withdrawn(env: &Env, recipient: &Address, token: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("FEE_WDR"),),
+        (recipient.clone(), token.clone(), amount),
     );
 }

@@ -114,6 +114,22 @@ mod test {
         assert_eq!(config.admin, new_admin);
     }
 
+    #[test]
+    fn test_transfer_admin_emits_adm_chng_event() {
+        let (env, _, client) = setup();
+        let admin = init(&env, &client);
+        let new_admin = Address::generate(&env);
+
+        let events_before = env.events().all().len();
+        client.transfer_admin(&admin, &new_admin);
+        let events_after = env.events().all().len();
+
+        assert!(
+            events_after > events_before,
+            "ADM_CHNG event must be emitted on transfer_admin"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // only_admin guard — unauthorized paths
     // -----------------------------------------------------------------------
@@ -147,7 +163,10 @@ mod test {
         let non_admin = Address::generate(&env);
 
         let result = client.try_update_config(&non_admin, &Some(999u32), &None);
-        assert!(result.is_err(), "non-admin must not be able to update config");
+        assert!(
+            result.is_err(),
+            "non-admin must not be able to update config"
+        );
     }
 
     #[test]
@@ -158,7 +177,10 @@ mod test {
         let victim = Address::generate(&env);
 
         let result = client.try_transfer_admin(&non_admin, &victim);
-        assert!(result.is_err(), "non-admin must not be able to transfer admin");
+        assert!(
+            result.is_err(),
+            "non-admin must not be able to transfer admin"
+        );
     }
 
     #[test]
@@ -168,7 +190,9 @@ mod test {
 
         // Contract never initialized — only_admin returns NotInitialized
         assert!(client.try_pause(&caller).is_err());
-        assert!(client.try_update_config(&caller, &Some(1u32), &None).is_err());
+        assert!(client
+            .try_update_config(&caller, &Some(1u32), &None)
+            .is_err());
         assert!(client.try_transfer_admin(&caller, &caller).is_err());
     }
 
@@ -226,7 +250,7 @@ mod test {
         assert_eq!(stats.active, 0);
 
         // Create an escrow
-        let id1 = client.create_escrow(&buyer, &seller, &token, &1000);
+        let id1 = client.create_escrow(&buyer, &seller, &token, &1000, &0);
 
         let stats = client.get_escrow_stats();
         assert_eq!(stats.total, 1);

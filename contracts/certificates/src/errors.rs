@@ -11,4 +11,5 @@ pub enum ContractError {
     CertificateExists = 5,
     InvalidProof = 6,
     SoulboundTransferNotAllowed = 7,
+    CertificateNotFound = 8,
 }

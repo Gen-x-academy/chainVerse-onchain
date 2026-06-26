@@ -1,0 +1,56 @@
+/* Responsive Typography Scaling - FE-137
+ *
+ * Uses CSS clamp() for fluid type scaling between mobile and desktop breakpoints.
+ * Formula: clamp(min, preferred, max)
+ * preferred = calc(base + (scale * 1vw))
+ */
+
+:root {
+  /* Base font size scales from 14px (mobile) to 16px (desktop) */
+  --font-size-base: clamp(0.875rem, 0.8rem + 0.375vw, 1rem);
+
+  /* Heading scale */
+  --font-size-xs:   clamp(0.75rem,  0.7rem + 0.25vw,  0.875rem);
+  --font-size-sm:   clamp(0.875rem, 0.8rem + 0.375vw, 1rem);
+  --font-size-md:   clamp(1rem,     0.9rem + 0.5vw,   1.125rem);
+  --font-size-lg:   clamp(1.125rem, 1rem + 0.625vw,   1.25rem);
+  --font-size-xl:   clamp(1.25rem,  1.1rem + 0.75vw,  1.5rem);
+  --font-size-2xl:  clamp(1.5rem,   1.3rem + 1vw,     2rem);
+  --font-size-3xl:  clamp(1.875rem, 1.5rem + 1.875vw, 2.5rem);
+  --font-size-4xl:  clamp(2.25rem,  1.75rem + 2.5vw,  3rem);
+
+  /* Line heights */
+  --line-height-tight:  1.25;
+  --line-height-normal: 1.5;
+  --line-height-loose:  1.75;
+
+  /* Letter spacing */
+  --letter-spacing-tight:  -0.025em;
+  --letter-spacing-normal:  0em;
+  --letter-spacing-wide:    0.025em;
+  --letter-spacing-wider:   0.05em;
+}
+
+/* Utility classes */
+.text-xs   { font-size: var(--font-size-xs); }
+.text-sm   { font-size: var(--font-size-sm); }
+.text-base { font-size: var(--font-size-base); }
+.text-md   { font-size: var(--font-size-md); }
+.text-lg   { font-size: var(--font-size-lg); }
+.text-xl   { font-size: var(--font-size-xl); }
+.text-2xl  { font-size: var(--font-size-2xl); }
+.text-3xl  { font-size: var(--font-size-3xl); }
+.text-4xl  { font-size: var(--font-size-4xl); }
+
+/* Heading defaults with fluid scaling */
+h1 { font-size: var(--font-size-4xl); line-height: var(--line-height-tight); }
+h2 { font-size: var(--font-size-3xl); line-height: var(--line-height-tight); }
+h3 { font-size: var(--font-size-2xl); line-height: var(--line-height-tight); }
+h4 { font-size: var(--font-size-xl);  line-height: var(--line-height-normal); }
+h5 { font-size: var(--font-size-lg);  line-height: var(--line-height-normal); }
+h6 { font-size: var(--font-size-md);  line-height: var(--line-height-normal); }
+
+body {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+}

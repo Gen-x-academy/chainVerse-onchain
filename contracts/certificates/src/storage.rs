@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env};
+use soroban_sdk::{contracttype, Address, Bytes, Env};
 
 use crate::{Certificate, ContractError};
 
@@ -8,6 +8,7 @@ pub enum DataKey {
     Admin,
     Paused,
     Certificate(Address, u64),
+    BackendPubKey,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -59,9 +60,26 @@ pub fn load_certificate(env: &Env, wallet: &Address, course_id: u64) -> Option<C
         .get(&DataKey::Certificate(wallet.clone(), course_id))
 }
 
+// ~1 year expressed in ledger entries (5-second close time)
+pub const MIN_TTL: u32 = 3_110_400;
+pub const MAX_TTL: u32 = 6_220_800;
+
 pub fn save_certificate(env: &Env, wallet: &Address, course_id: u64, certificate: &Certificate) {
-    env.storage().persistent().set(
-        &DataKey::Certificate(wallet.clone(), course_id),
-        certificate,
-    );
+    let key = DataKey::Certificate(wallet.clone(), course_id);
+    env.storage().persistent().set(&key, certificate);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+pub fn remove_certificate(env: &Env, wallet: &Address, course_id: u64) {
+    env.storage()
+        .persistent()
+        .remove(&DataKey::Certificate(wallet.clone(), course_id));
+}
+
+pub fn set_backend_pubkey(env: &Env, pubkey: &Bytes) {
+    env.storage().instance().set(&DataKey::BackendPubKey, pubkey);
+}
+
+pub fn get_backend_pubkey(env: &Env) -> Option<Bytes> {
+    env.storage().instance().get(&DataKey::BackendPubKey)
 }

@@ -10,23 +10,76 @@ mod types;
 mod version;
 
 pub use errors::EscrowError;
-pub use types::{Escrow, EscrowStatus};
+pub use types::{Escrow, EscrowStatus, FeeRecord};
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 #[contract]
 pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Whitelist a token so it can be used in escrows. Admin-only in production;
-    /// kept simple here as a direct call for composability.
-    pub fn whitelist_token(env: Env, token: Address) {
-        storage::whitelist_token(&env, &token);
+    /// Sets the initial escrow admin or rotates the admin after deployment.
+    ///
+    /// The `admin` parameter is the address that will be stored as the new
+    /// administrator. If an admin is already configured, the current admin must
+    /// authorize the call; otherwise the proposed admin must authorize the
+    /// initial setup. This function does not return contract-defined errors.
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), EscrowError> {
+        let old_admin = storage::get_admin(&env);
+        if let Some(current_admin) = old_admin.clone() {
+            current_admin.require_auth();
+        } else {
+            admin.require_auth();
+        }
+
+        storage::set_admin(&env, &admin);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ADM_CHNG"),),
+            (old_admin, admin),
+        );
+        Ok(())
     }
 
-    /// Create a new escrow. Transfers `amount` of `token` from `buyer` into
-    /// the contract and returns the new escrow ID.
+    /// Allows a token address to be used when creating new escrows.
+    ///
+    /// The `token` parameter identifies the token contract to whitelist.
+    /// Security requirement: only the configured admin may call this function.
+    /// Returns `EscrowError::Unauthorized` if no admin exists or the admin does
+    /// not authorize the call.
+    ///
+    /// # Security Note
+    /// This function requires admin authorization to prevent reentrancy or
+    /// infinite-mint attacks from malicious token contracts.
+    pub fn whitelist_token(env: Env, token: Address) -> Result<(), EscrowError> {
+        storage::require_admin(&env)?;
+        storage::whitelist_token(&env, &token);
+        Ok(())
+    }
+
+    /// Upgrades the current escrow contract to `new_wasm_hash`.
+    ///
+    /// The `admin` parameter must match the stored admin and authorize through
+    /// `storage::require_admin`; `new_wasm_hash` is the target WASM hash.
+    /// Returns `EscrowError::Unauthorized` if the stored admin is missing, the
+    /// authorization fails, or the supplied `admin` is not the stored admin.
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), EscrowError> {
+        let stored_admin = storage::require_admin(&env)?;
+        if stored_admin != admin {
+            return Err(EscrowError::Unauthorized);
+        }
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    /// Creates a new pending escrow and transfers the buyer's tokens into it.
+    ///
+    /// The `buyer` funds the escrow, `seller` receives funds when released,
+    /// `token` must be whitelisted, `amount` is the deposited token quantity,
+    /// and `expiration` is the ledger timestamp after which refunds may occur.
+    /// Security requirement: the buyer must authorize the token transfer.
+    /// Returns `InvalidAmount`, `InvalidRecipient`, `InvalidExpiration`, or
+    /// `TokenNotAllowed` when validation fails.
     pub fn create_escrow(
         env: Env,
         buyer: Address,
@@ -35,39 +88,211 @@ impl EscrowContract {
         amount: i128,
         expiration: u64,
     ) -> Result<u64, EscrowError> {
+        if storage::is_paused(&env) {
+            return Err(EscrowError::ContractPaused);
+        }
         create::create_escrow(&env, buyer, seller, token, amount, expiration)
     }
 
-    /// Release escrowed funds to the seller.
-    /// Must be called by the buyer.
+    /// Releases escrowed funds to the seller for an active escrow.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to release. Security
+    /// requirement: the escrow buyer must authorize the call. Returns `NotFound`
+    /// if the escrow does not exist, `AlreadyReleased` for completed escrows,
+    /// `NotPending` for disputed or otherwise non-pending escrows, and `Expired`
+    /// if the escrow has already expired.
     pub fn release_funds(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        if storage::is_paused(&env) {
+            return Err(EscrowError::ContractPaused);
+        }
         release::release_funds(&env, escrow_id)
     }
 
-    /// Refund escrowed funds to the buyer after the escrow has expired.
-    /// Must be called by the buyer.
+    /// Refunds escrowed funds to the buyer after expiration.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to refund. Security
+    /// requirement: the escrow buyer must authorize the call. Returns `NotFound`
+    /// if the escrow does not exist, `NotPending` when it is not refundable, and
+    /// `NotExpired` if the current ledger timestamp is still before expiration.
     pub fn refund_buyer(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        if storage::is_paused(&env) {
+            return Err(EscrowError::ContractPaused);
+        }
         refund::refund_buyer(&env, escrow_id)
     }
 
-    /// Returns the escrow record for the given ID.
+    /// Returns the ordered list of escrow IDs that used `token`.
+    ///
+    /// This read-only helper returns an empty list when no escrows have been
+    /// created with the given token. It does not modify contract state.
+    pub fn get_escrows_by_token(env: Env, token: Address) -> Vec<u64> {
+        storage::get_token_index(&env, &token)
+    }
+
+    /// Loads the escrow record for `escrow_id`.
+    ///
+    /// This read-only helper has no authorization requirement. It returns
+    /// `EscrowError::NotFound` when no escrow exists for the supplied ID.
     pub fn get_escrow(env: Env, escrow_id: u64) -> Result<Escrow, EscrowError> {
         storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)
     }
 
-    /// Returns the contract version string.
+    /// Returns the total token amount ever deposited through escrow creation.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and does not return contract-defined errors.
+    pub fn get_total_volume(env: Env) -> i128 {
+        storage::get_total_volume(&env)
+    }
+
+    /// Returns the accumulated protocol fees for `token`.
+    ///
+    /// The `token` parameter identifies the token whose fee balance should be
+    /// read. This read-only helper has no authorization requirement and returns
+    /// zero when no fees have been recorded.
+    pub fn get_fees_collected(env: Env, token: Address) -> i128 {
+        storage::get_protocol_fee(&env, &token)
+    }
+
+    /// Returns the complete fee-collection history in chronological order.
+    ///
+    /// This read-only helper has no authorization requirement and returns an
+    /// empty list when no fees have been recorded.
+    pub fn get_fee_history(env: Env) -> Vec<FeeRecord> {
+        storage::get_fee_history(&env)
+    }
+
+    /// Returns the total number of escrow IDs that have been created.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and returns zero before the first escrow is
+    /// created.
+    pub fn get_escrow_count(env: Env) -> u64 {
+        storage::get_escrow_count(&env)
+    }
+
+    /// Marks a pending escrow as disputed to block normal release or refund flow.
+    ///
+    /// The `escrow_id` parameter identifies the escrow to dispute. Security
+    /// requirement: the current implementation requires buyer authorization.
+    /// Returns `NotFound` when the escrow is missing, `AlreadyDisputed` when it
+    /// is already disputed, and `NotPending` when it is not pending.
+    pub fn flag_dispute(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        let mut escrow = storage::load_escrow(&env, escrow_id).ok_or(EscrowError::NotFound)?;
+
+        if escrow.status == EscrowStatus::Disputed {
+            return Err(EscrowError::AlreadyDisputed);
+        }
+        if escrow.status != EscrowStatus::Pending {
+            return Err(EscrowError::NotPending);
+        }
+
+        escrow.buyer.require_auth();
+
+        escrow.status = EscrowStatus::Disputed;
+        storage::save_escrow(&env, escrow_id, &escrow);
+        Ok(())
+    }
+
+    /// Placeholder entry point for resolving a disputed escrow.
+    ///
+    /// The `_escrow_id` parameter identifies the escrow and `_release_to_seller`
+    /// will eventually choose the ruling direction. Security requirements are
+    /// not yet implemented because arbitration is still a placeholder. This
+    /// function always returns `EscrowError::DisputeResolutionNotImplemented`.
+    pub fn resolve_dispute(
+        _env: Env,
+        _escrow_id: u64,
+        _release_to_seller: bool,
+    ) -> Result<(), EscrowError> {
+        Err(EscrowError::DisputeResolutionNotImplemented)
+    }
+
+    /// Withdraws accumulated protocol fees for `token` to `recipient`.
+    ///
+    /// Security requirement: the configured admin must authorize the call.
+    /// Returns `Unauthorized` if no admin is configured or authorization fails,
+    /// `NoFeesAvailable` when the token has no accumulated fees, and
+    /// `ContractPaused` when the contract is paused.
+    pub fn withdraw_fees(env: Env, token: Address, recipient: Address) -> Result<(), EscrowError> {
+        if storage::is_paused(&env) {
+            return Err(EscrowError::ContractPaused);
+        }
+
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        admin.require_auth();
+
+        let fees = storage::get_protocol_fee(&env, &token);
+        if fees == 0 {
+            return Err(EscrowError::NoFeesAvailable);
+        }
+
+        soroban_sdk::token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &recipient,
+            &fees,
+        );
+
+        storage::clear_protocol_fee(&env, &token);
+        events::fee_withdrawn(&env, &recipient, &token, fees);
+        Ok(())
+    }
+
+    /// Returns the static contract version string.
+    ///
+    /// This read-only helper takes no contract parameters beyond `env`, has no
+    /// authorization requirement, and does not return contract-defined errors.
     pub fn version(env: Env) -> String {
         String::from_str(&env, version::CONTRACT_VERSION)
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
+    }
+
+    /// Admin-only: pauses the contract, blocking all critical state-mutating functions.
+    ///
+    /// Returns `Unauthorized` if no admin is configured or authorization fails.
+    /// Idempotent: calling on an already-paused contract succeeds silently.
+    pub fn pause(env: Env, caller: Address) -> Result<(), EscrowError> {
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        if caller != admin {
+            return Err(EscrowError::Unauthorized);
+        }
+        caller.require_auth();
+        storage::set_paused(&env, true);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("PAUSED"),), (caller,));
+        Ok(())
+    }
+
+    /// Admin-only: unpauses the contract, allowing critical functions to proceed.
+    ///
+    /// Returns `Unauthorized` if no admin is configured or authorization fails.
+    /// Idempotent: calling on an already-unpaused contract succeeds silently.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), EscrowError> {
+        let admin = storage::get_admin(&env).ok_or(EscrowError::Unauthorized)?;
+        if caller != admin {
+            return Err(EscrowError::Unauthorized);
+        }
+        caller.require_auth();
+        storage::set_paused(&env, false);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("UNPAUSED"),), (caller,));
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
+    extern crate std;
+
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Events as _, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
-        Env,
+        Env, IntoVal, Symbol,
     };
 
     // -----------------------------------------------------------------------
@@ -76,7 +301,15 @@ mod test {
 
     /// Registers all contracts, whitelists the token, mints tokens to the
     /// buyer, and sets the ledger timestamp to `now`.
-    fn setup(now: u64) -> (Env, Address, Address, Address, EscrowContractClient<'static>) {
+    fn setup(
+        now: u64,
+    ) -> (
+        Env,
+        Address,
+        Address,
+        Address,
+        EscrowContractClient<'static>,
+    ) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -91,14 +324,111 @@ mod test {
         let token_addr = env.register_stellar_asset_contract(token_admin.clone());
         let stellar = StellarAssetClient::new(&env, &token_addr);
 
+        let admin = Address::generate(&env);
         let buyer = Address::generate(&env);
         let seller = Address::generate(&env);
 
         stellar.mint(&buyer, &1000);
 
+        client.set_admin(&admin);
         client.whitelist_token(&token_addr);
 
         (env, buyer, seller, token_addr, client)
+    }
+
+    #[test]
+    fn test_whitelist_token_requires_admin_setup() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_addr = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &escrow_addr);
+
+        let token_admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(token_admin);
+
+        let result = client.try_whitelist_token(&token_addr);
+        assert_eq!(result, Err(Ok(EscrowError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_whitelist_token_requires_admin_auth() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_addr = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &escrow_addr);
+
+        let admin = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token_addr = env.register_stellar_asset_contract(token_admin);
+
+        client.set_admin(&admin);
+        client.whitelist_token(&token_addr);
+
+        assert_eq!(
+            env.auths(),
+            std::vec![(
+                admin,
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        client.address.clone(),
+                        Symbol::new(&env, "whitelist_token"),
+                        (&token_addr,).into_val(&env),
+                    )),
+                    sub_invocations: std::vec![],
+                },
+            )]
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // get_total_volume
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_total_volume_increases_correctly() {
+        let (_, buyer, seller, token_addr, client) = setup(1000);
+
+        assert_eq!(client.get_total_volume(), 0);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+        assert_eq!(client.get_total_volume(), 300);
+
+        client.create_escrow(&buyer, &seller, &token_addr, &200, &9000);
+        assert_eq!(client.get_total_volume(), 500);
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_expired_timestamps() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &300, &1000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidExpiration)));
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_same_party() {
+        let (_env, buyer, _seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &buyer, &token_addr, &300, &2000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidRecipient)));
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_zero_amount() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &0, &9000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_create_escrow_rejects_negative_amount() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let result = client.try_create_escrow(&buyer, &seller, &token_addr, &-1, &9000);
+        assert_eq!(result, Err(Ok(EscrowError::InvalidAmount)));
     }
 
     // -----------------------------------------------------------------------
@@ -115,8 +445,9 @@ mod test {
         let escrow = client.get_escrow(&escrow_id);
         assert_eq!(escrow.status, EscrowStatus::Completed);
 
+        // Default protocol fee is 100 bps (1%), so seller receives 500 - 5 = 495
         let seller_balance = TokenClient::new(&env, &token_addr).balance(&seller);
-        assert_eq!(seller_balance, 500);
+        assert_eq!(seller_balance, 495);
     }
 
     #[test]
@@ -132,6 +463,18 @@ mod test {
 
         let result = client.try_release_funds(&escrow_id);
         assert!(result.is_err(), "release after expiration must fail");
+    }
+
+    #[test]
+    fn test_release_funds_fails_on_double_release() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &9000);
+        client.release_funds(&escrow_id);
+
+        // Second release must be rejected with AlreadyReleased
+        let result = client.try_release_funds(&escrow_id);
+        assert!(result.is_err(), "double release must be rejected");
     }
 
     // -----------------------------------------------------------------------
@@ -169,10 +512,7 @@ mod test {
         let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &500, &5000);
 
         let result = client.try_refund_buyer(&escrow_id);
-        assert!(
-            result.is_err(),
-            "refund before expiration must be rejected"
-        );
+        assert!(result.is_err(), "refund before expiration must be rejected");
         let _ = env; // keep env alive
     }
 
@@ -181,6 +521,16 @@ mod test {
         let (_env, _buyer, _seller, _token, client) = setup(1000);
         let result = client.try_refund_buyer(&999);
         assert!(result.is_err(), "refund of non-existent escrow must fail");
+    }
+
+    #[test]
+    fn test_escrow_created_event_includes_token() {
+        let (_env, buyer, seller, token_addr, client) = setup(1000);
+        let escrow_id = client.create_escrow(&buyer, &seller, &token_addr, &300, &9000);
+
+        // Verify the stored escrow record holds the correct token address
+        let escrow = client.get_escrow(&escrow_id);
+        assert_eq!(escrow.token, token_addr, "escrow token must match deposit token");
     }
 
     #[test]
