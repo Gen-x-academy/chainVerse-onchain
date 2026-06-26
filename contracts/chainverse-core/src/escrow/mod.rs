@@ -2,6 +2,9 @@ use soroban_sdk::{contracttype, token::Client as TokenClient, Address, Env, Vec}
 
 use crate::errors::ContractError;
 
+const MIN_TTL: u32 = 4_096;
+const MAX_TTL: u32 = 100_000;
+
 pub mod active_query;
 pub mod id_generator;
 pub mod pagination;
@@ -66,9 +69,9 @@ fn load(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
 }
 
 fn save(env: &Env, record: &EscrowRecord) {
-    env.storage()
-        .persistent()
-        .set(&EscrowKey::Record(record.id), record);
+    let key = EscrowKey::Record(record.id);
+    env.storage().persistent().set(&key, record);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 }
 
 // ---------------------------------------------------------------------------
