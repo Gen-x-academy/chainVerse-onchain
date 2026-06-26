@@ -36,6 +36,7 @@ pub struct Vault {
 }
 
 #[contracttype]
+pub enum DataKey { Vault(BytesN<32>), VaultCount }
 pub enum DataKey { Vault(BytesN<32>) }
 
 #[contract]
@@ -55,6 +56,16 @@ impl EscrowVault {
         if approvers.is_empty() {
             return Err(VaultError::EmptyApprovers);
         }
+        for i in 0..approvers.len() {
+            for j in (i + 1)..approvers.len() {
+                if approvers.get(i) == approvers.get(j) {
+                    return Err(VaultError::DuplicateApprover);
+                }
+            }
+        }
+        if amount <= 0 {
+            return Err(VaultError::InvalidAmount);
+        }
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
@@ -65,6 +76,7 @@ impl EscrowVault {
             &soroban_sdk::Bytes::from_slice(&env, &env.ledger().timestamp().to_be_bytes())
         ).into();
         let vault = Vault {
+            depositor, recipient, token, amount, approvers, approvals: 0, threshold, status: VaultStatus::Pending,
             depositor, recipient, token, amount, approvers, approvals: 0, threshold,
             status: VaultStatus::Pending,
         };
