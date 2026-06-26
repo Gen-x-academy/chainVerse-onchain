@@ -9,6 +9,11 @@ WASM_DIR="contracts/target/wasm32-unknown-unknown/release"
 OUTPUT_DIR="deployments"
 OUTPUT_FILE="$OUTPUT_DIR/testnet.json"
 
+# Pre-flight: top up deployer account via Friendbot
+PUBKEY=$(stellar keys address deployer --network testnet)
+curl -s "https://friendbot.stellar.org?addr=$PUBKEY" > /dev/null
+echo "Account balance topped up"
+
 # Ensure WASMs exist
 if [ ! -d "$WASM_DIR" ]; then
   echo "No WASM build found. Run ./scripts/build-all.sh first."
