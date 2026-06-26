@@ -55,9 +55,12 @@ pub fn has_certificate(env: &Env, wallet: &Address, course_id: u64) -> bool {
 }
 
 pub fn load_certificate(env: &Env, wallet: &Address, course_id: u64) -> Option<Certificate> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Certificate(wallet.clone(), course_id))
+    let key = DataKey::Certificate(wallet.clone(), course_id);
+    let cert = env.storage().persistent().get(&key);
+    if cert.is_some() {
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+    }
+    cert
 }
 
 // ~1 year expressed in ledger entries (5-second close time)
