@@ -40,16 +40,6 @@ jobs:
         if: steps.cache-stellar-cli.outputs.cache-hit != 'true'
         run: cargo install --locked stellar-cli --features opt
 
-      - name: Set up Stellar CLI identity
-        env:
-          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
-        run: |
-          if [ -z "${STELLAR_SECRET_KEY:-}" ]; then
-            echo "error: STELLAR_SECRET_KEY secret is required" >&2
-            exit 1
-          fi
-          stellar keys generate ci --secret-key "$STELLAR_SECRET_KEY"
-
       - name: Configure Stellar testnet network
         run: |
           stellar network add testnet \
@@ -57,18 +47,19 @@ jobs:
             --network-passphrase 'Test SDF Network ; September 2015'
 
       - name: Security audit
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: Cargo audit
         working-directory: contracts
-        run: cargo audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
 
       - name: Format check
+        working-directory: contracts
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --target wasm32-unknown-unknown -- -D warnings
+        working-directory: contracts
+        run: cargo clippy --workspace -- -D warnings
+
       - name: Build all contracts
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release

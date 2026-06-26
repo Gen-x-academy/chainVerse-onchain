@@ -24,3 +24,7 @@ required-features = ["testutils"]
 [[test]]
 name = "security_tests"
 required-features = ["testutils"]
+
+[[test]]
+name = "init_tests"
+required-features = ["testutils"]
