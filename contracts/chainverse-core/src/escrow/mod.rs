@@ -81,9 +81,6 @@ fn save(env: &Env, record: &EscrowRecord) {
 /// Creates a new escrow and returns its id.
 /// The depositor must authorise this call.
 /// `expires_at` is a Unix timestamp; pass 0 for no expiry.
-///
-/// Note: No token transfer occurs in this function. The escrow ID is assigned and the record is saved here.
-/// The actual token transfer to the contract happens in `release`, ensuring that if a transfer fails, no ID is consumed without a record.
 pub fn create(
     env: &Env,
     depositor: Address,
@@ -95,6 +92,8 @@ pub fn create(
     depositor.require_auth();
     crate::utils::validate_amount(amount)?;
     crate::utils::require_supported_token(env, &token)?;
+
+    TokenClient::new(env, &token).transfer(&depositor, &env.current_contract_address(), &amount);
 
     let id = next_id(env);
     let record = EscrowRecord {
