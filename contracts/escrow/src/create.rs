@@ -21,6 +21,15 @@ pub fn create_escrow(
     if buyer == seller {
         return Err(EscrowError::InvalidRecipient);
     }
+
+    buyer.require_auth();
+
+    if !is_token_whitelisted(env, &token) {
+        return Err(EscrowError::TokenNotAllowed);
+    }
+
+    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
+
     buyer.require_auth();
     if !is_token_whitelisted(env, &token) {
         return Err(EscrowError::TokenNotAllowed);
