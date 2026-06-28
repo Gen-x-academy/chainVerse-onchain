@@ -11,7 +11,6 @@ pub struct CertificateContract;
 
 #[contractimpl]
 impl CertificateContract {
-    /// Initializes the contract with the admin address and backend public key.
     pub fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() { return Err(ContractError::AlreadyInitialized); }
@@ -21,7 +20,7 @@ impl CertificateContract {
         storage::set_paused(&env, false);
         Ok(())
     }
-    /// Pauses or unpauses certificate minting. Only callable by admin.
+
     pub fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         storage::require_admin(&env, &caller)?;
@@ -29,7 +28,7 @@ impl CertificateContract {
         env.events().publish((symbol_short!("paused"),), paused);
         Ok(())
     }
-    /// Returns whether the contract is currently paused.
+
     pub fn is_paused(env: Env) -> bool { storage::get_paused(&env) }
 
     /// Mints a certificate to the recipient after verifying the backend proof.
@@ -88,8 +87,8 @@ impl CertificateContract {
         env.events().publish((symbol_short!("CERT_RVK"),), (recipient, course_id));
         Ok(())
     }
-    /// Returns a certificate for the given recipient and course, if it exists.
-    pub fn get_certificate(env: Env, recipient: Address, course_id: BytesN<32>) -> Option<Certificate> {
-        storage::get_certificate(&env, &(recipient, course_id))
+
+    pub fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate> {
+        storage::load_certificate(&env, &recipient, course_id)
     }
 }
