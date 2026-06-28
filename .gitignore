@@ -3,3 +3,8 @@ target/
 node_modules/
 .env
 .vs
+*.wasm
+contracts/target/
+.rustc_info.json
+Cargo.lock
+.secret_key
