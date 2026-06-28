@@ -36,8 +36,10 @@ pub struct Vault {
 }
 
 #[contracttype]
-pub enum DataKey { Vault(BytesN<32>), VaultCount }
 pub enum DataKey { Vault(BytesN<32>) }
+
+#[contracttype]
+pub enum VotedKey { Voted(BytesN<32>, Address) }
 
 #[contract]
 pub struct EscrowVault;
@@ -66,9 +68,6 @@ impl EscrowVault {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
-        if amount <= 0 {
-            return Err(VaultError::InvalidAmount);
-        }
         depositor.require_auth();
         soroban_sdk::token::Client::new(&env, &token)
             .transfer(&depositor, &env.current_contract_address(), &amount);
@@ -76,12 +75,52 @@ impl EscrowVault {
             &soroban_sdk::Bytes::from_slice(&env, &env.ledger().timestamp().to_be_bytes())
         ).into();
         let vault = Vault {
-            depositor, recipient, token, amount, approvers, approvals: 0, threshold, status: VaultStatus::Pending,
             depositor, recipient, token, amount, approvers, approvals: 0, threshold,
             status: VaultStatus::Pending,
         };
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
         Ok(id)
+    }
+
+    /// Approve a vault release. Checks: vault is Pending, caller is in approvers,
+    /// caller hasn't voted yet. Releases funds to recipient when threshold is met.
+    pub fn approve(env: Env, vault_id: BytesN<32>, caller: Address) -> Result<(), VaultError> {
+        caller.require_auth();
+
+        let mut vault: Vault = env.storage().persistent()
+            .get(&DataKey::Vault(vault_id.clone()))
+            .ok_or(VaultError::NotFound)?;
+
+        // Vault must be Pending
+        if !matches!(vault.status, VaultStatus::Pending) {
+            return Err(VaultError::NotPending);
+        }
+
+        // Caller must be in the approvers list
+        if !vault.approvers.contains(&caller) {
+            return Err(VaultError::Unauthorized);
+        }
+
+        // Caller must not have voted yet
+        let voted_key = VotedKey::Voted(vault_id.clone(), caller.clone());
+        if env.storage().persistent().get::<_, bool>(&voted_key).unwrap_or(false) {
+            return Err(VaultError::AlreadyVoted);
+        }
+
+        // Record vote
+        env.storage().persistent().set(&voted_key, &true);
+        vault.approvals += 1;
+
+        // Release funds if threshold met
+        if vault.approvals >= vault.threshold {
+            vault.status = VaultStatus::Released;
+            soroban_sdk::token::Client::new(&env, &vault.token)
+                .transfer(&env.current_contract_address(), &vault.recipient, &vault.amount);
+        }
+
+        env.storage().persistent().set(&DataKey::Vault(vault_id.clone()), &vault);
+        env.storage().persistent().extend_ttl(&DataKey::Vault(vault_id), VAULT_MIN_TTL, VAULT_MAX_TTL);
+        Ok(())
     }
 }
