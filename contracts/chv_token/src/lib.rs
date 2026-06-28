@@ -8,6 +8,7 @@ use error::TokenError;
 const CONTRACT_VERSION: &str = "1.0.0";
 const DECIMALS: u32 = 7;
 const TOTAL_SUPPLY: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
+const MAX_SUPPLY: i128 = 1_000_000_000 * 10_i128.pow(DECIMALS);
 const BALANCE_MIN_TTL: u32 = 100_000;
 const BALANCE_MAX_TTL: u32 = 200_000;
 
@@ -16,6 +17,7 @@ pub enum DataKey {
     Admin,
     Balance(Address),
     Initialized,
+    TotalMinted,
 }
 
 #[contract]
@@ -58,5 +60,24 @@ impl CHVToken {
 
     pub fn balance(env: Env, account: Address) -> i128 {
         env.storage().persistent().get(&DataKey::Balance(account)).unwrap_or(0)
+    }
+
+    /// Admin-only mint with hard supply cap. Fixes #630.
+    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
+        admin.require_auth();
+        let minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
+        if minted + amount > MAX_SUPPLY {
+            return Err(TokenError::InvalidAmount);
+        }
+        env.storage().instance().set(&DataKey::TotalMinted, &(minted + amount));
+        let bal: i128 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(bal + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.events().publish((symbol_short!("MINT"),), (to, amount));
+        Ok(())
     }
 }

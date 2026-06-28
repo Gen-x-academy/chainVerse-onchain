@@ -9,6 +9,7 @@ pub enum DataKey {
     Paused,
     Certificate(Address, u64),
     BackendPubKey,
+    NextTokenId,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -85,4 +86,20 @@ pub fn set_backend_pubkey(env: &Env, pubkey: &Bytes) {
 
 pub fn get_backend_pubkey(env: &Env) -> Option<Bytes> {
     env.storage().instance().get(&DataKey::BackendPubKey)
+}
+
+pub fn next_token_id(env: &Env) -> u64 {
+    let key = DataKey::NextTokenId;
+    let id: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &(id + 1));
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+    id
+}
+
+pub fn get_certificate_by_key(env: &Env, wallet: &Address, course_id: u64) -> Option<Certificate> {
+    load_certificate(env, wallet, course_id)
+}
+
+pub fn certificate_exists_by_key(env: &Env, wallet: &Address, course_id: u64) -> bool {
+    has_certificate(env, wallet, course_id)
 }
