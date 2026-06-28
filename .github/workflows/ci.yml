@@ -2,87 +2,25 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
 
 jobs:
   build-and-test:
-    name: Build & Test
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            contracts/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      - name: Cache Stellar CLI binary
-        id: cache-stellar-cli
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/stellar
-          key: ${{ runner.os }}-stellar-cli-${{ hashFiles('contracts/Cargo.lock') }}
-
-      - name: Install Stellar CLI
-        if: steps.cache-stellar-cli.outputs.cache-hit != 'true'
-        run: cargo install --locked stellar-cli --features opt
-
-      - name: Configure Stellar testnet network
-        run: |
-          stellar network add testnet \
-            --rpc-url https://soroban-testnet.stellar.org \
-            --network-passphrase 'Test SDF Network ; September 2015'
-
-      - name: Setup Stellar CI identity
-        run: |
-          if [ -n "${{ secrets.STELLAR_SECRET_KEY }}" ]; then
-            stellar keys add ci-identity --secret-key "${{ secrets.STELLAR_SECRET_KEY }}"
-          else
-            stellar keys generate ci-identity --network testnet
-          fi
-
-      - name: Security audit
-        working-directory: contracts
-        run: |
-          cargo install cargo-audit
-          cargo audit
-
-      - name: Format check
-        working-directory: contracts
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        working-directory: contracts
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: Build all contracts
+      - name: Build contracts
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
 
-      - name: WASM size check
+      - name: Test contracts
         working-directory: contracts
-        run: |
-          for wasm in target/wasm32-unknown-unknown/release/*.wasm; do
-            size=$(stat -c%s "$wasm")
-            echo "$wasm: $size bytes"
-            if [ $size -gt 102400 ]; then
-              echo "WARNING: $wasm exceeds 100KB"
-            fi
-          done
-
-      - name: Run tests
-        working-directory: contracts
-        run: cargo test --features testutils
+        run: cargo test

@@ -12,6 +12,8 @@ members = [
     "chv_token",
     "shared",
     "common",
+    "staking",
+    "token",
 ]
 
 [workspace.dependencies]

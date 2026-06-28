@@ -10,4 +10,5 @@ pub enum TokenError {
     InsufficientBalance = 3,
     Unauthorized = 4,
     SelfTransfer = 5,
+    SupplyCapExceeded = 6,
 }
