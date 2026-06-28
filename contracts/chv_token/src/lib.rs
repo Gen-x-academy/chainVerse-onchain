@@ -59,4 +59,13 @@ impl CHVToken {
     pub fn balance(env: Env, account: Address) -> i128 {
         env.storage().persistent().get(&DataKey::Balance(account)).unwrap_or(0)
     }
+
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin {
+            panic!("unauthorized");
+        }
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
 }
