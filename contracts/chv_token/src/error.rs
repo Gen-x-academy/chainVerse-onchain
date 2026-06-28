@@ -11,4 +11,5 @@ pub enum TokenError {
     Unauthorized = 4,
     SelfTransfer = 5,
     SupplyCapExceeded = 6,
+    NoPendingAdmin = 7,
 }

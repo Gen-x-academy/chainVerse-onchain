@@ -71,4 +71,16 @@ impl EscrowContract {
     pub fn get_escrow(env: Env, escrow_id: u64) -> Option<Escrow> {
         storage::get_escrow(&env, escrow_id)
     }
+
+    /// #638 — Sets the protocol fee in basis points. Hard-capped at 5000 bps (50%)
+    /// to prevent admin from setting a fee that drains all payments.
+    pub fn set_protocol_fee_bps(env: Env, admin: Address, bps: u32) -> Result<(), EscrowError> {
+        const MAX_FEE_BPS: u32 = 5_000; // 50% hard cap
+        storage::require_admin(&env, &admin)?;
+        if bps > MAX_FEE_BPS {
+            return Err(EscrowError::Unauthorized);
+        }
+        storage::set_protocol_fee_bps(&env, bps);
+        Ok(())
+    }
 }

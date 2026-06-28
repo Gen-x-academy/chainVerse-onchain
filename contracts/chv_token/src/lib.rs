@@ -17,6 +17,7 @@ pub enum DataKey {
     Balance(Address),
     Initialized,
     TotalMinted,
+    PendingAdmin,
 }
 
 #[contract]
@@ -88,5 +89,28 @@ impl CHVToken {
 
     pub fn total_minted(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0)
+    }
+
+    /// #635 — Step 1: current admin proposes a new admin. Does not transfer immediately.
+    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), TokenError> {
+        let stored: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::Unauthorized)?;
+        if stored != current_admin { return Err(TokenError::Unauthorized); }
+        current_admin.require_auth();
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish((symbol_short!("ADM_PROP"),), (current_admin, new_admin));
+        Ok(())
+    }
+
+    /// #635 — Step 2: pending admin accepts and becomes the new admin.
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
+            .ok_or(TokenError::NoPendingAdmin)?;
+        if pending != new_admin { return Err(TokenError::Unauthorized); }
+        new_admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish((symbol_short!("ADM_NEW"),), (new_admin,));
+        Ok(())
     }
 }
