@@ -46,6 +46,14 @@ jobs:
             --rpc-url https://soroban-testnet.stellar.org \
             --network-passphrase 'Test SDF Network ; September 2015'
 
+      - name: Setup Stellar CI identity
+        run: |
+          if [ -n "${{ secrets.STELLAR_SECRET_KEY }}" ]; then
+            stellar keys add ci-identity --secret-key "${{ secrets.STELLAR_SECRET_KEY }}"
+          else
+            stellar keys generate ci-identity --network testnet
+          fi
+
       - name: Security audit
         working-directory: contracts
         run: |
