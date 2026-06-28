@@ -1,72 +1,31 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-NETWORK="testnet"
-SOURCE="deployer"
-RPC_URL="https://soroban-testnet.stellar.org"
-PASSPHRASE="Test SDF Network ; September 2015"
-WASM_DIR="contracts/target/wasm32-unknown-unknown/release"
-OUTPUT_DIR="deployments"
-OUTPUT_FILE="$OUTPUT_DIR/testnet.json"
+[ -f .env.testnet ] && source .env.testnet
 
-# Pre-flight: top up deployer account via Friendbot
-PUBKEY=$(stellar keys address deployer --network testnet)
-curl -s "https://friendbot.stellar.org?addr=$PUBKEY" > /dev/null
-echo "Account balance topped up"
+echo "Building all contracts..."
+cargo build --target wasm32-unknown-unknown --release
 
-# Ensure WASMs exist
-if [ ! -d "$WASM_DIR" ]; then
-  echo "No WASM build found. Run ./scripts/build-all.sh first."
-  exit 1
-fi
+deploy() {
+  local name=$1
+  local wasm=$2
+  echo "Deploying $name..."
+  stellar contract deploy \
+    --wasm "target/wasm32-unknown-unknown/release/${wasm}.wasm" \
+    --source "$STELLAR_IDENTITY" \
+    --network testnet
+}
 
-WASMS=$(find "$WASM_DIR" -maxdepth 1 -name "*.wasm" | sort)
-if [ -z "$WASMS" ]; then
-  echo "No .wasm files found in $WASM_DIR. Run ./scripts/build-all.sh first."
-  exit 1
-fi
+CHV_TOKEN_CONTRACT_ID=$(deploy chv_token chv_token)
+CERTIFICATES_CONTRACT_ID=$(deploy certificates certificates)
+ESCROW_VAULT_CONTRACT_ID=$(deploy escrow-vault escrow_vault)
+STAKING_CONTRACT_ID=$(deploy staking staking)
+PAYOUT_AUTOMATION_CONTRACT_ID=$(deploy payout-automation payout_automation)
+COURSE_REGISTRY_CONTRACT_ID=$(deploy course_registry course_registry)
 
-mkdir -p "$OUTPUT_DIR"
-
-# Start JSON output
-echo "{" > "$OUTPUT_FILE"
-echo "  \"network\": \"$NETWORK\"," >> "$OUTPUT_FILE"
-echo "  \"rpc_url\": \"$RPC_URL\"," >> "$OUTPUT_FILE"
-echo "  \"passphrase\": \"$PASSPHRASE\"," >> "$OUTPUT_FILE"
-echo "  \"deployed_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"," >> "$OUTPUT_FILE"
-echo "  \"contracts\": {" >> "$OUTPUT_FILE"
-
-FIRST=true
-for WASM in $WASMS; do
-  NAME=$(basename "$WASM" .wasm)
-
-  echo "Deploying $NAME..."
-
-  CONTRACT_ID=$(stellar contract deploy \
-    --wasm "$WASM" \
-    --source "$SOURCE" \
-    --network "$NETWORK" 2>&1)
-
-  if [ $? -ne 0 ]; then
-    echo "  ERROR deploying $NAME: $CONTRACT_ID"
-    CONTRACT_ID="ERROR"
-  else
-    echo "  $NAME => $CONTRACT_ID"
-  fi
-
-  if [ "$FIRST" = true ]; then
-    FIRST=false
-  else
-    # Close previous entry
-    sed -i '$ s/$/,/' "$OUTPUT_FILE"
-  fi
-
-  echo "    \"$NAME\": \"$CONTRACT_ID\"" >> "$OUTPUT_FILE"
-done
-
-echo "  }" >> "$OUTPUT_FILE"
-echo "}" >> "$OUTPUT_FILE"
-
-echo ""
-echo "Deployment complete. Addresses written to $OUTPUT_FILE"
-cat "$OUTPUT_FILE"
+echo "CHV_TOKEN_CONTRACT_ID=$CHV_TOKEN_CONTRACT_ID"
+echo "CERTIFICATES_CONTRACT_ID=$CERTIFICATES_CONTRACT_ID"
+echo "ESCROW_VAULT_CONTRACT_ID=$ESCROW_VAULT_CONTRACT_ID"
+echo "STAKING_CONTRACT_ID=$STAKING_CONTRACT_ID"
+echo "PAYOUT_AUTOMATION_CONTRACT_ID=$PAYOUT_AUTOMATION_CONTRACT_ID"
+echo "COURSE_REGISTRY_CONTRACT_ID=$COURSE_REGISTRY_CONTRACT_ID"
