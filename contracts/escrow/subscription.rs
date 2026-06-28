@@ -519,6 +519,10 @@ impl SubscriptionContract {
         // Require authorization from subscription owner
         subscription.user.require_auth();
 
+        if subscription.status == MembershipStatus::Inactive {
+            return Err(Error::SubscriptionNotActive);
+        }
+
         if subscription.status == MembershipStatus::Paused {
             return Err(Error::SubscriptionPaused);
         }

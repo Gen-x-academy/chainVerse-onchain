@@ -38,6 +38,9 @@ pub struct Vault {
 #[contracttype]
 pub enum DataKey { Vault(BytesN<32>), VaultCount }
 
+#[contracttype]
+pub enum VotedKey { Voted(BytesN<32>, Address) }
+
 #[contract]
 pub struct EscrowVault;
 

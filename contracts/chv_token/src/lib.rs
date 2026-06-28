@@ -82,6 +82,21 @@ impl CHVToken {
         Ok(())
     }
 
+    pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        from.require_auth();
+        let bal: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        if bal < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(bal - amount));
+        env.events().publish((symbol_short!("BURN"),), (from, amount));
+        Ok(())
+    }
+
     pub fn balance(env: Env, account: Address) -> i128 {
         env.storage().persistent().get(&DataKey::Balance(account)).unwrap_or(0)
     }
