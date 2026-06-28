@@ -75,7 +75,9 @@ impl CHVToken {
         let to_bal: i128 = env.storage().persistent()
             .get(&DataKey::Balance(to.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
         Ok(())
     }
