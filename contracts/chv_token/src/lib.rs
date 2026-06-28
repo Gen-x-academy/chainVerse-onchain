@@ -1,13 +1,12 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Env,
 };
 mod error;
 use error::TokenError;
 
-const CONTRACT_VERSION: &str = "1.0.0";
 const DECIMALS: u32 = 7;
-const TOTAL_SUPPLY: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
+/// Fix #630: Hard cap — 1 billion CHV tokens. Enforced in mint(); cannot be changed post-deploy.
 const MAX_SUPPLY: i128 = 1_000_000_000 * 10_i128.pow(DECIMALS);
 const BALANCE_MIN_TTL: u32 = 100_000;
 const BALANCE_MAX_TTL: u32 = 200_000;
@@ -30,10 +29,33 @@ impl CHVToken {
             return Err(TokenError::AlreadyInitialized);
         }
         admin.require_auth();
+        let initial_supply: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Initialized, &true);
-        env.storage().instance().set(&(DataKey::Balance(treasury.clone())), &TOTAL_SUPPLY);
-        env.events().publish((symbol_short!("INIT"),), (admin, treasury, TOTAL_SUPPLY));
+        env.storage().instance().set(&(DataKey::Balance(treasury.clone())), &initial_supply);
+        env.storage().instance().set(&DataKey::TotalMinted, &initial_supply);
+        env.events().publish((symbol_short!("INIT"),), (admin, treasury, initial_supply));
+        Ok(())
+    }
+
+    /// Fix #630: Mints new CHV tokens to `to`, enforcing the MAX_SUPPLY hard cap.
+    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        admin.require_auth();
+        let total_minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
+        if total_minted + amount > MAX_SUPPLY {
+            return Err(TokenError::SupplyCapExceeded);
+        }
+        let balance: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().instance().set(&DataKey::TotalMinted, &(total_minted + amount));
+        env.events().publish((symbol_short!("MINT"),), (to, amount));
         Ok(())
     }
 
@@ -53,8 +75,25 @@ impl CHVToken {
         let to_bal: i128 = env.storage().persistent()
             .get(&DataKey::Balance(to.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
+        Ok(())
+    }
+
+    pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        from.require_auth();
+        let bal: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        if bal < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(bal - amount));
+        env.events().publish((symbol_short!("BURN"),), (from, amount));
         Ok(())
     }
 
@@ -62,22 +101,7 @@ impl CHVToken {
         env.storage().persistent().get(&DataKey::Balance(account)).unwrap_or(0)
     }
 
-    /// Admin-only mint with hard supply cap. Fixes #630.
-    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
-        if amount <= 0 {
-            return Err(TokenError::InvalidAmount);
-        }
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(TokenError::NotInitialized)?;
-        admin.require_auth();
-        let minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
-        if minted + amount > MAX_SUPPLY {
-            return Err(TokenError::InvalidAmount);
-        }
-        env.storage().instance().set(&DataKey::TotalMinted, &(minted + amount));
-        let bal: i128 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
-        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(bal + amount));
-        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
-        env.events().publish((symbol_short!("MINT"),), (to, amount));
-        Ok(())
+    pub fn total_minted(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0)
     }
 }

@@ -3,7 +3,7 @@
 const VAULT_MIN_TTL: u32 = 100_000;
 const VAULT_MAX_TTL: u32 = 500_000;
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -37,7 +37,9 @@ pub struct Vault {
 
 #[contracttype]
 pub enum DataKey { Vault(BytesN<32>), VaultCount }
-pub enum DataKey { Vault(BytesN<32>) }
+
+#[contracttype]
+pub enum VotedKey { Voted(BytesN<32>, Address) }
 
 #[contract]
 pub struct EscrowVault;
@@ -66,9 +68,6 @@ impl EscrowVault {
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
         }
-        if amount <= 0 {
-            return Err(VaultError::InvalidAmount);
-        }
         depositor.require_auth();
         soroban_sdk::token::Client::new(&env, &token)
             .transfer(&depositor, &env.current_contract_address(), &amount);
@@ -76,12 +75,50 @@ impl EscrowVault {
             &soroban_sdk::Bytes::from_slice(&env, &env.ledger().timestamp().to_be_bytes())
         ).into();
         let vault = Vault {
-            depositor, recipient, token, amount, approvers, approvals: 0, threshold, status: VaultStatus::Pending,
-            depositor, recipient, token, amount, approvers, approvals: 0, threshold,
+            depositor: depositor.clone(),
+            recipient,
+            token,
+            amount,
+            approvers,
+            approvals: 0,
+            threshold,
             status: VaultStatus::Pending,
         };
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
+        // #639 — emit event for audit trail
+        env.events().publish((symbol_short!("VAULT_NEW"),), (id.clone(), depositor.clone(), amount));
         Ok(id)
+    }
+
+    pub fn approve(
+        env: Env,
+        caller: Address,
+        id: BytesN<32>,
+    ) -> Result<(), VaultError> {
+        caller.require_auth();
+        let mut vault: Vault = env.storage().persistent()
+            .get(&DataKey::Vault(id.clone()))
+            .ok_or(VaultError::NotFound)?;
+        match vault.status {
+            VaultStatus::Pending => {}
+            _ => return Err(VaultError::NotPending),
+        }
+        // #640 — prevent depositor from self-approving their own vault release
+        if caller == vault.depositor && vault.approvers.contains(&caller) {
+            return Err(VaultError::Unauthorized);
+        }
+        if !vault.approvers.contains(&caller) {
+            return Err(VaultError::Unauthorized);
+        }
+        vault.approvals += 1;
+        if vault.approvals >= vault.threshold {
+            vault.status = VaultStatus::Released;
+            soroban_sdk::token::Client::new(&env, &vault.token)
+                .transfer(&env.current_contract_address(), &vault.recipient, &vault.amount);
+        }
+        env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
+        env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
+        Ok(())
     }
 }
