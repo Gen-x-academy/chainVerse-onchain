@@ -149,7 +149,6 @@ pub fn get_protocol_fee_bps(env: &Env) -> u32 {
         .unwrap_or(DEFAULT_PROTOCOL_FEE_BPS)
 }
 
-#[allow(dead_code)]
 pub fn set_protocol_fee_bps(env: &Env, bps: u32) {
     env.storage().instance().set(&DataKey::ProtocolFeeBps, &bps);
 }
