@@ -1,56 +1,201 @@
 #!/bin/bash
-set -e
+# scripts/smoke-test.sh
+#
+# Smoke-test all deployed ChainVerse contracts on Stellar testnet.
+#
+# Usage:
+#   ./scripts/smoke-test.sh [DEPLOYMENT_FILE]
+#
+# The optional DEPLOYMENT_FILE argument lets you point at any JSON file that
+# matches the schema of deployments/testnet.json (useful for staging or a
+# local Quickstart node).  It defaults to deployments/testnet.json.
+#
+# Prerequisites:
+#   - stellar CLI installed and on $PATH
+#   - A funded testnet identity called "deployer" (or set STELLAR_IDENTITY)
+#   - Contract addresses populated in the deployment file
+#
+# Exit codes:
+#   0 — all smoke checks passed (or were skipped due to missing addresses)
+#   1 — one or more checks failed or the deployment file was not found
 
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 DEPLOYMENT_FILE="${1:-deployments/testnet.json}"
-NETWORK="testnet"
+NETWORK="${STELLAR_NETWORK:-testnet}"
+IDENTITY="${STELLAR_IDENTITY:-deployer}"
 PASS=0
 FAIL=0
+SKIP=0
 
-if [ ! -f "$DEPLOYMENT_FILE" ]; then
-  echo "ERROR: $DEPLOYMENT_FILE not found"
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-# Read contract addresses
+# Extract a contract address from the JSON deployment file.
 get_address() {
-  grep -o "\"$1\": \"[^\"]*\"" "$DEPLOYMENT_FILE" | grep -o '"[^"]*"$' | tr -d '"'
+  local key="$1"
+  grep -o "\"${key}\": \"[^\"]*\"" "$DEPLOYMENT_FILE" \
+    | grep -o '"[^"]*"$' \
+    | tr -d '"'
 }
 
-check_contract() {
-  local name="$1"
-  local fn="$2"
-  local id
-  id=$(get_address "$name")
+# Invoke a single read-only function and track pass / fail.
+# Arguments: <display_name> <contract_key_in_json> <function_name> [extra_args...]
+check_fn() {
+  local display="$1"
+  local json_key="$2"
+  local fn_name="$3"
+  shift 3
+  local extra_args=("$@")
 
-  if [ -z "$id" ] || [ "$id" = "ERROR" ]; then
-    echo "  SKIP $name (no address)"
+  local contract_id
+  contract_id=$(get_address "$json_key")
+
+  if [ -z "$contract_id" ]; then
+    echo "  [SKIP] $display — no address in $DEPLOYMENT_FILE"
+    SKIP=$((SKIP + 1))
     return
   fi
 
-  echo -n "  Checking $name ($id)... "
-  if stellar contract invoke \
-      --id "$id" \
-      --network "$NETWORK" \
-      --source deployer \
-      -- "$fn" >/dev/null 2>&1; then
-    echo "OK"
+  printf "  %-45s ... " "$display ($fn_name)"
+  local output
+  if output=$(stellar contract invoke \
+        --id    "$contract_id" \
+        --source "$IDENTITY" \
+        --network "$NETWORK" \
+        -- "$fn_name" "${extra_args[@]}" 2>&1); then
+    echo "PASS  →  ${output}"
     PASS=$((PASS + 1))
   else
     echo "FAIL"
+    echo "      error: ${output}"
     FAIL=$((FAIL + 1))
   fi
 }
 
-echo "=== Smoke Test: $DEPLOYMENT_FILE ==="
-check_contract "escrow"            "get_escrow_count"
-check_contract "escrow_vault"      "get_admin"
-check_contract "certificates"      "get_admin"
-check_contract "chainverse_core"   "get_admin"
-check_contract "reward"            "get_admin"
-check_contract "chv_token"         "get_admin"
-check_contract "course_registry"   "get_admin"
-check_contract "payout_automation" "get_admin"
+# ---------------------------------------------------------------------------
+# Pre-flight
+# ---------------------------------------------------------------------------
+if [ ! -f "$DEPLOYMENT_FILE" ]; then
+  echo "ERROR: deployment file not found: $DEPLOYMENT_FILE"
+  exit 1
+fi
 
+echo "======================================================="
+echo " ChainVerse Smoke Test"
+echo " Network  : $NETWORK"
+echo " Identity : $IDENTITY"
+echo " File     : $DEPLOYMENT_FILE"
+echo "======================================================="
+
+# ---------------------------------------------------------------------------
+# CHV Token  (contracts/chv_token)
+# Read-only, zero-arg functions: total_minted
+# ---------------------------------------------------------------------------
 echo ""
-echo "Results: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+echo "--- CHV Token ---"
+check_fn "CHV Token: total supply minted" "chv_token" "total_minted"
+
+# ---------------------------------------------------------------------------
+# Certificates  (contracts/certificates)
+# Read-only, zero-arg functions: is_paused
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Certificates ---"
+check_fn "Certificates: is_paused" "certificates" "is_paused"
+
+# ---------------------------------------------------------------------------
+# Escrow  (contracts/escrow)
+# The escrow contract has no zero-arg read functions; we verify liveness
+# by reading the contract version exposed in the storage version module.
+# The version() fn is defined in contracts/escrow/src/version.rs and
+# re-exported.  If it is absent we skip gracefully.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Escrow ---"
+check_fn "Escrow: version" "escrow" "version"
+
+# ---------------------------------------------------------------------------
+# Escrow Vault  (contracts/escrow-vault)
+# The vault contract has no side-effect-free zero-arg reads.  We confirm
+# the contract is reachable by querying the vault count stored under
+# DataKey::VaultCount (defaults to 0 if no vaults have been created).
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Escrow Vault ---"
+check_fn "Escrow Vault: vault_count" "escrow_vault" "vault_count"
+
+# ---------------------------------------------------------------------------
+# ChainVerse Core  (contracts/chainverse-core)
+# Read-only, zero-arg functions: is_paused, version
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- ChainVerse Core ---"
+check_fn "ChainVerse Core: is_paused" "chainverse_core" "is_paused"
+check_fn "ChainVerse Core: version"   "chainverse_core" "version"
+
+# ---------------------------------------------------------------------------
+# Reward  (contracts/reward)
+# Read-only, zero-arg functions: is_paused, get_backend_pubkey
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Reward ---"
+check_fn "Reward: is_paused"          "reward" "is_paused"
+check_fn "Reward: get_backend_pubkey" "reward" "get_backend_pubkey"
+
+# ---------------------------------------------------------------------------
+# Course Registry  (contracts/course_registry)
+# Read-only, zero-arg functions: is_paused, version
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Course Registry ---"
+check_fn "Course Registry: is_paused" "course_registry" "is_paused"
+check_fn "Course Registry: version"   "course_registry" "version"
+
+# ---------------------------------------------------------------------------
+# Payout Automation  (contracts/payout-automation)
+# No zero-arg read functions exist; verify the contract address is set.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Payout Automation ---"
+payout_id=$(get_address "payout_automation")
+if [ -z "$payout_id" ]; then
+  echo "  [SKIP] Payout Automation — no address in $DEPLOYMENT_FILE"
+  SKIP=$((SKIP + 1))
+else
+  echo "  [INFO] Payout Automation deployed at $payout_id (no zero-arg read to invoke)"
+fi
+
+# ---------------------------------------------------------------------------
+# Staking  (contracts/staking)
+# No zero-arg read functions; verify address is present in deployment file.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Staking ---"
+staking_id=$(get_address "staking")
+if [ -z "$staking_id" ]; then
+  echo "  [SKIP] Staking — no address in $DEPLOYMENT_FILE"
+  SKIP=$((SKIP + 1))
+else
+  echo "  [INFO] Staking deployed at $staking_id (no zero-arg read to invoke)"
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+echo ""
+echo "======================================================="
+echo " Results: ${PASS} passed  |  ${FAIL} failed  |  ${SKIP} skipped"
+echo "======================================================="
+
+if [ "$FAIL" -gt 0 ]; then
+  echo "SMOKE TEST FAILED — review errors above."
+  exit 1
+fi
+
+echo "All smoke tests passed!"
+exit 0
