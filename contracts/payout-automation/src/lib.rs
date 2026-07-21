@@ -1,12 +1,19 @@
 #![no_std]
 
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod payment_test;
+
+#[cfg(test)]
+mod test;
+
 const MAX_BATCH_SIZE: u32 = 100;
-const AUTH_MIN_TTL: u32 = 17_280;
-const AUTH_MAX_TTL: u32 = 518_400;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short,
-    token::Client as TokenClient, Address, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype,
+    token::Client as TokenClient, Address, Env, Vec,
 };
 
 #[contracterror]
@@ -28,7 +35,9 @@ pub enum DataKey {
     Token,
     Initialized,
     Course(u64),
+    CourseFee(u64),
     Enrollment(Address, u64),
+    Treasury,
 }
 
 #[contract]
@@ -43,21 +52,59 @@ impl PayoutAutomation {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
+        // Default treasury to admin; can be overridden via set_treasury.
+        env.storage().instance().set(&DataKey::Treasury, &admin);
         env.storage().instance().set(&DataKey::Initialized, &true);
         Ok(())
     }
 
-    /// Register a course so students can enroll in it.
-    pub fn register_course(env: Env, caller: Address, course_id: u64, price: i128) -> Result<(), PayoutError> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(PayoutError::NotInitialized)?;
-        if caller != admin { return Err(PayoutError::Unauthorized); }
+    /// Admin-only: set the treasury address that receives platform fees.
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), PayoutError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(PayoutError::NotInitialized)?;
+        if caller != admin {
+            return Err(PayoutError::Unauthorized);
+        }
         caller.require_auth();
-        env.storage().persistent().set(&DataKey::Course(course_id), &price);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+        Ok(())
+    }
+
+    /// Register a course so students can enroll in it.
+    /// `fee_bps` is the platform fee in basis points (0–10000). 100 bps = 1%.
+    pub fn register_course(
+        env: Env,
+        caller: Address,
+        course_id: u64,
+        price: i128,
+        fee_bps: u32,
+    ) -> Result<(), PayoutError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(PayoutError::NotInitialized)?;
+        if caller != admin {
+            return Err(PayoutError::Unauthorized);
+        }
+        caller.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Course(course_id), &price);
+        env.storage()
+            .persistent()
+            .set(&DataKey::CourseFee(course_id), &fee_bps);
         Ok(())
     }
 
     /// Pay for a course. Verifies the course exists (#625) and the student isn't
     /// already enrolled (#626) before charging.
+    ///
+    /// If the course has a non-zero `fee_bps`, the platform fee is forwarded to
+    /// the treasury address. The remainder stays in the contract (for creator payouts).
     pub fn pay_for_course(
         env: Env,
         student: Address,
@@ -66,19 +113,53 @@ impl PayoutAutomation {
         student.require_auth();
 
         // #625 — phantom course guard
-        let price: i128 = env.storage().persistent()
+        let price: i128 = env
+            .storage()
+            .persistent()
             .get(&DataKey::Course(course_id))
             .ok_or(PayoutError::CourseNotFound)?;
 
         // #626 — double-payment prevention
-        if env.storage().persistent().has(&DataKey::Enrollment(student.clone(), course_id)) {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Enrollment(student.clone(), course_id))
+        {
             return Err(PayoutError::AlreadyEnrolled);
         }
 
-        let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
-        TokenClient::new(&env, &token).transfer(&student, &env.current_contract_address(), &price);
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(PayoutError::NotInitialized)?;
+        let token_client = TokenClient::new(&env, &token);
 
-        env.storage().persistent().set(&DataKey::Enrollment(student, course_id), &true);
+        // Transfer the full course price from the student to the contract.
+        token_client.transfer(&student, &env.current_contract_address(), &price);
+
+        // If a platform fee (in bps) is configured, forward it to the treasury.
+        let fee_bps: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CourseFee(course_id))
+            .unwrap_or(0);
+
+        if fee_bps > 0 {
+            let fee_amount = price * (fee_bps as i128) / 10_000_i128;
+            if fee_amount > 0 {
+                let treasury: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Treasury)
+                    .ok_or(PayoutError::NotInitialized)?;
+                token_client.transfer(&env.current_contract_address(), &treasury, &fee_amount);
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Enrollment(student, course_id), &true);
         Ok(())
     }
 
