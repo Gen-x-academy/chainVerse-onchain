@@ -129,3 +129,9 @@ impl CHVToken {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test;
+
+#[cfg(test)]
+mod extended_test;
