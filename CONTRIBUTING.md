@@ -61,3 +61,103 @@ The template location is at `.github/PULL_REQUEST_TEMPLATE.md` and provides a st
    ```bash
    rustup target add wasm32-unknown-unknown
    ```
+
+## Contributing to Soroban Contracts
+
+This section is for anyone adding or modifying a Rust/Soroban smart contract under `contracts/`.
+
+### Toolchain setup
+
+The pinned toolchain is defined in [`rust-toolchain.toml`](rust-toolchain.toml) — `rustup` picks it up automatically in this repo, so you don't need to install anything extra beyond the target and CLI below.
+
+```bash
+rustup target add wasm32-unknown-unknown
+rustup component add rustfmt clippy
+
+# Stellar CLI (used to build/deploy/invoke contracts)
+cargo install --locked stellar-cli --version 21.0.0 --features opt
+```
+
+### Build
+
+```bash
+stellar contract build
+```
+
+This compiles every contract crate to `target/wasm32-unknown-unknown/release/*.wasm`.
+
+### Test
+
+```bash
+cargo test --workspace
+```
+
+Run a single contract's tests while iterating:
+
+```bash
+cargo test -p chv_token
+```
+
+### Lint
+
+```bash
+cargo clippy --workspace -- -D warnings
+```
+
+CI treats clippy warnings as errors — run this locally before opening a PR.
+
+### Writing a new contract function — checklist
+
+Every state-changing function added to a contract must satisfy all of the following:
+
+- [ ] Call `.require_auth()` on the relevant `Address` for any state-changing function
+- [ ] Return a typed `Result<T, ContractError>` — no `unwrap()`, `expect()`, or `panic!()`
+- [ ] Emit an event via `env.events().publish(...)` describing what changed
+- [ ] Bump TTL (`extend_ttl`) on any persistent storage entry the function writes to
+- [ ] Add a unit test covering the success path and each error case
+
+Example, based on `contracts/chv_token/src/lib.rs`:
+
+```rust
+pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
+    if amount <= 0 {
+        return Err(TokenError::InvalidAmount);              // typed error, no panic
+    }
+    let admin: Address = env.storage().instance().get(&DataKey::Admin)
+        .ok_or(TokenError::NotInitialized)?;
+    admin.require_auth();                                    // auth check
+
+    let balance: i128 = env.storage().persistent()
+        .get(&DataKey::Balance(to.clone())).unwrap_or(0);
+    env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + amount));
+    env.storage().persistent()
+        .extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL); // TTL bump
+
+    env.events().publish((symbol_short!("MINT"),), (to, amount));                     // event
+    Ok(())
+}
+```
+
+### Contract upgrade procedure
+
+Contracts are upgraded by deploying new WASM and invoking the contract's own `upgrade` function with the new WASM hash — the contract address stays the same:
+
+```bash
+stellar contract upgrade \
+  --id <CONTRACT_ID> \
+  --source <identity> \
+  --network testnet \
+  -- upgrade \
+  --admin <ADMIN_ADDRESS> \
+  --new_wasm_hash <NEW_WASM_HASH>
+```
+
+The `upgrade` function must `require_auth()` on the admin before installing the new WASM.
+
+### PR checklist for contract changes
+
+- [ ] `stellar contract build` succeeds with no errors
+- [ ] `cargo test --workspace` passes
+- [ ] `cargo clippy --workspace -- -D warnings` reports no warnings
+- [ ] New/changed functions follow the checklist above (auth, typed errors, events, TTL, tests)
+- [ ] PR description explains the storage layout or event schema, if changed
