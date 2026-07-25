@@ -36,13 +36,9 @@ pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Update status to Completed
     escrow.status = EscrowStatus::Completed;
     save_escrow(env, escrow_id, &escrow);
-    decrement_active_escrows(env);
 
     // Emit release event
     escrow_released(env, escrow_id, &escrow.seller, escrow.amount);
-
-    // Emit event
-    escrow_completed(env, escrow_id, &escrow.buyer, &escrow.seller, escrow.amount);
 
     Ok(())
 }
