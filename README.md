@@ -6,6 +6,10 @@ Smart contracts for the ChainVerse Academy platform, built with [Soroban](https:
 
 ChainVerse Academy is a decentralized learning platform where course creators publish content and learners earn verifiable credentials. This repository contains the on-chain contracts that power token incentives, course enrollment, certification, staking, escrow, and automated payouts.
 
+## Getting Started
+
+New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through installing the Stellar CLI, creating and funding a testnet identity, and building, deploying, initializing, and smoke-testing every contract on Stellar testnet.
+
 ## Contracts
 
 | Contract | Path | Description |
@@ -58,35 +62,27 @@ Run tests for a specific contract:
 cargo test -p chv_token
 ```
 
-## Deployment Overview
+## Quick Start / Deployment Overview
+
+See [docs/testnet-setup.md](docs/testnet-setup.md) for the full walkthrough. Summary:
 
 1. Set up a funded testnet identity (see [docs/testnet-identity-setup.md](docs/testnet-identity-setup.md)).
-2. Deploy a contract:
+2. Deploy all contracts:
    ```sh
-   stellar contract deploy \
-     --wasm target/wasm32-unknown-unknown/release/chv_token.wasm \
-     --source <identity> \
-     --network testnet
+   ./scripts/deploy-testnet.sh
    ```
-3. Invoke an initialization function:
+3. Initialize all deployed contracts (admin, token, treasury, etc.):
    ```sh
-   stellar contract invoke \
-     --id <CONTRACT_ID> \
-     --source <identity> \
-     --network testnet \
-     -- initialize \
-     --admin <ADMIN_ADDRESS> \
-     --treasury <TREASURY_ADDRESS>
+   cp .env.testnet.example .env.testnet   # fill in contract IDs from step 2
+   ./scripts/init-contracts.sh
    ```
-4. To upgrade a deployed contract, call the `upgrade` function with the new WASM hash:
+4. Verify every contract is live and responding:
    ```sh
-   stellar contract invoke \
-     --id <CONTRACT_ID> \
-     --source <identity> \
-     --network testnet \
-     -- upgrade \
-     --admin <ADMIN_ADDRESS> \
-     --new_wasm_hash <NEW_WASM_HASH>
+   ./scripts/smoke-test.sh
+   ```
+5. To upgrade a deployed contract, call its `upgrade` function with the new WASM hash (all 8 core contracts expose this, admin-gated):
+   ```sh
+   ./scripts/upgrade-contract.sh testnet deployer <contract-name> <path-to-new-wasm>
    ```
 
 ## Contributing

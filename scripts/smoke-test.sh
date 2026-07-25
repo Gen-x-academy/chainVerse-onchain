@@ -110,24 +110,28 @@ check_fn "Certificates: is_paused" "certificates" "is_paused"
 
 # ---------------------------------------------------------------------------
 # Escrow  (contracts/escrow)
-# The escrow contract has no zero-arg read functions; we verify liveness
-# by reading the contract version exposed in the storage version module.
-# The version() fn is defined in contracts/escrow/src/version.rs and
-# re-exported.  If it is absent we skip gracefully.
+# The escrow contract has no zero-arg read functions.  We verify liveness
+# with get_escrow on an id that will not exist yet — a live contract returns
+# `None` (not an error), while an unreachable/undeployed contract fails.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Escrow ---"
-check_fn "Escrow: version" "escrow" "version"
+check_fn "Escrow: get_escrow" "escrow" "get_escrow" --escrow_id 0
 
 # ---------------------------------------------------------------------------
 # Escrow Vault  (contracts/escrow-vault)
-# The vault contract has no side-effect-free zero-arg reads.  We confirm
-# the contract is reachable by querying the vault count stored under
-# DataKey::VaultCount (defaults to 0 if no vaults have been created).
+# No side-effect-free zero-arg reads exist; verify the contract address is
+# present in the deployment file instead of invoking a state-changing fn.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Escrow Vault ---"
-check_fn "Escrow Vault: vault_count" "escrow_vault" "vault_count"
+escrow_vault_id=$(get_address "escrow_vault")
+if [ -z "$escrow_vault_id" ]; then
+  echo "  [SKIP] Escrow Vault — no address in $DEPLOYMENT_FILE"
+  SKIP=$((SKIP + 1))
+else
+  echo "  [INFO] Escrow Vault deployed at $escrow_vault_id (no zero-arg read to invoke)"
+fi
 
 # ---------------------------------------------------------------------------
 # ChainVerse Core  (contracts/chainverse-core)

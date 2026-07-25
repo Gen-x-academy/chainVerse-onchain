@@ -12,8 +12,8 @@ mod test;
 const MAX_BATCH_SIZE: u32 = 100;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype,
-    token::Client as TokenClient, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short,
+    token::Client as TokenClient, Address, BytesN, Env, Vec,
 };
 
 #[contracterror]
@@ -182,6 +182,16 @@ impl PayoutAutomation {
             if amount <= 0 { return Err(PayoutError::NegativeAmount); }
             client.transfer(&env.current_contract_address(), &recipient, &amount);
         }
+        Ok(())
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), PayoutError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(PayoutError::NotInitialized)?;
+        if caller != admin { return Err(PayoutError::Unauthorized); }
+        caller.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgraded"),), new_wasm_hash);
         Ok(())
     }
 }

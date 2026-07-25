@@ -83,4 +83,12 @@ impl EscrowContract {
         storage::set_protocol_fee_bps(&env, bps);
         Ok(())
     }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), EscrowError> {
+        storage::require_admin(&env)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((soroban_sdk::symbol_short!("upgraded"),), new_wasm_hash);
+        Ok(())
+    }
 }

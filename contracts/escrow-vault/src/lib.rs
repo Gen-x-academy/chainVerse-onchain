@@ -16,6 +16,8 @@ pub enum VaultError {
     EmptyApprovers = 5,
     DuplicateApprover = 6,
     InvalidAmount = 7,
+    AlreadyInitialized = 8,
+    NotInitialized = 9,
 }
 
 #[contracttype]
@@ -36,7 +38,7 @@ pub struct Vault {
 }
 
 #[contracttype]
-pub enum DataKey { Vault(BytesN<32>), VaultCount }
+pub enum DataKey { Vault(BytesN<32>), VaultCount, Admin }
 
 #[contracttype]
 pub enum VotedKey { Voted(BytesN<32>, Address) }
@@ -46,6 +48,25 @@ pub struct EscrowVault;
 
 #[contractimpl]
 impl EscrowVault {
+    /// One-time bootstrap of the contract admin, required before `upgrade()` can be used.
+    pub fn set_admin(env: Env, admin: Address) -> Result<(), VaultError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(VaultError::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        Ok(())
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), VaultError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(VaultError::NotInitialized)?;
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgraded"),), new_wasm_hash);
+        Ok(())
+    }
+
     pub fn create_vault(
         env: Env,
         depositor: Address,
