@@ -8,3 +8,8 @@ contracts/target/
 .rustc_info.json
 Cargo.lock
 .secret_key
+
+# Scratch files
+*.scratch.rs
+.codex
+scratch/
