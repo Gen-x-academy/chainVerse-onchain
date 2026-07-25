@@ -1,5 +1,5 @@
-use crate::errors::ContractError;
 use super::EscrowStatus;
+use crate::errors::ContractError;
 
 /// Validates that transitioning from `current` to `next` is a legal escrow state change.
 ///
@@ -14,7 +14,7 @@ pub fn validate_transition(
     next: &EscrowStatus,
 ) -> Result<(), ContractError> {
     match (current, next) {
-        (EscrowStatus::Pending, EscrowStatus::Released) => Ok(()),
+        (EscrowStatus::Pending, EscrowStatus::Completed) => Ok(()),
         (EscrowStatus::Pending, EscrowStatus::Cancelled) => Ok(()),
         _ => Err(ContractError::InvalidEscrowState),
     }

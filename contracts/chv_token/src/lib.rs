@@ -1,17 +1,23 @@
 #![no_std]
-
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Symbol, Vec, symbol_short
+    contract, contractimpl, contracttype, symbol_short, Address, Env,
 };
+mod error;
+use error::TokenError;
 
 const DECIMALS: u32 = 7;
-const TOTAL_SUPPLY: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
+/// Fix #630: Hard cap — 1 billion CHV tokens. Enforced in mint(); cannot be changed post-deploy.
+const MAX_SUPPLY: i128 = 1_000_000_000 * 10_i128.pow(DECIMALS);
+const BALANCE_MIN_TTL: u32 = 100_000;
+const BALANCE_MAX_TTL: u32 = 200_000;
 
 #[contracttype]
 pub enum DataKey {
     Admin,
     Balance(Address),
     Initialized,
+    TotalMinted,
+    PendingAdmin,
 }
 
 #[contract]
@@ -19,67 +25,113 @@ pub struct CHVToken;
 
 #[contractimpl]
 impl CHVToken {
-
-    /// Initialize contract and mint fixed supply to treasury
-    pub fn initialize(env: Env, admin: Address) {
-        // Prevent re-initialization
+    pub fn initialize(env: Env, admin: Address, treasury: Address) -> Result<(), TokenError> {
         if env.storage().instance().has(&DataKey::Initialized) {
-            panic!("Already initialized");
+            return Err(TokenError::AlreadyInitialized);
         }
-
         admin.require_auth();
-
-        // Set admin
+        let initial_supply: i128 = 100_000_000 * 10_i128.pow(DECIMALS);
         env.storage().instance().set(&DataKey::Admin, &admin);
-
-        // Mint entire supply to admin (treasury)
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(admin.clone()), &TOTAL_SUPPLY);
-
-        // Mark as initialized
         env.storage().instance().set(&DataKey::Initialized, &true);
+        env.storage().instance().set(&(DataKey::Balance(treasury.clone())), &initial_supply);
+        env.storage().instance().set(&DataKey::TotalMinted, &initial_supply);
+        env.events().publish((symbol_short!("INIT"),), (admin, treasury, initial_supply));
+        Ok(())
     }
 
-    /// Get total supply
-    pub fn total_supply(_env: Env) -> i128 {
-        TOTAL_SUPPLY
-    }
-
-    /// Get token decimals
-    pub fn decimals(_env: Env) -> u32 {
-        DECIMALS
-    }
-
-    /// Get balance of address
-    pub fn balance(env: Env, addr: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Balance(addr))
-            .unwrap_or(0)
-    }
-
-    /// Transfer tokens
-    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
-        from.require_auth();
-
+    /// Fix #630: Mints new CHV tokens to `to`, enforcing the MAX_SUPPLY hard cap.
+    pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), TokenError> {
         if amount <= 0 {
-            panic!("Invalid amount");
+            return Err(TokenError::InvalidAmount);
         }
-
-        let from_balance = Self::balance(env.clone(), from.clone());
-        if from_balance < amount {
-            panic!("Insufficient balance");
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        admin.require_auth();
+        let total_minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
+        if total_minted + amount > MAX_SUPPLY {
+            return Err(TokenError::SupplyCapExceeded);
         }
+        let balance: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().instance().set(&DataKey::TotalMinted, &(total_minted + amount));
+        env.events().publish((symbol_short!("MINT"),), (to, amount));
+        Ok(())
+    }
 
-        let to_balance = Self::balance(env.clone(), to.clone());
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if from == to {
+            return Err(TokenError::SelfTransfer);
+        }
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        from.require_auth();
+        let from_bal: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        if from_bal < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        let to_bal: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
+        Ok(())
+    }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(from), &(from_balance - amount));
+    pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        from.require_auth();
+        let bal: i128 = env.storage().persistent()
+            .get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        if bal < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(bal - amount));
+        env.events().publish((symbol_short!("BURN"),), (from, amount));
+        Ok(())
+    }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(to), &(to_balance + amount));
+    pub fn balance(env: Env, account: Address) -> i128 {
+        env.storage().persistent().get(&DataKey::Balance(account)).unwrap_or(0)
+    }
+
+    pub fn total_minted(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0)
+    }
+
+    /// #635 — Step 1: current admin proposes a new admin. Does not transfer immediately.
+    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), TokenError> {
+        let stored: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::Unauthorized)?;
+        if stored != current_admin { return Err(TokenError::Unauthorized); }
+        current_admin.require_auth();
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish((symbol_short!("ADM_PROP"),), (current_admin, new_admin));
+        Ok(())
+    }
+
+    /// #635 — Step 2: pending admin accepts and becomes the new admin.
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
+            .ok_or(TokenError::NoPendingAdmin)?;
+        if pending != new_admin { return Err(TokenError::Unauthorized); }
+        new_admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish((symbol_short!("ADM_NEW"),), (new_admin,));
+        Ok(())
     }
 }
+
+#[cfg(test)]
+mod test;
+
+#[cfg(test)]
+mod extended_test;

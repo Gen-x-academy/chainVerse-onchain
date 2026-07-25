@@ -1,9 +1,3 @@
-// A simple README for the hello_chainverse.rs file
+# hello_chainverse.rs (removed)
 
-This file contains a basic function:
-
-- `hello_chainverse()` — returns a friendly greeting string.
-
-Usage:
-
-You can import and call this function from your Rust code to print or use the greeting.
+The `hello_chainverse.rs` file was a stray scratch file located at the repository root. It was not part of any Cargo workspace crate and caused confusion for contributors. The file has been removed from the repository. No further action is required.

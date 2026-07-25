@@ -23,16 +23,22 @@ pub enum SubscriptionDataKey {
     TierList,
     TierPromotion(String),
     TierPromotionList,
+    PromoByCode(String),
     TierChangeRequest(String),
     UserTierChangeHistory(Address),
     TierAnalytics(String),
     UserSubscriptionByTier(Address, String),
 }
 
+const MIN_TTL: u32 = 17_280; // ~1 day
+const MAX_TTL: u32 = 518_400; // ~30 days
+
 pub struct SubscriptionContract;
 
 impl SubscriptionContract {
     fn require_admin(env: &Env, caller: &Address) -> Result<(), Error> {
+        caller.require_auth();
+
         let admin: Address = env
             .storage()
             .instance()
@@ -43,7 +49,6 @@ impl SubscriptionContract {
             return Err(Error::Unauthorized);
         }
 
-        caller.require_auth();
         Ok(())
     }
 
@@ -85,7 +90,7 @@ impl SubscriptionContract {
         env: &Env,
         payment_token: &Address,
         amount: i128,
-        _payer: &Address,
+        payer: &Address,
     ) -> Result<bool, Error> {
         // Check for non-negative amount
         if amount <= 0 {
@@ -100,11 +105,11 @@ impl SubscriptionContract {
             return Err(Error::InvalidPaymentToken);
         }
 
-        // Note: Balance checking is omitted in this implementation.
-        // In production, you would check the token balance using:
-        // let token_client = token::Client::new(env, payment_token);
-        // let balance = token_client.balance(payer);
-        // if balance < amount { return Err(Error::InsufficientBalance); }
+        let token_client = token::Client::new(env, payment_token);
+        let balance = token_client.balance(payer);
+        if balance < amount {
+            return Err(Error::InsufficientBalance);
+        }
 
         Ok(true)
     }
@@ -132,11 +137,8 @@ impl SubscriptionContract {
         // Validate payment first
         Self::validate_payment(&env, &payment_token, amount, &user)?;
 
-        // Note: Token transfer is omitted in this implementation.
-        // In production, you would transfer tokens using:
-        // let token_client = token::Client::new(&env, &payment_token);
-        // let contract_address = env.current_contract_address();
-        // token_client.transfer(&user, &contract_address, &amount);
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&user, &env.current_contract_address(), &amount);
 
         // Create subscription record
         let current_time = env.ledger().timestamp();
@@ -166,7 +168,7 @@ impl SubscriptionContract {
 
         // Store and extend TTL with same key
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit subscription created event
         env.events().publish(
@@ -267,7 +269,7 @@ impl SubscriptionContract {
 
         let key = SubscriptionDataKey::Subscription(id.clone());
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         env.events().publish(
             (
@@ -367,7 +369,7 @@ impl SubscriptionContract {
 
         let key = SubscriptionDataKey::Subscription(id.clone());
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         env.events().publish(
             (
@@ -433,10 +435,7 @@ impl SubscriptionContract {
 
     #[allow(deprecated)]
     pub fn set_usdc_contract(env: Env, admin: Address, usdc_address: Address) -> Result<(), Error> {
-        admin.require_auth();
-
-        // Check if admin is authorized (you might want to implement admin checking logic)
-        // For now, we'll store the USDC contract address
+        Self::require_admin(&env, &admin)?;
         env.storage()
             .instance()
             .set(&SubscriptionDataKey::UsdcContract, &usdc_address);
@@ -483,11 +482,35 @@ impl SubscriptionContract {
         } else {
             0
         };
+        // Calculate and transfer prorated refund for remaining subscription time
+        let current_time = env.ledger().timestamp();
+        if subscription.status == MembershipStatus::Active
+            && subscription.expires_at > current_time
+            && subscription.amount > 0
+        {
+            let remaining = subscription.expires_at - current_time;
+            let total_duration: u64 = match subscription.billing_cycle {
+                BillingCycle::Monthly => 30 * 24 * 60 * 60,
+                BillingCycle::Annual => 365 * 24 * 60 * 60,
+            };
+            let refund_amount =
+                (subscription.amount * remaining as i128) / total_duration as i128;
+            if refund_amount > 0 {
+                let token_client =
+                    token::Client::new(&env, &subscription.payment_token);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &subscription.user,
+                    &refund_amount,
+                );
+            }
+        }
 
         // Update status to inactive
         subscription.status = MembershipStatus::Inactive;
         subscription.paused_at = None;
         env.storage().persistent().set(&key, &subscription);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Refund the prorated remaining amount to the subscriber atomically
         // with the status change above.
@@ -536,6 +559,10 @@ impl SubscriptionContract {
         // Require authorization from subscription owner
         subscription.user.require_auth();
 
+        if subscription.status == MembershipStatus::Inactive {
+            return Err(Error::SubscriptionNotActive);
+        }
+
         if subscription.status == MembershipStatus::Paused {
             return Err(Error::SubscriptionPaused);
         }
@@ -549,11 +576,8 @@ impl SubscriptionContract {
         // Validate payment
         Self::validate_payment(&env, &payment_token, amount, &subscription.user)?;
 
-        // Note: Token transfer is omitted in this implementation.
-        // In production, you would transfer tokens using:
-        // let token_client = token::Client::new(&env, &payment_token);
-        // let contract_address = env.current_contract_address();
-        // token_client.transfer(&subscription.user, &contract_address, &amount);
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&subscription.user, &env.current_contract_address(), &amount);
 
         // Update subscription details - extend from current expiry date or current time, whichever is later
         let current_time = env.ledger().timestamp();
@@ -571,7 +595,7 @@ impl SubscriptionContract {
 
         // Store updated subscription and extend TTL
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Update tier analytics if subscription has a tier
         if !subscription.tier_id.is_empty() {
@@ -657,17 +681,27 @@ impl SubscriptionContract {
         Ok(())
     }
 
-    /// Generate a deterministic event_id from subscription_id
+    /// Generate a unique event_id using ledger timestamp and contract address as seed
     fn generate_event_id(env: &Env, subscription_id: &String) -> BytesN<32> {
-        // Use the subscription_id to generate a BytesN<32>
-        // Pad or truncate the subscription_id to create a 32-byte array
         let mut bytes = [0u8; 32];
 
-        // For simplicity, we'll create a deterministic ID based on the subscription_id length
-        // In production, you'd want to use a proper hashing mechanism
+        // Seed bytes 0-7 with ledger timestamp
+        let timestamp = env.ledger().timestamp();
+        let ts_bytes = timestamp.to_be_bytes();
+        bytes[..8].copy_from_slice(&ts_bytes);
+
+        // Seed bytes 8-27 with contract address bytes
+        let contract_addr = env.current_contract_address();
+        let addr_bytes = contract_addr.to_xdr(env);
+        let addr_len = addr_bytes.len().min(20);
+        for i in 0..addr_len {
+            bytes[8 + i as usize] = addr_bytes.get(i).unwrap_or(0);
+        }
+
+        // Seed bytes 28-31 with subscription_id length
         let id_len = subscription_id.len();
-        bytes[0] = (id_len % 256) as u8;
-        bytes[1] = ((id_len / 256) % 256) as u8;
+        bytes[28] = (id_len % 256) as u8;
+        bytes[29] = ((id_len / 256) % 256) as u8;
 
         BytesN::from_array(env, &bytes)
     }
@@ -678,7 +712,7 @@ impl SubscriptionContract {
 
     /// Creates a new subscription tier. Admin only.
     pub fn create_tier(env: Env, admin: Address, params: CreateTierParams) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         // Validate prices
         if params.price < 0 {
@@ -711,7 +745,7 @@ impl SubscriptionContract {
 
         // Store tier
         env.storage().persistent().set(&key, &tier);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Add to tier list
         let list_key = SubscriptionDataKey::TierList;
@@ -747,7 +781,7 @@ impl SubscriptionContract {
 
     /// Updates an existing subscription tier. Admin only.
     pub fn update_tier(env: Env, admin: Address, params: UpdateTierParams) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         let key = SubscriptionDataKey::Tier(params.id.clone());
         let mut tier: SubscriptionTier = env
@@ -789,6 +823,7 @@ impl SubscriptionContract {
 
         // Store updated tier
         env.storage().persistent().set(&key, &tier);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit tier updated event
         env.events().publish(
@@ -843,7 +878,7 @@ impl SubscriptionContract {
 
     /// Deactivates a tier (soft delete). Admin only.
     pub fn deactivate_tier(env: Env, admin: Address, id: String) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         let key = SubscriptionDataKey::Tier(id.clone());
         let mut tier: SubscriptionTier = env
@@ -856,6 +891,7 @@ impl SubscriptionContract {
         tier.updated_at = env.ledger().timestamp();
 
         env.storage().persistent().set(&key, &tier);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Emit tier deactivated event
         env.events().publish(
@@ -910,6 +946,9 @@ impl SubscriptionContract {
         // Validate payment
         Self::validate_payment(&env, &payment_token, final_price, &user)?;
 
+        let token_client = token::Client::new(&env, &payment_token);
+        token_client.transfer(&user, &env.current_contract_address(), &final_price);
+
         // Calculate duration based on billing cycle
         let duration = match billing_cycle {
             BillingCycle::Monthly => 30 * 24 * 60 * 60, // 30 days in seconds
@@ -940,7 +979,7 @@ impl SubscriptionContract {
 
         // Store subscription
         env.storage().persistent().set(&key, &subscription);
-        env.storage().persistent().extend_ttl(&key, 100, 1000);
+        env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
         // Update tier analytics
         Self::update_tier_analytics_on_subscribe(&env, &tier_id, final_price)?;
@@ -1092,7 +1131,7 @@ impl SubscriptionContract {
 
         // Verify caller is the user or admin
         if caller != change_request.user {
-            // TODO: Add admin check here
+            Self::require_admin(&env, &caller)?;
         }
 
         // Get subscription and update it
@@ -1197,7 +1236,7 @@ impl SubscriptionContract {
         admin: Address,
         params: CreatePromotionParams,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
 
         // Validate tier exists
         let _ = Self::get_tier(env.clone(), params.tier_id.clone())?;
@@ -1230,6 +1269,8 @@ impl SubscriptionContract {
         };
 
         env.storage().persistent().set(&key, &promotion);
+        // Store promotion by promo code for direct lookup
+        env.storage().persistent().set(&SubscriptionDataKey::PromoByCode(promotion.promo_code.clone()), &promotion);
 
         // Add to promotion list
         let list_key = SubscriptionDataKey::TierPromotionList;
@@ -1270,31 +1311,23 @@ impl SubscriptionContract {
         promo_code: &String,
         base_price: i128,
     ) -> Result<i128, Error> {
-        // Search for promotion with matching code and tier
-        let list_key = SubscriptionDataKey::TierPromotionList;
-        let promo_list: Vec<String> = env
+        // Look up promotion by promo code directly
+        let current_time = env.ledger().timestamp();
+        let promotion = env
             .storage()
             .persistent()
-            .get(&list_key)
-            .unwrap_or_else(|| Vec::new(env));
+            .get::<_, TierPromotion>(&SubscriptionDataKey::PromoByCode(promo_code.clone()));
 
-        let current_time = env.ledger().timestamp();
+        if let Some(mut promotion) = promotion {
+            // Check if promotion matches tier
+            if promotion.tier_id == *tier_id {
+                // Validate promotion is active
+                if current_time < promotion.start_date || current_time > promotion.end_date {
+                    return Err(Error::PromoCodeExpired);
+                }
 
-        for promo_id in promo_list.iter() {
-            if let Some(mut promotion) = env
-                .storage()
-                .persistent()
-                .get::<_, TierPromotion>(&SubscriptionDataKey::TierPromotion(promo_id.clone()))
-            {
-                // Check if promotion matches
-                if promotion.tier_id == *tier_id && promotion.promo_code == *promo_code {
-                    // Validate promotion is active
-                    if current_time < promotion.start_date || current_time > promotion.end_date {
-                        return Err(Error::PromoCodeExpired);
-                    }
-
-                    // Check max redemptions
-                    if promotion.max_redemptions > 0
+                // Check max redemptions
+                if promotion.max_redemptions > 0
                         && promotion.current_redemptions >= promotion.max_redemptions
                     {
                         return Err(Error::PromoCodeMaxRedemptions);

@@ -1,8 +1,8 @@
-use soroban_sdk::{token::Client as TokenClient, Env};
 use crate::errors::EscrowError;
 use crate::events::escrow_refunded;
-use crate::storage::{decrement_active_escrows, load_escrow, save_escrow};
+use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
+use soroban_sdk::{token::Client as TokenClient, Env};
 
 pub fn refund_buyer(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Load escrow, return NotFound if missing
@@ -31,7 +31,6 @@ pub fn refund_buyer(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     // Update status to Cancelled
     escrow.status = EscrowStatus::Cancelled;
     save_escrow(env, escrow_id, &escrow);
-    decrement_active_escrows(env);
 
     // Emit event
     escrow_refunded(env, escrow_id, &escrow.buyer, escrow.amount);

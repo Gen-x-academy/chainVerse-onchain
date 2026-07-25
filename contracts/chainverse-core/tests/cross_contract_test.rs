@@ -1,8 +1,8 @@
-﻿#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, vec, IntoVal,
-    testutils::Address as _, panic_with_error, Address, Env, Error as SorobanError,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
+    testutils::Address as _, vec, Address, Env, Error as SorobanError, IntoVal,
 };
 
 #[contracttype]

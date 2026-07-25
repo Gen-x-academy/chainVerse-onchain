@@ -20,14 +20,16 @@ pub enum StakingDataKey {
     Tier(String),
     /// Active stake per staker address (persistent storage).
     Stake(Address),
+    /// Running total of all active staked tokens (instance storage).
+    TotalStaked,
 }
 
 // ---------------------------------------------------------------------------
 // TTL constants (in ledgers; Stellar produces ~1 ledger / 5 s)
 // ---------------------------------------------------------------------------
 
-/// Keep stake records for ~30 days.
-const STAKE_TTL_LEDGERS: u32 = 518_400;
+const MIN_TTL: u32 = 17_280; // ~1 day
+const MAX_TTL: u32 = 518_400; // ~30 days
 
 // ---------------------------------------------------------------------------
 // Module
@@ -56,7 +58,10 @@ impl StakingModule {
             return Err(Error::Unauthorized);
         }
 
-        if config.emergency_unstake_penalty_bps > 10_000 {
+        const MIN_PENALTY_BPS: u32 = 100; // 1% minimum penalty
+        if config.emergency_unstake_penalty_bps < MIN_PENALTY_BPS
+            || config.emergency_unstake_penalty_bps > 10_000
+        {
             return Err(Error::InvalidPaymentAmount);
         }
 
@@ -99,6 +104,11 @@ impl StakingModule {
         env.storage()
             .persistent()
             .set(&StakingDataKey::Tier(tier.id.clone()), &tier);
+        env.storage().persistent().extend_ttl(
+            &StakingDataKey::Tier(tier.id.clone()),
+            MIN_TTL,
+            MAX_TTL,
+        );
 
         // Append tier ID to the tier list.
         let mut list: Vec<String> = env
@@ -117,6 +127,53 @@ impl StakingModule {
                 tier.id.clone(),
             ),
             env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Admin – penalty withdrawal
+    // -----------------------------------------------------------------------
+
+    /// Withdraw accumulated penalty funds to a recipient address. Admin only.
+    ///
+    /// Penalty balance = contract token balance − total active stakes.
+    pub fn withdraw_penalties(
+        env: Env,
+        admin: Address,
+        recipient: Address,
+    ) -> Result<(), Error> {
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&MembershipDataKey::Admin)
+            .ok_or(Error::AdminNotSet)?;
+        stored_admin.require_auth();
+        if stored_admin != admin {
+            return Err(Error::Unauthorized);
+        }
+
+        let config = Self::get_config(&env)?;
+        let token_client = token::Client::new(&env, &config.staking_token);
+
+        let contract_balance = token_client.balance(&env.current_contract_address());
+        let total_staked: i128 = env
+            .storage()
+            .instance()
+            .get(&StakingDataKey::TotalStaked)
+            .unwrap_or(0);
+
+        let penalty_balance = contract_balance.saturating_sub(total_staked);
+        if penalty_balance <= 0 {
+            return Ok(());
+        }
+
+        token_client.transfer(&env.current_contract_address(), &recipient, &penalty_balance);
+
+        env.events().publish(
+            (String::from_str(&env, "PenaltiesWithdrawn"), admin),
+            (recipient, penalty_balance),
         );
 
         Ok(())
@@ -192,6 +249,7 @@ impl StakingModule {
             };
 
             Self::save_stake(&env, &staker, &updated);
+            Self::adjust_total_staked(&env, amount);
 
             env.events().publish(
                 (String::from_str(&env, "Staked"), staker.clone(), tier_id),
@@ -221,6 +279,7 @@ impl StakingModule {
         };
 
         Self::save_stake(&env, &staker, &stake);
+        Self::adjust_total_staked(&env, amount);
 
         env.events().publish(
             (String::from_str(&env, "Staked"), staker.clone(), tier_id),
@@ -268,6 +327,7 @@ impl StakingModule {
         env.storage()
             .persistent()
             .remove(&StakingDataKey::Stake(staker.clone()));
+        Self::adjust_total_staked(&env, -stake.amount);
 
         env.events().publish(
             (String::from_str(&env, "Unstaked"), staker.clone()),
@@ -319,6 +379,7 @@ impl StakingModule {
         env.storage()
             .persistent()
             .remove(&StakingDataKey::Stake(staker.clone()));
+        Self::adjust_total_staked(&env, -stake.amount);
 
         env.events().publish(
             (String::from_str(&env, "EmergencyUnstaked"), staker.clone()),
@@ -389,8 +450,19 @@ impl StakingModule {
             .set(&StakingDataKey::Stake(staker.clone()), stake);
         env.storage().persistent().extend_ttl(
             &StakingDataKey::Stake(staker.clone()),
-            STAKE_TTL_LEDGERS,
-            STAKE_TTL_LEDGERS,
+            MIN_TTL,
+            MAX_TTL,
         );
+    }
+
+    fn adjust_total_staked(env: &Env, delta: i128) {
+        let current: i128 = env
+            .storage()
+            .instance()
+            .get(&StakingDataKey::TotalStaked)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&StakingDataKey::TotalStaked, &current.saturating_add(delta));
     }
 }

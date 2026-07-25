@@ -1,0 +1,61 @@
+name: Deploy Testnet
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build, Test & Deploy to Testnet
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust + WASM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --features opt
+
+      - name: Configure deployer identity
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_SECRET_KEY }}
+        run: stellar keys generate deployer --secret-key "$STELLAR_SECRET_KEY"
+
+      - name: Build all contracts
+        working-directory: contracts
+        run: make build
+
+      - name: Run tests
+        working-directory: contracts
+        run: make test
+
+      - name: Deploy to testnet
+        run: bash scripts/deploy-testnet.sh
+
+      - name: Commit updated deployments/testnet.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployments/testnet.json
+          git diff --cached --quiet || git commit -m "chore: update deployments/testnet.json [skip ci]"
+          git push
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh

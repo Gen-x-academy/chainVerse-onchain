@@ -1,0 +1,16 @@
+{
+  "network": "testnet",
+  "rpc_url": "https://soroban-testnet.stellar.org",
+  "passphrase": "Test SDF Network ; September 2015",
+  "deployed_at": "",
+  "contracts": {
+    "escrow": "",
+    "escrow_vault": "",
+    "certificates": "",
+    "chainverse_core": "",
+    "reward": "",
+    "chv_token": "",
+    "course_registry": "",
+    "payout_automation": ""
+  }
+}
