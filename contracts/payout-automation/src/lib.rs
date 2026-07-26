@@ -164,7 +164,10 @@ impl PayoutAutomation {
     }
 
     /// Executes a batch of payouts. Batch size must not exceed MAX_BATCH_SIZE (100).
-    /// Each payout amount must be positive.
+    ///
+    /// Uses a two-pass approach: ALL amounts are validated before ANY transfer is
+    /// executed. This guarantees atomicity — a batch with even one invalid entry is
+    /// rejected in full with no tokens moved (fixes issue #301 / #729).
     pub fn execute(
         env: Env,
         caller: Address,
@@ -176,10 +179,20 @@ impl PayoutAutomation {
         if payouts.len() > MAX_BATCH_SIZE {
             return Err(PayoutError::BatchTooLarge);
         }
+
+        // --- Pass 1: validate ALL amounts before touching any balances ---
+        // This ensures a batch with any invalid entry is rejected entirely,
+        // preventing partial execution that could leave funds in an inconsistent state.
+        for (_recipient, amount) in payouts.iter() {
+            if amount <= 0 {
+                return Err(PayoutError::NegativeAmount);
+            }
+        }
+
+        // --- Pass 2: all amounts are valid — now execute all transfers ---
         let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
         let client = TokenClient::new(&env, &token);
         for (recipient, amount) in payouts.iter() {
-            if amount <= 0 { return Err(PayoutError::NegativeAmount); }
             client.transfer(&env.current_contract_address(), &recipient, &amount);
         }
         Ok(())
