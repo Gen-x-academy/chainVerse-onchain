@@ -415,6 +415,24 @@ impl SubscriptionContract {
             .ok_or(Error::SubscriptionNotFound)
     }
 
+    /// Returns whether a subscription is currently active: status must be
+    /// `Active` AND the subscription must not yet have expired. A cancelled,
+    /// paused, or expired subscription always returns false.
+    pub fn is_active(env: Env, id: String) -> bool {
+        let subscription: Option<Subscription> = env
+            .storage()
+            .persistent()
+            .get(&SubscriptionDataKey::Subscription(id));
+
+        match subscription {
+            Some(sub) => {
+                sub.status == MembershipStatus::Active
+                    && sub.expires_at > env.ledger().timestamp()
+            }
+            None => false,
+        }
+    }
+
     #[allow(deprecated)]
     pub fn set_usdc_contract(env: Env, admin: Address, usdc_address: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
@@ -453,6 +471,17 @@ impl SubscriptionContract {
         // Capture old status for event emission
         let old_status = subscription.status.clone();
 
+        // Calculate the prorated refund for the unused remainder of the period.
+        let current_time = env.ledger().timestamp();
+        let total_secs = subscription
+            .expires_at
+            .saturating_sub(subscription.created_at);
+        let remaining_secs = subscription.expires_at.saturating_sub(current_time);
+        let refund_amount = if total_secs > 0 && remaining_secs > 0 {
+            (subscription.amount * remaining_secs as i128) / total_secs as i128
+        } else {
+            0
+        };
         // Calculate and transfer prorated refund for remaining subscription time
         let current_time = env.ledger().timestamp();
         if subscription.status == MembershipStatus::Active
@@ -483,6 +512,16 @@ impl SubscriptionContract {
         env.storage().persistent().set(&key, &subscription);
         env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 
+        // Refund the prorated remaining amount to the subscriber atomically
+        // with the status change above.
+        if refund_amount > 0 {
+            token::Client::new(&env, &subscription.payment_token).transfer(
+                &env.current_contract_address(),
+                &subscription.user,
+                &refund_amount,
+            );
+        }
+
         // Emit subscription cancelled event
         env.events().publish(
             (
@@ -494,6 +533,7 @@ impl SubscriptionContract {
                 env.ledger().timestamp(),
                 old_status,
                 MembershipStatus::Inactive,
+                refund_amount,
             ),
         );
 
@@ -525,6 +565,12 @@ impl SubscriptionContract {
 
         if subscription.status == MembershipStatus::Paused {
             return Err(Error::SubscriptionPaused);
+        }
+
+        // A cancelled subscription must not be resurrected via renewal —
+        // the subscriber has to go through subscribe again.
+        if subscription.status == MembershipStatus::Inactive {
+            return Err(Error::SubscriptionCancelled);
         }
 
         // Validate payment
