@@ -61,3 +61,15 @@ The template location is at `.github/PULL_REQUEST_TEMPLATE.md` and provides a st
    ```bash
    rustup target add wasm32-unknown-unknown
    ```
+
+## Required Tool Versions
+
+To avoid version drift between contributors and CI, this project pins:
+
+- **Rust**: `1.82.0` (see `rust-toolchain.toml`; `rustup` will pick this up automatically)
+- **soroban-sdk**: `22.0.11` (see `contracts/Cargo.toml`, `[workspace.dependencies]`)
+- **stellar-cli**: `22.0.0`
+
+  ```bash
+  cargo install --locked stellar-cli@22.0.0 --features opt
+  ```
