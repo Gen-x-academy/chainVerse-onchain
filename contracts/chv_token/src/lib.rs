@@ -18,6 +18,8 @@ pub enum DataKey {
     Initialized,
     TotalMinted,
     PendingAdmin,
+    Allowance(Address, Address),
+    Frozen(Address),
 }
 
 #[contract]
@@ -67,6 +69,9 @@ impl CHVToken {
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
+        if Self::is_frozen(env.clone(), from.clone()) {
+            return Err(TokenError::AccountFrozen);
+        }
         from.require_auth();
         let from_bal: i128 = env.storage().persistent()
             .get(&DataKey::Balance(from.clone())).unwrap_or(0);
@@ -83,12 +88,95 @@ impl CHVToken {
         Ok(())
     }
 
+    /// Approve `spender` to spend up to `amount` of `owner`'s tokens.
+    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128) -> Result<(), TokenError> {
+        if amount < 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        owner.require_auth();
+        env.storage().persistent().set(&DataKey::Allowance(owner, spender), &amount);
+        Ok(())
+    }
+
+    /// Returns remaining allowance for `spender` on `owner`.
+    pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
+        env.storage().persistent().get(&DataKey::Allowance(owner, spender)).unwrap_or(0)
+    }
+
+    /// Transfer tokens using allowance. `spender` does not need auth; allowance is checked and decremented.
+    pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if from == to {
+            return Err(TokenError::SelfTransfer);
+        }
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        if Self::is_frozen(env.clone(), from.clone()) {
+            return Err(TokenError::AccountFrozen);
+        }
+        spender.require_auth();
+        let mut allow = env.storage().persistent().get(&DataKey::Allowance(from.clone(), spender.clone()))
+            .ok_or(TokenError::InsufficientAllowance)?;
+        if allow < amount {
+            return Err(TokenError::InsufficientAllowance);
+        }
+        allow -= amount;
+        if allow == 0 {
+            env.storage().persistent().remove(&DataKey::Allowance(from.clone(), spender.clone()));
+        } else {
+            env.storage().persistent().set(&DataKey::Allowance(from.clone(), spender.clone()), &allow);
+        }
+        let from_bal = env.storage().persistent().get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        if from_bal < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+        let to_bal = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
+        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
+        Ok(())
+    }
+
+    /// Revoke a previously set allowance.
+    pub fn revoke_allowance(env: Env, owner: Address, spender: Address) -> Result<(), TokenError> {
+        owner.require_auth();
+        env.storage().persistent().remove(&DataKey::Allowance(owner, spender));
+        Ok(())
+    }
+
+    /// Admin-only: freeze an account to prevent outgoing transfers.
+    pub fn freeze_account(env: Env, account: Address) -> Result<(), TokenError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().persistent().set(&DataKey::Frozen(account.clone()), &true);
+        env.events().publish((symbol_short!("frozen"),), account);
+        Ok(())
+    }
+
+    /// Admin-only: unfreeze a previously frozen account.
+    pub fn unfreeze_account(env: Env, account: Address) -> Result<(), TokenError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().persistent().set(&DataKey::Frozen(account.clone()), &false);
+        env.events().publish((symbol_short!("unfrozen"),), account);
+        Ok(())
+    }
+
+    /// Returns true if the account is frozen.
+    pub fn is_frozen(env: Env, account: Address) -> bool {
+        env.storage().persistent().get(&DataKey::Frozen(account)).unwrap_or(false)
+    }
+
     pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), TokenError> {
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
         from.require_auth();
-        let bal: i128 = env.storage().persistent()
+        let bal = env.storage().persistent()
             .get(&DataKey::Balance(from.clone())).unwrap_or(0);
         if bal < amount {
             return Err(TokenError::InsufficientBalance);

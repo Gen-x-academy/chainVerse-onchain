@@ -12,4 +12,6 @@ pub enum TokenError {
     SelfTransfer = 5,
     SupplyCapExceeded = 6,
     NoPendingAdmin = 7,
+    AccountFrozen = 8,
+    InsufficientAllowance = 9,
 }
