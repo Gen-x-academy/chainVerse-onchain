@@ -4,6 +4,10 @@
 
 Smart contracts for the ChainVerse Academy platform — a decentralized Web3 education platform — built with [Soroban](https://soroban.stellar.org/) on the Stellar network.
 
+## Getting Started
+
+New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through installing the Stellar CLI, creating and funding a testnet identity, and building, deploying, initializing, and smoke-testing every contract on Stellar testnet.
+
 ## Contracts
 
 | Contract | Path | What it does |
@@ -69,6 +73,28 @@ See [docs/testnet-identity-setup.md](docs/testnet-identity-setup.md) for creatin
 
 Deployed testnet contract IDs are not committed to this repo. Copy [`.env.testnet.example`](.env.testnet.example) to `.env.testnet` and fill in the IDs after deploying:
 
+## Quick Start / Deployment Overview
+
+See [docs/testnet-setup.md](docs/testnet-setup.md) for the full walkthrough. Summary:
+
+1. Set up a funded testnet identity (see [docs/testnet-identity-setup.md](docs/testnet-identity-setup.md)).
+2. Deploy all contracts:
+   ```sh
+   ./scripts/deploy-testnet.sh
+   ```
+3. Initialize all deployed contracts (admin, token, treasury, etc.):
+   ```sh
+   cp .env.testnet.example .env.testnet   # fill in contract IDs from step 2
+   ./scripts/init-contracts.sh
+   ```
+4. Verify every contract is live and responding:
+   ```sh
+   ./scripts/smoke-test.sh
+   ```
+5. To upgrade a deployed contract, call its `upgrade` function with the new WASM hash (all 8 core contracts expose this, admin-gated):
+   ```sh
+   ./scripts/upgrade-contract.sh testnet deployer <contract-name> <path-to-new-wasm>
+   ```
 | Env var | Contract |
 |---|---|
 | `CHV_TOKEN_CONTRACT_ID` | `contracts/chv_token` |

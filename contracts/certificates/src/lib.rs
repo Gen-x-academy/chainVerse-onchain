@@ -91,4 +91,12 @@ impl CertificateContract {
     pub fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate> {
         storage::load_certificate(&env, &recipient, course_id)
     }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+        storage::require_admin(&env, &caller)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgraded"),), new_wasm_hash);
+        Ok(())
+    }
 }
