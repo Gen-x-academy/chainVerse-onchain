@@ -60,6 +60,9 @@ where
     V: IntoVal<Env, Val>,
 {
     env.storage().persistent().set(key, val);
+    env.storage()
+        .persistent()
+        .extend_ttl(key, crate::MIN_TTL, crate::MAX_TTL);
 }
 
 /// Removes a key and its associated value from persistent storage.

@@ -46,7 +46,9 @@ fn test_non_admin_update_config_rejected() {
     let env = Env::default();
     let (_admin, client) = setup(&env);
     let non_admin = Address::generate(&env);
-    assert!(client.try_update_config(&non_admin, &Some(999u32), &None).is_err());
+    assert!(client
+        .try_update_config(&non_admin, &Some(999u32), &None)
+        .is_err());
 }
 
 /// A non-admin address cannot transfer admin rights.

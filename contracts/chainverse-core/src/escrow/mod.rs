@@ -1,6 +1,9 @@
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, token::Client as TokenClient, Address, Env, Vec};
 
 use crate::errors::ContractError;
+
+const MIN_TTL: u32 = 4_096;
+const MAX_TTL: u32 = 100_000;
 
 pub mod active_query;
 pub mod id_generator;
@@ -66,9 +69,9 @@ fn load(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
 }
 
 fn save(env: &Env, record: &EscrowRecord) {
-    env.storage()
-        .persistent()
-        .set(&EscrowKey::Record(record.id), record);
+    let key = EscrowKey::Record(record.id);
+    env.storage().persistent().set(&key, record);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +92,8 @@ pub fn create(
     depositor.require_auth();
     crate::utils::validate_amount(amount)?;
     crate::utils::require_supported_token(env, &token)?;
+
+    TokenClient::new(env, &token).transfer(&depositor, &env.current_contract_address(), &amount);
 
     let id = next_id(env);
     let record = EscrowRecord {
@@ -118,6 +123,12 @@ pub fn release(env: &Env, caller: Address, id: u64) -> Result<(), ContractError>
         return Err(ContractError::Unauthorized);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.recipient,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Completed;
     save(env, &record);
     Ok(())
@@ -136,6 +147,12 @@ pub fn cancel(env: &Env, caller: Address, id: u64) -> Result<(), ContractError> 
         return Err(ContractError::Unauthorized);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Cancelled;
     save(env, &record);
     Ok(())
@@ -147,14 +164,15 @@ pub fn get(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
 }
 
 /// Returns all escrows where `buyer` is the depositor.
-pub fn get_by_buyer(env: &Env, buyer: &Address) -> Vec<EscrowRecord> {
+pub fn get_by_buyer(env: &Env, buyer: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
     let mut results = Vec::new(env);
     let count: u64 = env
         .storage()
         .persistent()
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             if &record.depositor == buyer {
                 results.push_back(record);
@@ -165,14 +183,15 @@ pub fn get_by_buyer(env: &Env, buyer: &Address) -> Vec<EscrowRecord> {
 }
 
 /// Returns all escrows where `seller` is the recipient.
-pub fn get_by_seller(env: &Env, seller: &Address) -> Vec<EscrowRecord> {
+pub fn get_by_seller(env: &Env, seller: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
     let mut results = Vec::new(env);
     let count: u64 = env
         .storage()
         .persistent()
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             if &record.recipient == seller {
                 results.push_back(record);
@@ -196,6 +215,12 @@ pub fn buyer_cancel(env: &Env, buyer: Address, id: u64) -> Result<(), ContractEr
         return Err(ContractError::InvalidEscrowState);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Cancelled;
     save(env, &record);
     Ok(())
@@ -216,6 +241,12 @@ pub fn refund_expired(env: &Env, id: u64) -> Result<(), ContractError> {
         return Err(ContractError::InvalidEscrowState);
     }
 
+    TokenClient::new(env, &record.token).transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
+
     record.status = EscrowStatus::Expired;
     save(env, &record);
     Ok(())
@@ -227,6 +258,8 @@ pub fn search(
     env: &Env,
     token: Option<Address>,
     status: Option<EscrowStatus>,
+    start: u64,
+    limit: u64,
 ) -> soroban_sdk::Vec<EscrowRecord> {
     let mut results = soroban_sdk::Vec::new(env);
     let count: u64 = env
@@ -235,7 +268,8 @@ pub fn search(
         .get(&EscrowKey::NextId)
         .unwrap_or(0u64);
 
-    for i in 0..count {
+    let end = core::cmp::min(count, start.saturating_add(limit));
+    for i in start..end {
         if let Ok(record) = load(env, i) {
             let mut matches = true;
             if let Some(t) = &token {

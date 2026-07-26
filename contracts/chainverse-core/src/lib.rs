@@ -34,7 +34,11 @@ use analytics::{
 };
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
+
+const CONTRACT_VERSION: &str = "1.0.0";
+const MIN_TTL: u32 = 4096;
+const MAX_TTL: u32 = 100_000;
 
 #[contract]
 pub struct ChainverseCore;
@@ -52,6 +56,8 @@ impl ChainverseCore {
         protocol_fee: u32,
         supported_tokens: Vec<Address>,
     ) -> Result<(), ContractError> {
+        admin.require_auth();
+
         if env.storage().persistent().has(&DataKey::Config) {
             return Err(ContractError::AlreadyInitialized);
         }
@@ -63,6 +69,9 @@ impl ChainverseCore {
         };
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         Ok(())
     }
 
@@ -113,6 +122,9 @@ impl ChainverseCore {
             .ok_or(ContractError::NotInitialized)?;
 
         if let Some(fee) = new_protocol_fee {
+            if fee > 10_000 {
+                return Err(ContractError::InvalidFee);
+            }
             config.protocol_fee = fee;
         }
         if let Some(tokens) = new_supported_tokens {
@@ -120,7 +132,21 @@ impl ChainverseCore {
         }
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_CONFIG_UPDATED);
+        Ok(())
+    }
+
+    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        admin::only_admin(&env, &caller)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
 
@@ -138,10 +164,16 @@ impl ChainverseCore {
             .get(&DataKey::Config)
             .ok_or(ContractError::NotInitialized)?;
 
-        config.admin = new_admin;
+        let old_admin = config.admin.clone();
+        config.admin = new_admin.clone();
 
         env.storage().persistent().set(&DataKey::Config, &config);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Config, MIN_TTL, MAX_TTL);
         analytics::record(&env, EVT_ADMIN_CHANGED);
+        env.events()
+            .publish((symbol_short!("ADM_CHNG"),), (old_admin, new_admin));
         Ok(())
     }
 
@@ -204,12 +236,12 @@ impl ChainverseCore {
 
     /// Returns all escrows where `buyer` is the depositor.
     pub fn get_escrows_by_buyer(env: Env, buyer: Address) -> Vec<EscrowRecord> {
-        escrow::get_by_buyer(&env, &buyer)
+        escrow::get_by_buyer(&env, &buyer, 0, u64::MAX)
     }
 
     /// Returns all escrows where `seller` is the recipient.
     pub fn get_escrows_by_seller(env: Env, seller: Address) -> Vec<EscrowRecord> {
-        escrow::get_by_seller(&env, &seller)
+        escrow::get_by_seller(&env, &seller, 0, u64::MAX)
     }
 
     // -----------------------------------------------------------------------
@@ -232,7 +264,7 @@ impl ChainverseCore {
         token: Option<Address>,
         status: Option<EscrowStatus>,
     ) -> Vec<EscrowRecord> {
-        escrow::search(&env, token, status)
+        escrow::search(&env, token, status, 0, u64::MAX)
     }
 
     /// Returns all escrows currently in the Pending (active) state.
@@ -252,5 +284,10 @@ impl ChainverseCore {
     /// Calculates the protocol fee for a given amount.
     pub fn calculate_fee(env: Env, amount: i128) -> Result<i128, ContractError> {
         utils::calculate_fee(&env, amount)
+    }
+
+    /// Returns the contract version string for deployment smoke checks.
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, CONTRACT_VERSION)
     }
 }

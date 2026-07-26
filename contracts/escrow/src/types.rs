@@ -19,3 +19,13 @@ pub struct Escrow {
     pub status: EscrowStatus,
     pub expiration: u64,
 }
+
+/// A single fee-collection record persisted on every successful escrow release.
+#[contracttype]
+#[derive(Clone)]
+pub struct FeeRecord {
+    pub escrow_id: u64,
+    pub token: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}

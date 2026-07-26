@@ -46,11 +46,7 @@ pub fn get_stats(env: &Env) -> Stats {
 /// Increments the counter for `event` by one.
 pub fn record(env: &Env, event: Symbol) {
     let key = AnalyticsKey::EventCount(event.clone());
-    let count: u64 = env
-        .storage()
-        .instance()
-        .get(&key)
-        .unwrap_or(0u64);
+    let count: u64 = env.storage().instance().get(&key).unwrap_or(0u64);
     env.storage().instance().set(&key, &(count + 1));
 
     // Also emit a Soroban diagnostic event so the event can be indexed off-chain.

@@ -1,0 +1,9 @@
+[build]
+target = "wasm32-unknown-unknown"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+codegen-units = 1

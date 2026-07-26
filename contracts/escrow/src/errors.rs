@@ -11,4 +11,11 @@ pub enum EscrowError {
     TokenNotAllowed = 5,
     NotExpired = 6,
     AlreadyReleased = 7,
+    InvalidAmount = 8,
+    InvalidRecipient = 9,
+    InvalidExpiration = 10,
+    AlreadyDisputed = 11,
+    DisputeResolutionNotImplemented = 12,
+    NoFeesAvailable = 13,
+    ContractPaused = 14,
 }

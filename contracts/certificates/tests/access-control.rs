@@ -1,4 +1,4 @@
-use soroban_sdk::{Env, testutils::Address as _};
+use soroban_sdk::{testutils::Address as _, Env};
 use token::TokenContract;
 
 #[test]

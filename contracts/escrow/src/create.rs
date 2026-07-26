@@ -1,8 +1,8 @@
-use soroban_sdk::{token::Client as TokenClient, Address, Env};
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
-use crate::storage::{add_to_total_volume, is_token_whitelisted, next_escrow_id, save_escrow};
+use crate::storage::{add_to_total_volume, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow};
 use crate::types::{Escrow, EscrowStatus};
+use soroban_sdk::{token::Client as TokenClient, Address, Env};
 
 pub fn create_escrow(
     env: &Env,
@@ -12,38 +12,41 @@ pub fn create_escrow(
     amount: i128,
     expiration: u64,
 ) -> Result<u64, EscrowError> {
-    // Validate: buyer must authorize this call
+    if amount <= 0 {
+        return Err(EscrowError::InvalidAmount);
+    }
+    if expiration <= env.ledger().timestamp() {
+        return Err(EscrowError::InvalidExpiration);
+    }
+    if buyer == seller {
+        return Err(EscrowError::InvalidRecipient);
+    }
+
     buyer.require_auth();
 
-    // Validate: token must be whitelisted
     if !is_token_whitelisted(env, &token) {
         return Err(EscrowError::TokenNotAllowed);
     }
 
-    // Transfer funds from buyer into this contract
-    TokenClient::new(env, &token).transfer(
-        &buyer,
-        &env.current_contract_address(),
-        &amount,
-    );
+    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
 
-    // Assign a unique ID and store the escrow
+    buyer.require_auth();
+    if !is_token_whitelisted(env, &token) {
+        return Err(EscrowError::TokenNotAllowed);
+    }
+    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
     let escrow_id = next_escrow_id(env);
     let escrow = Escrow {
         buyer: buyer.clone(),
         seller: seller.clone(),
-        token,
+        token: token.clone(),
         amount,
         status: EscrowStatus::Pending,
         expiration,
     };
     save_escrow(env, escrow_id, &escrow);
-
-    // Track total volume processed
     add_to_total_volume(env, amount);
-
-    // Emit event
-    escrow_created(env, escrow_id, &buyer, &seller, amount);
-
+    append_to_token_index(env, &token, escrow_id);
+    escrow_created(env, escrow_id, &buyer, &seller, &token, amount);
     Ok(escrow_id)
 }
