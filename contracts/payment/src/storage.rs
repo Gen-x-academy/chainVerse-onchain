@@ -25,11 +25,11 @@ pub struct PaymentRecord {
     pub paid_at: u64,
 }
 
-pub fn read_admin(env: &Env) -> Address {
+pub fn read_admin(env: &Env) -> Result<Address, crate::ContractError> {
     env.storage()
         .persistent()
         .get(&DataKey::Admin)
-        .unwrap_or(Address::from_contract_id(env, &[0; 32]))
+        .ok_or(crate::ContractError::NotInitialized)
 }
 
 pub fn write_admin(env: &Env, admin: &Address) {

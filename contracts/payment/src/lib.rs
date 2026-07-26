@@ -37,7 +37,7 @@ impl PaymentContract {
     ) -> Result<(), ContractError> {
         admin.require_auth();
 
-        if read_admin(&env) != Address::from_contract_id(env.clone(), &[0; 32]) {
+        if env.storage().persistent().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
 
@@ -58,7 +58,7 @@ impl PaymentContract {
     }
 
     pub fn set_fee(env: Env, caller: Address, fee_percent: u32) -> Result<(), ContractError> {
-        let admin = read_admin(&env);
+        let admin = read_admin(&env)?;
         if caller != admin {
             return Err(ContractError::NotAdmin);
         }
@@ -122,7 +122,7 @@ impl PaymentContract {
         student: Address,
         course_id: Symbol,
     ) -> Result<(), ContractError> {
-        let admin = read_admin(&env);
+        let admin = read_admin(&env)?;
         admin.require_auth();
 
         if !is_enrolled(&env, &student, &course_id) {
