@@ -35,3 +35,10 @@ Cargo.lock
 node_modules/
 .rustc_info.json
 .secret_key
+Cargo.lock
+.secret_key
+
+# Scratch files
+*.scratch.rs
+.codex
+scratch/

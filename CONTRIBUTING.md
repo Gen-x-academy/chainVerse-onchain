@@ -161,3 +161,14 @@ The `upgrade` function must `require_auth()` on the admin before installing the 
 - [ ] `cargo clippy --workspace -- -D warnings` reports no warnings
 - [ ] New/changed functions follow the checklist above (auth, typed errors, events, TTL, tests)
 - [ ] PR description explains the storage layout or event schema, if changed
+## Required Tool Versions
+
+To avoid version drift between contributors and CI, this project pins:
+
+- **Rust**: `1.82.0` (see `rust-toolchain.toml`; `rustup` will pick this up automatically)
+- **soroban-sdk**: `22.0.11` (see `contracts/Cargo.toml`, `[workspace.dependencies]`)
+- **stellar-cli**: `22.0.0`
+
+  ```bash
+  cargo install --locked stellar-cli@22.0.0 --features opt
+  ```
