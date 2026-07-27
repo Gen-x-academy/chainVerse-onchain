@@ -31,6 +31,7 @@ fn setup(now: u64) -> (Env, Address, Address, Address, Address, EscrowContractCl
 }
 
 /// Happy path: escrow is created unfunded with correct stored fields.
+/// Happy path: escrow is created with correct stored fields (unfunded).
 #[test]
 fn create_escrow_happy_path_stores_correct_record() {
     let (_env, _admin, buyer, seller, token, client) = setup(1_000);

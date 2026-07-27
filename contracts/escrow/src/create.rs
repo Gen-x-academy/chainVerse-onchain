@@ -5,6 +5,13 @@ use crate::types::{Escrow, EscrowStatus};
 use soroban_sdk::{Address, Env};
 
 /// Creates an unfunded escrow. The buyer must later call `fund_escrow`.
+use crate::storage::{
+    append_to_buyer_index, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow,
+};
+use crate::types::{Escrow, EscrowStatus};
+use soroban_sdk::{Address, Env};
+
+/// Creates an unfunded escrow record. Tokens are deposited later via `fund_escrow`.
 pub fn create_escrow(
     env: &Env,
     buyer: Address,
@@ -40,6 +47,7 @@ pub fn create_escrow(
     };
     save_escrow(env, escrow_id, &escrow);
     append_to_token_index(env, &token, escrow_id);
+    append_to_buyer_index(env, &buyer, escrow_id);
     escrow_created(env, escrow_id, &buyer, &seller, &token, amount);
     Ok(escrow_id)
 }

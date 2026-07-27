@@ -1,6 +1,7 @@
 #![no_std]
 
 mod create;
+mod dispute;
 mod errors;
 mod events;
 mod fund;
@@ -14,6 +15,7 @@ pub use errors::EscrowError;
 pub use types::{Escrow, EscrowStatus, FeeRecord};
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 #[contract]
 pub struct EscrowContract;
@@ -60,11 +62,32 @@ impl EscrowContract {
     }
 
     /// Releases funds to the seller. Only callable by the buyer or admin.
+    /// Deposits the escrow amount. Only the buyer may fund.
+    pub fn fund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        fund::fund_escrow(&env, caller, escrow_id)
+    }
+
+    /// Releases remaining funds to the seller. Buyer or admin.
     pub fn release_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         release::release_escrow(&env, caller, escrow_id)
     }
 
-    /// Refunds the buyer after expiry. Only callable after the expiration timestamp.
+    /// Releases a portion of locked funds to the seller.
+    pub fn partial_release(
+        env: Env,
+        caller: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        release::partial_release(&env, caller, escrow_id, amount)
+    }
+
+    /// Opens a dispute on a funded escrow (buyer or seller).
+    pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        dispute::dispute_escrow(&env, caller, escrow_id)
+    }
+
+    /// Refunds the buyer after the expiration timestamp.
     pub fn refund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         refund::refund_escrow(&env, caller, escrow_id)
     }
@@ -72,6 +95,11 @@ impl EscrowContract {
     /// Returns the escrow record for the given ID, if it exists.
     pub fn get_escrow(env: Env, escrow_id: u64) -> Option<Escrow> {
         storage::get_escrow(&env, escrow_id)
+    }
+
+    /// Returns escrow IDs indexed by buyer.
+    pub fn get_by_buyer_index(env: Env, buyer: Address) -> Vec<u64> {
+        storage::get_buyer_index(&env, &buyer)
     }
 
     /// Sets the protocol fee in basis points. Hard-capped at 5000 bps (50%).

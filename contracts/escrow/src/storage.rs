@@ -18,6 +18,7 @@ pub enum DataKey {
     WhitelistedToken(Address),
     ProtocolFees(Address),
     TokenIndex(Address),
+    BuyerIndex(Address),
     FeeHistory,
     ProtocolFeeBps,
     Paused,
@@ -69,6 +70,7 @@ pub fn load_escrow(env: &Env, id: u64) -> Option<Escrow> {
     env.storage().persistent().get(&DataKey::Escrow(id))
 }
 
+/// Alias used by the contract facade.
 pub fn get_escrow(env: &Env, id: u64) -> Option<Escrow> {
     load_escrow(env, id)
 }
@@ -153,6 +155,21 @@ pub fn get_token_index(env: &Env, token: &Address) -> Vec<u64> {
     env.storage()
         .persistent()
         .get(&DataKey::TokenIndex(token.clone()))
+        .unwrap_or(vec![env])
+}
+
+pub fn append_to_buyer_index(env: &Env, buyer: &Address, escrow_id: u64) {
+    let key = DataKey::BuyerIndex(buyer.clone());
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(vec![env]);
+    ids.push_back(escrow_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+pub fn get_buyer_index(env: &Env, buyer: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BuyerIndex(buyer.clone()))
         .unwrap_or(vec![env])
 }
 
