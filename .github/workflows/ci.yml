@@ -16,6 +16,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
 
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
@@ -34,6 +35,69 @@ jobs:
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
 
-      - name: Test contracts
+      - name: Test with default features
         working-directory: contracts
-        run: cargo test
+        run: cargo test --workspace
+
+      - name: Test with testutils feature
+        working-directory: contracts
+        run: cargo test --workspace --features testutils
+
+      - name: Clippy (deny warnings)
+        working-directory: contracts
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Check formatting
+        working-directory: contracts
+        run: cargo fmt --all -- --check
+
+  wasm-size-budgets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli@22.0.0 --features opt
+
+      - name: Build all contracts
+        working-directory: contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Check WASM size budgets
+        working-directory: contracts
+        run: |
+          echo "=== WASM Size Report ==="
+          MAX_SIZE_KB=500
+          FAILED=0
+          for wasm in target/wasm32-unknown-unknown/release/*.wasm; do
+            if [ -f "$wasm" ]; then
+              NAME=$(basename "$wasm" .wasm)
+              SIZE_BYTES=$(wc -c < "$wasm")
+              SIZE_KB=$((SIZE_BYTES / 1024))
+              echo "  $NAME: ${SIZE_KB} KB"
+              if [ "$SIZE_KB" -gt "$MAX_SIZE_KB" ]; then
+                echo "  FAIL: $NAME exceeds ${MAX_SIZE_KB} KB budget"
+                FAILED=1
+              fi
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "WASM size budget check failed"
+            exit 1
+          fi
+          echo "All WASM artifacts within budget"

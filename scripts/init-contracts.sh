@@ -26,6 +26,9 @@ ADMIN=$(stellar keys address "$STELLAR_IDENTITY")
 # Minimum enforced by the staking contract is 100 (1%).
 STAKING_EMERGENCY_PENALTY_BPS="${STAKING_EMERGENCY_PENALTY_BPS:-500}"
 
+# Escrow protocol fee in basis points (default 100 = 1%, max 5000 = 50%).
+ESCROW_PROTOCOL_FEE_BPS="${ESCROW_PROTOCOL_FEE_BPS:-100}"
+
 invoke() {
   local contract_id=$1
   local name=$2
@@ -42,10 +45,21 @@ echo "Initializing CHV Token..."
 invoke "$CHV_TOKEN_CONTRACT_ID" "chv_token" initialize --admin "$ADMIN" --treasury "$ADMIN"
 
 echo "Initializing Certificates..."
-invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init --admin "$ADMIN" --backend_public_key "$CERTIFICATES_BACKEND_PUBKEY_HEX"
+invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init --admin "$ADMIN" --backend_public_key "$CERTIFICATES_BACKEND_PUBKEY_HEX" --minter "$ADMIN"
+
+echo "Initializing Escrow..."
+invoke "$ESCROW_CONTRACT_ID" "escrow" set_admin --admin "$ADMIN"
+invoke "$ESCROW_CONTRACT_ID" "escrow" whitelist_token --admin "$ADMIN" --token "$CHV_TOKEN_CONTRACT_ID"
+invoke "$ESCROW_CONTRACT_ID" "escrow" set_protocol_fee_bps --admin "$ADMIN" --bps "$ESCROW_PROTOCOL_FEE_BPS"
 
 echo "Initializing Escrow Vault..."
 invoke "$ESCROW_VAULT_CONTRACT_ID" "escrow-vault" set_admin --admin "$ADMIN"
+
+echo "Initializing ChainVerse Core..."
+invoke "$CHAINVERSE_CORE_CONTRACT_ID" "chainverse-core" initialize --admin "$ADMIN" --protocol_fee "$ESCROW_PROTOCOL_FEE_BPS" --supported_tokens "[\"$CHV_TOKEN_CONTRACT_ID\"]"
+
+echo "Initializing Reward..."
+invoke "$REWARD_CONTRACT_ID" "reward" initialize --admin "$ADMIN" --treasury "$ADMIN" --token "$CHV_TOKEN_CONTRACT_ID" --reward_amount 10000000
 
 echo "Initializing Staking..."
 invoke "$STAKING_CONTRACT_ID" "staking" initialize --admin "$ADMIN" --token "$CHV_TOKEN_CONTRACT_ID" --emergency_unstake_penalty_bps "$STAKING_EMERGENCY_PENALTY_BPS"
@@ -56,4 +70,7 @@ invoke "$PAYOUT_AUTOMATION_CONTRACT_ID" "payout-automation" initialize --admin "
 echo "Initializing Course Registry..."
 invoke "$COURSE_REGISTRY_CONTRACT_ID" "course_registry" initialize --admin "$ADMIN"
 
+echo ""
 echo "All contracts initialized."
+echo "  Escrow token whitelist: $CHV_TOKEN_CONTRACT_ID"
+echo "  Escrow protocol fee:    $ESCROW_PROTOCOL_FEE_BPS bps"

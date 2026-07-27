@@ -8,6 +8,7 @@ members = [
     "escrow",
     "escrow-vault",
     "payout-automation",
+    "payment",
     "reward",
     "course_registry",
     "chv_token",
