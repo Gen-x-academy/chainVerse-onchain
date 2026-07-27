@@ -18,4 +18,6 @@ pub enum EscrowError {
     DisputeResolutionNotImplemented = 12,
     NoFeesAvailable = 13,
     ContractPaused = 14,
+    /// Escrow is not in the expected lifecycle state for this action.
+    InvalidEscrowState = 15,
 }

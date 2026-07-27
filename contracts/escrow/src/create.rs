@@ -1,9 +1,17 @@
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
-use crate::storage::{add_to_total_volume, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow};
+use crate::storage::{append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow};
 use crate::types::{Escrow, EscrowStatus};
-use soroban_sdk::{token::Client as TokenClient, Address, Env};
+use soroban_sdk::{Address, Env};
 
+/// Creates an unfunded escrow. The buyer must later call `fund_escrow`.
+use crate::storage::{
+    append_to_buyer_index, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow,
+};
+use crate::types::{Escrow, EscrowStatus};
+use soroban_sdk::{Address, Env};
+
+/// Creates an unfunded escrow record. Tokens are deposited later via `fund_escrow`.
 pub fn create_escrow(
     env: &Env,
     buyer: Address,
@@ -28,25 +36,18 @@ pub fn create_escrow(
         return Err(EscrowError::TokenNotAllowed);
     }
 
-    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
-
-    buyer.require_auth();
-    if !is_token_whitelisted(env, &token) {
-        return Err(EscrowError::TokenNotAllowed);
-    }
-    TokenClient::new(env, &token).transfer(&buyer, &env.current_contract_address(), &amount);
     let escrow_id = next_escrow_id(env);
     let escrow = Escrow {
         buyer: buyer.clone(),
         seller: seller.clone(),
         token: token.clone(),
         amount,
-        status: EscrowStatus::Pending,
+        status: EscrowStatus::Created,
         expiration,
     };
     save_escrow(env, escrow_id, &escrow);
-    add_to_total_volume(env, amount);
     append_to_token_index(env, &token, escrow_id);
+    append_to_buyer_index(env, &buyer, escrow_id);
     escrow_created(env, escrow_id, &buyer, &seller, &token, amount);
     Ok(escrow_id)
 }

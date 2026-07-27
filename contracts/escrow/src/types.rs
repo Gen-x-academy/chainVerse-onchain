@@ -3,9 +3,17 @@ use soroban_sdk::{contracttype, Address};
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EscrowStatus {
+    /// Escrow created but not yet funded by the buyer.
+    Created,
+    /// Buyer has deposited tokens; awaiting release, dispute, or refund.
+    Funded,
+    /// Buyer has deposited tokens; awaiting release, dispute, or refund.
     Pending,
+    /// Funds fully released to the seller.
     Completed,
+    /// Funds returned to the buyer after expiry (or cancellation).
     Cancelled,
+    /// Dispute opened; release blocked until resolved.
     Disputed,
 }
 
@@ -15,6 +23,7 @@ pub struct Escrow {
     pub buyer: Address,
     pub seller: Address,
     pub token: Address,
+    /// Remaining locked amount (reduced by partial releases).
     pub amount: i128,
     pub status: EscrowStatus,
     pub expiration: u64,

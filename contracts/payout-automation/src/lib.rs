@@ -11,6 +11,7 @@ mod payment_test;
 #[cfg(test)]
 mod test;
 
+const MAX_BATCH_SIZE: u32 = 50;
 #[cfg(test)]
 mod suite;
 
@@ -24,6 +25,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, require, symbol_short,
     token::Client as TokenClient, Address, BytesN, Env, Vec,
 };
+mod events;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -36,6 +38,7 @@ pub enum PayoutError {
     NegativeAmount = 5,
     CourseNotFound = 6,
     AlreadyEnrolled = 7,
+    InsufficientTreasuryBalance = 8,
     CourseInactive = 8,
     FeeTooHigh = 9,
     NothingToWithdraw = 10,
@@ -261,6 +264,8 @@ impl PayoutAutomation {
             .set(&DataKey::Enrollment(student.clone(), course_id), &true);
         env.storage()
             .persistent()
+            .set(&DataKey::Enrollment(student.clone(), course_id), &true);
+        events::emit_course_paid(&env, &student, course_id, price);
             .extend_ttl(&DataKey::Enrollment(student, course_id), PAYOUT_MIN_TTL, PAYOUT_MAX_TTL);
         Ok(())
     }
@@ -316,6 +321,19 @@ impl PayoutAutomation {
         // schedule_payout() share identical rules with no duplication.
         validation::validate_batch(&payouts)?;
 
+        let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
+        let client = TokenClient::new(&env, &token);
+
+        // --- Pass 2: pre-flight treasury balance check (#731) ---
+        // Sum the full batch and verify the contract holds enough before touching balances.
+        // Prevents mid-batch panics from exhausted funds.
+        let total: i128 = payouts.iter().map(|(_r, a)| a).sum();
+        let balance: i128 = client.balance(&env.current_contract_address());
+        if balance < total {
+            return Err(PayoutError::InsufficientTreasuryBalance);
+        }
+
+        // --- Pass 3: all checks passed — execute all transfers ---
         // --- Pass 1b: verify the contract holds enough funds for the full batch ---
         let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
         let client = TokenClient::new(&env, &token);
@@ -331,7 +349,10 @@ impl PayoutAutomation {
         // --- Pass 2: all amounts are valid — now execute all transfers ---
         for (recipient, amount) in payouts.iter() {
             client.transfer(&env.current_contract_address(), &recipient, &amount);
+            events::emit_payout_sent(&env, &recipient, amount);
         }
+
+        events::emit_batch_executed(&env, &caller, payouts.len(), total);
         Ok(())
     }
 
