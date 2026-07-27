@@ -14,6 +14,7 @@ mod version;
 pub use errors::EscrowError;
 pub use types::{Escrow, EscrowStatus, FeeRecord};
 
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 #[contract]
@@ -55,6 +56,12 @@ impl EscrowContract {
         create::create_escrow(&env, buyer, seller, token, amount, expiration)
     }
 
+    /// Deposits escrow funds. Requires authorization from the escrow buyer.
+    pub fn fund_escrow(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        fund::fund_escrow(&env, escrow_id)
+    }
+
+    /// Releases funds to the seller. Only callable by the buyer or admin.
     /// Deposits the escrow amount. Only the buyer may fund.
     pub fn fund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         fund::fund_escrow(&env, caller, escrow_id)

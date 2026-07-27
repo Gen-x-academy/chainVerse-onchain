@@ -7,6 +7,16 @@ use crate::storage::{
 use crate::types::{EscrowStatus, FeeRecord};
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
 
+/// Releases funds to the seller. Buyer or admin may authorize.
+pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+    let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
+
+    caller.require_auth();
+    let is_buyer = caller == escrow.buyer;
+    let is_admin = crate::storage::get_admin(env).as_ref() == Some(&caller);
+    if !is_buyer && !is_admin {
+        return Err(EscrowError::Unauthorized);
+    }
 fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<(), EscrowError> {
     caller.require_auth();
     if caller == buyer {
@@ -26,6 +36,8 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::AlreadyReleased);
     }
 
+    if escrow.status != EscrowStatus::Funded {
+        return Err(EscrowError::InvalidEscrowState);
     if escrow.status != EscrowStatus::Pending {
         return Err(EscrowError::NotPending);
     }

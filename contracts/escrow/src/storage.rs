@@ -216,7 +216,7 @@ mod tests {
             seller: Address::generate(env),
             token: Address::generate(env),
             amount: 1_000,
-            status: EscrowStatus::Pending,
+            status: EscrowStatus::Funded,
             expiration: 9999,
         }
     }

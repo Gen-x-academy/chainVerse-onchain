@@ -3,8 +3,10 @@ use soroban_sdk::{contracttype, Address};
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EscrowStatus {
-    /// Escrow created but not yet funded.
+    /// Escrow created but not yet funded by the buyer.
     Created,
+    /// Buyer has deposited tokens; awaiting release, dispute, or refund.
+    Funded,
     /// Buyer has deposited tokens; awaiting release, dispute, or refund.
     Pending,
     /// Funds fully released to the seller.

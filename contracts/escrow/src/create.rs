@@ -1,5 +1,10 @@
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
+use crate::storage::{append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow};
+use crate::types::{Escrow, EscrowStatus};
+use soroban_sdk::{Address, Env};
+
+/// Creates an unfunded escrow. The buyer must later call `fund_escrow`.
 use crate::storage::{
     append_to_buyer_index, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow,
 };
