@@ -1,5 +1,7 @@
 #![no_std]
 
+mod validation;
+
 #[cfg(test)]
 mod tests;
 
@@ -314,14 +316,10 @@ impl PayoutAutomation {
             return Err(PayoutError::BatchTooLarge);
         }
 
-        // --- Pass 1: validate ALL amounts before touching any balances ---
-        // This ensures a batch with any invalid entry is rejected entirely,
-        // preventing partial execution that could leave funds in an inconsistent state.
-        for (_recipient, amount) in payouts.iter() {
-            if amount <= 0 {
-                return Err(PayoutError::NegativeAmount);
-            }
-        }
+        // --- Pass 1: validate ALL entries via the shared validator (#733) ---
+        // Delegates to validation::validate_batch() so execute() and
+        // schedule_payout() share identical rules with no duplication.
+        validation::validate_batch(&payouts)?;
 
         let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
         let client = TokenClient::new(&env, &token);
@@ -382,6 +380,9 @@ impl PayoutAutomation {
         if amount <= 0 {
             return Err(PayoutError::NegativeAmount);
         }
+
+        // Validate via the shared validator (#733) so rules stay in sync with execute().
+        validation::validate_payout_record(&recipient, amount)?;
 
         // Reject schedules set in the past to prevent accidental immediate execution.
         if execute_after <= env.ledger().timestamp() {

@@ -3,7 +3,7 @@
 const VAULT_MIN_TTL: u32 = 100_000;
 const VAULT_MAX_TTL: u32 = 500_000;
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Vec};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -20,6 +20,9 @@ pub enum VaultError {
     NotInitialized = 9,
     ConflictOfInterest = 10,
     NotVoted = 11,
+    InvalidThreshold = 10,
+    ThresholdExceedsApprovers = 11,
+    NotVoted = 12,
 }
 
 #[contracttype]
@@ -44,6 +47,19 @@ pub enum DataKey { Vault(BytesN<32>), VaultCount, Admin }
 
 #[contracttype]
 pub enum VotedKey { Voted(BytesN<32>, Address) }
+
+/// Removes duplicate addresses from `list`, preserving first-seen order.
+fn deduplicate(env: &Env, list: Vec<Address>) -> Vec<Address> {
+    let mut seen: Map<Address, bool> = Map::new(env);
+    let mut result: Vec<Address> = Vec::new(env);
+    for addr in list.iter() {
+        if !seen.contains_key(addr.clone()) {
+            seen.set(addr.clone(), true);
+            result.push_back(addr);
+        }
+    }
+    result
+}
 
 #[contract]
 pub struct EscrowVault;
@@ -93,8 +109,19 @@ impl EscrowVault {
         if approvers.contains(&depositor) || approvers.contains(&recipient) {
             return Err(VaultError::ConflictOfInterest);
         }
+        // #719 — duplicate addresses are deduplicated rather than rejected,
+        // so the threshold check below is always against unique approvers.
+        let unique_approvers = deduplicate(&env, approvers);
         if amount <= 0 {
             return Err(VaultError::InvalidAmount);
+        }
+        // #717 — a zero threshold would auto-release with no approvals; a
+        // threshold above the approver count could never be met.
+        if threshold == 0 {
+            return Err(VaultError::InvalidThreshold);
+        }
+        if threshold > unique_approvers.len() as u32 {
+            return Err(VaultError::ThresholdExceedsApprovers);
         }
         depositor.require_auth();
         soroban_sdk::token::Client::new(&env, &token)
@@ -107,7 +134,7 @@ impl EscrowVault {
             recipient,
             token,
             amount,
-            approvers,
+            approvers: unique_approvers,
             approvals: 0,
             threshold,
             status: VaultStatus::Pending,
@@ -119,10 +146,10 @@ impl EscrowVault {
         Ok(id)
     }
 
-    pub fn approve(
+    pub fn approve_vault(
         env: Env,
-        caller: Address,
         id: BytesN<32>,
+        caller: Address,
     ) -> Result<(), VaultError> {
         caller.require_auth();
         let mut vault: Vault = env.storage().persistent()
@@ -160,6 +187,12 @@ impl EscrowVault {
     /// #718 — an approver revokes their prior approval before the threshold is
     /// met. Fails once the vault has been released or cancelled.
     pub fn revoke_approval(env: Env, caller: Address, id: BytesN<32>) -> Result<(), VaultError> {
+    /// Lets an approver withdraw their approval before the vault releases.
+    pub fn revoke_approval(
+        env: Env,
+        id: BytesN<32>,
+        caller: Address,
+    ) -> Result<(), VaultError> {
         caller.require_auth();
         let mut vault: Vault = env.storage().persistent()
             .get(&DataKey::Vault(id.clone()))
@@ -174,8 +207,37 @@ impl EscrowVault {
         }
         env.storage().persistent().remove(&voted_key);
         vault.approvals = vault.approvals.saturating_sub(1);
+        vault.approvals -= 1;
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
+        Ok(())
+    }
+
+    /// Admin-only escape hatch for a vault that must be cancelled for legal
+    /// or compliance reasons (e.g. buyer's account frozen). Refunds the
+    /// full amount back to the depositor.
+    pub fn emergency_cancel(
+        env: Env,
+        vault_id: BytesN<32>,
+        reason: String,
+    ) -> Result<(), VaultError> {
+        let admin: Address = env.storage().instance()
+            .get(&DataKey::Admin)
+            .ok_or(VaultError::NotInitialized)?;
+        admin.require_auth();
+        let mut vault: Vault = env.storage().persistent()
+            .get(&DataKey::Vault(vault_id.clone()))
+            .ok_or(VaultError::NotFound)?;
+        match vault.status {
+            VaultStatus::Pending => {}
+            _ => return Err(VaultError::NotPending),
+        }
+        vault.status = VaultStatus::Cancelled;
+        env.storage().persistent().set(&DataKey::Vault(vault_id.clone()), &vault);
+        env.storage().persistent().extend_ttl(&DataKey::Vault(vault_id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
+        soroban_sdk::token::Client::new(&env, &vault.token)
+            .transfer(&env.current_contract_address(), &vault.depositor, &vault.amount);
+        env.events().publish((symbol_short!("emrg_cncl"),), (vault_id, reason));
         Ok(())
     }
 }
