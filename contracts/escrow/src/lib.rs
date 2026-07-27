@@ -86,6 +86,13 @@ impl EscrowContract {
         refund::refund_escrow(&env, caller, escrow_id)
     }
 
+    /// Opens a dispute on a still-funded escrow. Only the buyer may dispute, and
+    /// only while the escrow is `Pending` — a released or cancelled escrow can
+    /// no longer be disputed, preventing post-settlement state corruption.
+    pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        dispute::dispute(&env, caller, escrow_id)
+    }
+
     /// Returns the escrow record for the given ID, if it exists.
     pub fn get_escrow(env: Env, escrow_id: u64) -> Option<Escrow> {
         storage::get_escrow(&env, escrow_id)
