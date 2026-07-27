@@ -19,9 +19,11 @@ pub fn claim_reward(env: Env, user: Address) -> Result<(), Error> {
     if allowance < reward_amount {
         return Err(Error::InsufficientTreasuryAllowance);
     }
-    token_client.transfer(&treasury, &user, &reward_amount);
 
+    // Optimistic locking: set the flag BEFORE the transfer so that a
+    // panicking transfer cannot leave the flag unset and allow re-claims.
     set_rewarded(&env, &user);
+    token_client.transfer(&treasury, &user, &reward_amount);
     emit_reward_claimed(&env, &user, reward_amount);
 
     Ok(())

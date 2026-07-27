@@ -7,8 +7,6 @@ pub enum EscrowStatus {
     Created,
     /// Buyer has deposited tokens; awaiting release, dispute, or refund.
     Funded,
-    /// Buyer has deposited tokens; awaiting release, dispute, or refund.
-    Pending,
     /// Funds fully released to the seller.
     Completed,
     /// Funds returned to the buyer after expiry (or cancellation).
@@ -26,6 +24,7 @@ pub struct Escrow {
     /// Remaining locked amount (reduced by partial releases).
     pub amount: i128,
     pub status: EscrowStatus,
+    /// Unix timestamp after which the buyer may reclaim funds (#709).
     pub expiration: u64,
 }
 

@@ -7,16 +7,6 @@ use crate::storage::{
 use crate::types::{EscrowStatus, FeeRecord};
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
 
-/// Releases funds to the seller. Buyer or admin may authorize.
-pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
-    let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
-
-    caller.require_auth();
-    let is_buyer = caller == escrow.buyer;
-    let is_admin = crate::storage::get_admin(env).as_ref() == Some(&caller);
-    if !is_buyer && !is_admin {
-        return Err(EscrowError::Unauthorized);
-    }
 fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<(), EscrowError> {
     caller.require_auth();
     if caller == buyer {
@@ -29,6 +19,7 @@ fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<()
 }
 
 /// Releases the full remaining balance of a funded escrow to the seller.
+/// Requires the escrow to be in `Funded` or `Disputed` state (#708).
 pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
     let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
 
@@ -36,10 +27,9 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::AlreadyReleased);
     }
 
-    if escrow.status != EscrowStatus::Funded {
+    // #708: guard — only Funded or Disputed escrows may be released.
+    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
         return Err(EscrowError::InvalidEscrowState);
-    if escrow.status != EscrowStatus::Pending {
-        return Err(EscrowError::NotPending);
     }
 
     authorize_releaser(env, &caller, &escrow.buyer)?;
@@ -77,7 +67,8 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
     Ok(())
 }
 
-/// Releases part of a funded escrow to the seller. Remaining amount stays locked.
+/// Releases a portion of the locked funds to the seller. Remaining amount stays locked.
+/// Requires the escrow to be in `Funded` or `Disputed` state (#708).
 pub fn partial_release(
     env: &Env,
     caller: Address,
@@ -94,8 +85,9 @@ pub fn partial_release(
         return Err(EscrowError::AlreadyReleased);
     }
 
-    if escrow.status != EscrowStatus::Pending {
-        return Err(EscrowError::NotPending);
+    // #708: guard — only Funded or Disputed escrows may be partially released.
+    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
+        return Err(EscrowError::InvalidEscrowState);
     }
 
     authorize_releaser(env, &caller, &escrow.buyer)?;
@@ -139,7 +131,7 @@ pub fn partial_release(
     Ok(())
 }
 
-/// Backwards-compatible alias used by older call sites / snapshots.
+/// Backwards-compatible alias used by older call sites.
 pub fn release_funds(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     let escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
     let buyer = escrow.buyer.clone();
