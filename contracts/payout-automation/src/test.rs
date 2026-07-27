@@ -94,7 +94,8 @@ fn test_double_pay_fails() {
     let price: i128 = 500;
 
     // Register course with zero platform fee.
-    client.register_course(&ctx.admin, &course_id, &price, &0_u32);
+    let instructor = Address::generate(&ctx.env);
+    client.register_course(&ctx.admin, &course_id, &price, &instructor, &0_u32);
 
     let student = Address::generate(&ctx.env);
     // Give enough balance for two hypothetical payments.
@@ -136,7 +137,8 @@ fn test_fee_calculation_correct() {
     client.set_treasury(&ctx.admin, &treasury);
 
     // Register course with fee.
-    client.register_course(&ctx.admin, &course_id, &price, &fee_bps);
+    let instructor = Address::generate(&ctx.env);
+    client.register_course(&ctx.admin, &course_id, &price, &instructor, &fee_bps);
 
     let student = Address::generate(&ctx.env);
     mint(&ctx.env, &ctx.token, &student, price);
@@ -175,7 +177,8 @@ fn test_pay_deducts_exact_amount() {
     let initial_balance: i128 = 5_000;
 
     // Zero-fee course so fee forwarding doesn't affect the deduction assertion.
-    client.register_course(&ctx.admin, &course_id, &price, &0_u32);
+    let instructor = Address::generate(&ctx.env);
+    client.register_course(&ctx.admin, &course_id, &price, &instructor, &0_u32);
 
     let student = Address::generate(&ctx.env);
     mint(&ctx.env, &ctx.token, &student, initial_balance);
