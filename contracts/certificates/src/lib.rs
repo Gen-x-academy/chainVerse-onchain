@@ -1,10 +1,40 @@
 #![no_std]
-mod errors; mod storage; mod types; mod verify;
-#[cfg(test)] mod test;
+mod errors;
+mod storage;
+mod types;
+mod verify;
+#[cfg(test)]
+mod test;
+
 pub use errors::ContractError;
 pub use types::Certificate;
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env};
+
+use soroban_sdk::{contract, contractclient, contractimpl, symbol_short, Address, Bytes, BytesN, Env};
 use storage::{MAX_TTL, MIN_TTL};
+
+// ---------------------------------------------------------------------------
+// Typed cross-contract client interface (#742)
+//
+// Exposes a `CertificateContractClient` that can be imported by any other
+// contract (e.g. the payment contract) to perform a cross-contract call:
+//
+//   use certificates::CertificateContractClient;
+//
+//   let cert_client = CertificateContractClient::new(&env, &cert_contract_id);
+//   cert_client.mint(&recipient, &course_id, &proof)?;
+// ---------------------------------------------------------------------------
+#[contractclient(name = "CertificateContractClient")]
+pub trait CertificateInterface {
+    fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError>;
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
+    fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError>;
+    fn transfer(env: Env, from: Address, to: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
+    fn revoke(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
+    fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate>;
+    fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError>;
+    fn is_paused(env: Env) -> bool;
+    fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError>;
+}
 
 #[contract]
 pub struct CertificateContract;

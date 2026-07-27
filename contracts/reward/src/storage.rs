@@ -18,8 +18,8 @@ const TOKEN: soroban_sdk::Symbol = symbol_short!("TOKEN");
 const REWARD_AMOUNT: soroban_sdk::Symbol = symbol_short!("REWARD_AMT");
 const PENALTY_POOL: soroban_sdk::Symbol = symbol_short!("PENALTIES");
 
-const MIN_TTL: u32 = 6_307_200;
-const MAX_TTL: u32 = 12_614_400;
+pub const MIN_TTL: u32 = 6_307_200;
+pub const MAX_TTL: u32 = 12_614_400;
 
 pub fn is_initialized(env: &Env) -> bool {
     env.storage().instance().get(&DataKey::Initialized).unwrap_or(false)
@@ -86,4 +86,12 @@ pub fn set_backend_pubkey(env: &Env, key: &BytesN<32>) {
 /// Returns the stored backend public key, or None if not initialized.
 pub fn get_backend_pubkey(env: &Env) -> Option<BytesN<32>> {
     env.storage().instance().get(&DataKey::BackendPubKey)
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
 }
