@@ -1,17 +1,13 @@
-use soroban_sdk::{Env, Bytes, BytesN};
-use crate::storage::DataKey;
+use soroban_sdk::{Bytes, BytesN, Env};
 use crate::errors::Error;
+use crate::storage::get_backend_pubkey;
 
 pub fn verify_signature(
     env: &Env,
     payload: Bytes,
     signature: BytesN<64>,
 ) -> Result<(), Error> {
-    let pubkey: BytesN<32> = env
-        .storage()
-        .instance()
-        .get(&DataKey::BackendPubKey)
-        .ok_or(Error::Unauthorized)?;
+    let pubkey = get_backend_pubkey(env).ok_or(Error::Unauthorized)?;
 
     env.crypto()
         .ed25519_verify(&pubkey, &payload, &signature)
