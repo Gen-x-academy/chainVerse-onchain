@@ -43,6 +43,10 @@ pub enum EscrowKey {
     Record(u64),
     /// Monotonically increasing counter used to generate new ids.
     NextId,
+    /// Maps a depositor (buyer) → the ids of their escrows.
+    BuyerIndex(Address),
+    /// Maps a recipient (seller) → the ids of their escrows.
+    SellerIndex(Address),
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +75,22 @@ fn load(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
 fn save(env: &Env, record: &EscrowRecord) {
     let key = EscrowKey::Record(record.id);
     env.storage().persistent().set(&key, record);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+fn add_to_buyer_index(env: &Env, buyer: &Address, id: u64) {
+    let key = EscrowKey::BuyerIndex(buyer.clone());
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    ids.push_back(id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+fn add_to_seller_index(env: &Env, seller: &Address, id: u64) {
+    let key = EscrowKey::SellerIndex(seller.clone());
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    ids.push_back(id);
+    env.storage().persistent().set(&key, &ids);
     env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 }
 
@@ -107,6 +127,8 @@ pub fn create(
         expires_at,
     };
     save(env, &record);
+    add_to_buyer_index(env, &record.depositor, id);
+    add_to_seller_index(env, &record.recipient, id);
     Ok(id)
 }
 
@@ -163,40 +185,42 @@ pub fn get(env: &Env, id: u64) -> Result<EscrowRecord, ContractError> {
     load(env, id)
 }
 
-/// Returns all escrows where `buyer` is the depositor.
+/// Returns escrows where `buyer` is the depositor, reading a per-buyer index
+/// instead of scanning every escrow. Cost scales with the buyer's own escrow
+/// count and the `limit`, not with the global escrow count (fixes the O(n) DoS).
 pub fn get_by_buyer(env: &Env, buyer: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
-    let mut results = Vec::new(env);
-    let count: u64 = env
+    let ids: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&EscrowKey::NextId)
-        .unwrap_or(0u64);
-    let end = core::cmp::min(count, start.saturating_add(limit));
-    for i in start..end {
-        if let Ok(record) = load(env, i) {
-            if &record.depositor == buyer {
-                results.push_back(record);
-            }
-        }
-    }
-    results
+        .get(&EscrowKey::BuyerIndex(buyer.clone()))
+        .unwrap_or(Vec::new(env));
+    collect_by_ids(env, &ids, start, limit)
 }
 
-/// Returns all escrows where `seller` is the recipient.
+/// Returns escrows where `seller` is the recipient, reading a per-seller index
+/// instead of scanning every escrow.
 pub fn get_by_seller(env: &Env, seller: &Address, start: u64, limit: u64) -> Vec<EscrowRecord> {
-    let mut results = Vec::new(env);
-    let count: u64 = env
+    let ids: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&EscrowKey::NextId)
-        .unwrap_or(0u64);
-    let end = core::cmp::min(count, start.saturating_add(limit));
-    for i in start..end {
-        if let Ok(record) = load(env, i) {
-            if &record.recipient == seller {
+        .get(&EscrowKey::SellerIndex(seller.clone()))
+        .unwrap_or(Vec::new(env));
+    collect_by_ids(env, &ids, start, limit)
+}
+
+/// Load the escrow records for a paginated slice of an id index.
+fn collect_by_ids(env: &Env, ids: &Vec<u64>, start: u64, limit: u64) -> Vec<EscrowRecord> {
+    let mut results = Vec::new(env);
+    let total = ids.len() as u64;
+    let end = core::cmp::min(total, start.saturating_add(limit));
+    let mut i = start;
+    while i < end {
+        if let Some(id) = ids.get(i as u32) {
+            if let Ok(record) = load(env, id) {
                 results.push_back(record);
             }
         }
+        i += 1;
     }
     results
 }
