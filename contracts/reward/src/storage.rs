@@ -10,6 +10,16 @@ pub enum DataKey {
     BackendSigner,
     UsedNonce(BytesN<32>),
     Paused,
+    /// Per-student claim flag — must be persistent so it survives WASM upgrades (#299).
+    Rewarded(Address),
+}
+
+const TREASURY: soroban_sdk::Symbol = symbol_short!("TREASURY");
+const TOKEN: soroban_sdk::Symbol = symbol_short!("TOKEN");
+const REWARD_AMOUNT: soroban_sdk::Symbol = symbol_short!("REWARD_AMT");
+const PENALTY_POOL: soroban_sdk::Symbol = symbol_short!("PENALTIES");
+
+/// TTL threshold / bump for persistent entries (ledgers).
     Treasury,
     Token,
     RewardAmount,
@@ -54,6 +64,24 @@ pub fn set_admin(env: &Env, admin: &Address) {
     bump_persistent(env, &DataKey::Admin);
 }
 
+pub fn has_been_rewarded(env: &Env, student: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Rewarded(student.clone()))
+        .unwrap_or(false)
+}
+
+pub fn set_rewarded_flag(env: &Env, student: &Address, value: bool) {
+    let key = DataKey::Rewarded(student.clone());
+    env.storage().persistent().set(&key, &value);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+/// Marks a student as rewarded (claim completed).
+pub fn set_rewarded(env: &Env, student: &Address) {
+    set_rewarded_flag(env, student, true);
 pub fn has_been_rewarded(env: &Env, user: &Address) -> bool {
     env.storage()
         .persistent()
