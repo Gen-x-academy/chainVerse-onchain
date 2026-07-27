@@ -1,14 +1,31 @@
-[package]
-name = "chainverse_onchain"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+members = [
+    "contracts/chv_token",
+    "contracts/payment",
+    "contracts/certificates",
+    "contracts/escrow",
+    "contracts/escrow-vault",
+    "contracts/reward",
+    "contracts/payout-automation",
+    "contracts/chainverse-core",
+    "contracts/chainverse-types",
+    "contracts/course_registry",
+    "contracts/shared",
+    "contracts/common",
+    "contracts/staking",
+    "contracts/token",
+]
 
-[dependencies]
-soroban-sdk = "20.0.0"
+[workspace.dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 
 [profile.release]
-opt-level = "z"
+opt-level      = "z"
 overflow-checks = true
+debug          = 0
+strip          = "symbols"
+panic          = "abort"
+codegen-units  = 1
+lto            = true
