@@ -4,8 +4,8 @@ use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
 
-/// Refunds the buyer after the escrow deadline.
-/// Refunds remaining funds to the buyer after the escrow deadline.
+/// Refunds remaining funds to the buyer after the escrow deadline (#709).
+/// Only callable once the escrow expiration timestamp has passed.
 pub fn refund_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
     caller.require_auth();
 
@@ -17,8 +17,6 @@ pub fn refund_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), E
 
     if escrow.status != EscrowStatus::Funded {
         return Err(EscrowError::InvalidEscrowState);
-    if escrow.status != EscrowStatus::Pending {
-        return Err(EscrowError::NotPending);
     }
 
     if env.ledger().timestamp() < escrow.expiration {
@@ -42,7 +40,6 @@ pub fn refund_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), E
     Ok(())
 }
 
-/// Backwards-compatible entry used by older call sites.
 /// Backwards-compatible alias.
 pub fn refund_buyer(env: &Env, escrow_id: u64) -> Result<(), EscrowError> {
     let escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;

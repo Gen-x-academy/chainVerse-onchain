@@ -21,8 +21,8 @@ pub fn dispute_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::AlreadyReleased);
     }
 
-    if escrow.status != EscrowStatus::Pending {
-        return Err(EscrowError::NotPending);
+    if escrow.status != EscrowStatus::Funded {
+        return Err(EscrowError::InvalidEscrowState);
     }
 
     // #714 — validate the status transition before writing it.

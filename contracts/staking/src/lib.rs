@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod subscription;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
     String,
@@ -111,3 +113,14 @@ impl StakingContract {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod subscription_test;
+#[cfg(test)]
+mod subscription_extended_test;
+#[cfg(test)]
+mod subscription_payment_test;
+#[cfg(test)]
+mod subscription_suite_test;
