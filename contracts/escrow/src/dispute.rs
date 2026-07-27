@@ -25,6 +25,9 @@ pub fn dispute_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::NotPending);
     }
 
+    // #714 — validate the status transition before writing it.
+    crate::escrow_state::assert_transition_allowed(&escrow.status, &EscrowStatus::Disputed)?;
+
     escrow.status = EscrowStatus::Disputed;
     save_escrow(env, escrow_id, &escrow);
     Ok(())

@@ -18,6 +18,8 @@ pub enum VaultError {
     InvalidAmount = 7,
     AlreadyInitialized = 8,
     NotInitialized = 9,
+    ConflictOfInterest = 10,
+    NotVoted = 11,
     InvalidThreshold = 10,
     ThresholdExceedsApprovers = 11,
     NotVoted = 12,
@@ -95,6 +97,18 @@ impl EscrowVault {
         if approvers.is_empty() {
             return Err(VaultError::EmptyApprovers);
         }
+        for i in 0..approvers.len() {
+            for j in (i + 1)..approvers.len() {
+                if approvers.get(i) == approvers.get(j) {
+                    return Err(VaultError::DuplicateApprover);
+                }
+            }
+        }
+        // #716 — a conflicted party (depositor/buyer or recipient/beneficiary)
+        // must not be an approver, otherwise the multisig can be self-approved.
+        if approvers.contains(&depositor) || approvers.contains(&recipient) {
+            return Err(VaultError::ConflictOfInterest);
+        }
         // #719 — duplicate addresses are deduplicated rather than rejected,
         // so the threshold check below is always against unique approvers.
         let unique_approvers = deduplicate(&env, approvers);
@@ -145,13 +159,15 @@ impl EscrowVault {
             VaultStatus::Pending => {}
             _ => return Err(VaultError::NotPending),
         }
-        // #640 — prevent depositor from self-approving their own vault release
-        if caller == vault.depositor && vault.approvers.contains(&caller) {
-            return Err(VaultError::Unauthorized);
+        // #716 — no conflicted party (depositor/buyer or recipient/beneficiary)
+        // may approve, even if listed as an approver.
+        if caller == vault.depositor || caller == vault.recipient {
+            return Err(VaultError::ConflictOfInterest);
         }
         if !vault.approvers.contains(&caller) {
             return Err(VaultError::Unauthorized);
         }
+        // #718 — record the individual vote so it can be revoked; block double votes.
         let voted_key = VotedKey::Voted(id.clone(), caller.clone());
         if env.storage().persistent().has(&voted_key) {
             return Err(VaultError::AlreadyVoted);
@@ -168,6 +184,9 @@ impl EscrowVault {
         Ok(())
     }
 
+    /// #718 — an approver revokes their prior approval before the threshold is
+    /// met. Fails once the vault has been released or cancelled.
+    pub fn revoke_approval(env: Env, caller: Address, id: BytesN<32>) -> Result<(), VaultError> {
     /// Lets an approver withdraw their approval before the vault releases.
     pub fn revoke_approval(
         env: Env,
@@ -187,6 +206,7 @@ impl EscrowVault {
             return Err(VaultError::NotVoted);
         }
         env.storage().persistent().remove(&voted_key);
+        vault.approvals = vault.approvals.saturating_sub(1);
         vault.approvals -= 1;
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
