@@ -18,6 +18,7 @@ pub enum DataKey {
     WhitelistedToken(Address),
     ProtocolFees(Address),
     TokenIndex(Address),
+    BuyerIndex(Address),
     FeeHistory,
     ProtocolFeeBps,
     Paused,
@@ -48,6 +49,16 @@ pub fn require_admin(env: &Env) -> Result<Address, EscrowError> {
     Ok(admin)
 }
 
+/// Verifies `admin` is the configured admin and has authorized the call.
+pub fn require_admin_addr(env: &Env, admin: &Address) -> Result<(), EscrowError> {
+    let current = get_admin(env).ok_or(EscrowError::Unauthorized)?;
+    if &current != admin {
+        return Err(EscrowError::Unauthorized);
+    }
+    admin.require_auth();
+    Ok(())
+}
+
 pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
     env.storage().persistent().set(&DataKey::Escrow(id), escrow);
     
@@ -57,6 +68,11 @@ pub fn save_escrow(env: &Env, id: u64, escrow: &Escrow) {
 
 pub fn load_escrow(env: &Env, id: u64) -> Option<Escrow> {
     env.storage().persistent().get(&DataKey::Escrow(id))
+}
+
+/// Alias used by the contract facade.
+pub fn get_escrow(env: &Env, id: u64) -> Option<Escrow> {
+    load_escrow(env, id)
 }
 
 pub fn next_escrow_id(env: &Env) -> u64 {
@@ -142,6 +158,21 @@ pub fn get_token_index(env: &Env, token: &Address) -> Vec<u64> {
         .unwrap_or(vec![env])
 }
 
+pub fn append_to_buyer_index(env: &Env, buyer: &Address, escrow_id: u64) {
+    let key = DataKey::BuyerIndex(buyer.clone());
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(vec![env]);
+    ids.push_back(escrow_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+pub fn get_buyer_index(env: &Env, buyer: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BuyerIndex(buyer.clone()))
+        .unwrap_or(vec![env])
+}
+
 pub fn get_protocol_fee_bps(env: &Env) -> u32 {
     env.storage()
         .instance()
@@ -185,7 +216,7 @@ mod tests {
             seller: Address::generate(env),
             token: Address::generate(env),
             amount: 1_000,
-            status: EscrowStatus::Pending,
+            status: EscrowStatus::Funded,
             expiration: 9999,
         }
     }
