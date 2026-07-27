@@ -1,6 +1,7 @@
 #![no_std]
 
 mod create;
+mod dispute;
 mod errors;
 mod events;
 mod refund;
@@ -65,6 +66,13 @@ impl EscrowContract {
     /// Refunds the buyer after expiry. Only callable after the expiration timestamp.
     pub fn refund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         refund::refund_escrow(&env, caller, escrow_id)
+    }
+
+    /// Opens a dispute on a still-funded escrow. Only the buyer may dispute, and
+    /// only while the escrow is `Pending` — a released or cancelled escrow can
+    /// no longer be disputed, preventing post-settlement state corruption.
+    pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        dispute::dispute(&env, caller, escrow_id)
     }
 
     /// Returns the escrow record for the given ID, if it exists.
