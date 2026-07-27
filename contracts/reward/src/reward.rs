@@ -2,6 +2,7 @@ use soroban_sdk::{symbol_short, token::Client, Address, Env, Vec};
 use crate::storage::*;
 use crate::events::*;
 use crate::errors::Error;
+use crate::eligibility::assert_eligible;
 
 /// Maximum number of recipients per batch, to stay within the Soroban compute
 /// budget for a single transaction.
@@ -53,9 +54,8 @@ pub fn batch_claim_reward(env: Env, recipients: Vec<Address>) -> Result<(), Erro
 pub fn claim_reward(env: Env, user: Address) -> Result<(), Error> {
     user.require_auth();
 
-    if has_been_rewarded(&env, &user) {
-        return Err(Error::AlreadyRewarded);
-    }
+    // Eligibility is fully validated here before any state mutation or transfer.
+    assert_eligible(&env, &user)?;
 
     let treasury = get_treasury(&env)?;
     let token_address = get_token(&env)?;
@@ -68,7 +68,10 @@ pub fn claim_reward(env: Env, user: Address) -> Result<(), Error> {
     }
     token_client.transfer(&treasury, &user, &reward_amount);
 
+    // Optimistic locking: set the flag BEFORE the transfer so that a
+    // panicking transfer cannot leave the flag unset and allow re-claims.
     set_rewarded(&env, &user);
+    token_client.transfer(&treasury, &user, &reward_amount);
     emit_reward_claimed(&env, &user, reward_amount);
 
     Ok(())

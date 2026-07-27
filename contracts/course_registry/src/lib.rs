@@ -7,6 +7,10 @@ use soroban_sdk::{
 
 const CONTRACT_VERSION: &str = "1.0.0";
 
+// TTL constants: ~1 year at 6-second ledgers (issue #735)
+const COURSE_MIN_TTL: u32 = 3_110_400;
+const COURSE_MAX_TTL: u32 = 6_220_800;
+
 // Errors
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -101,6 +105,9 @@ impl CourseRegistryContract {
         env.storage()
             .persistent()
             .set(&DataKey::Course(course_id), &course);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Course(course_id.clone()), COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(())
     }
 
@@ -123,6 +130,7 @@ impl CourseRegistryContract {
         course.is_active = is_active;
 
         env.storage().persistent().set(&key, &course);
+        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(())
     }
 
@@ -140,6 +148,7 @@ impl CourseRegistryContract {
         course.is_active = false;
 
         env.storage().persistent().set(&key, &course);
+        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(())
     }
 
@@ -147,10 +156,14 @@ impl CourseRegistryContract {
     pub fn get_course(env: Env, course_id: Symbol) -> Result<Course, ContractError> {
         let key = DataKey::Course(course_id);
 
-        env.storage()
+        let course = env
+            .storage()
             .persistent()
             .get(&key)
-            .ok_or(ContractError::CourseNotFound)
+            .ok_or(ContractError::CourseNotFound)?;
+        // Refresh TTL on read so active courses never silently expire (issue #735)
+        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+        Ok(course)
     }
 
     // Purchase Check

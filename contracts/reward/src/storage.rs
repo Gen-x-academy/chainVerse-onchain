@@ -10,80 +10,167 @@ pub enum DataKey {
     BackendSigner,
     UsedNonce(BytesN<32>),
     Paused,
+    /// Per-student claim flag — must be persistent so it survives WASM upgrades (#299).
+    Rewarded(Address),
 }
 
-const REWARDED: soroban_sdk::Symbol = symbol_short!("REWARDED");
 const TREASURY: soroban_sdk::Symbol = symbol_short!("TREASURY");
 const TOKEN: soroban_sdk::Symbol = symbol_short!("TOKEN");
 const REWARD_AMOUNT: soroban_sdk::Symbol = symbol_short!("REWARD_AMT");
 const PENALTY_POOL: soroban_sdk::Symbol = symbol_short!("PENALTIES");
 
-const MIN_TTL: u32 = 6_307_200;
-const MAX_TTL: u32 = 12_614_400;
+/// TTL threshold / bump for persistent entries (ledgers).
+    Treasury,
+    Token,
+    RewardAmount,
+    PenaltyPool,
+}
+
+const REWARDED: soroban_sdk::Symbol = symbol_short!("REWARDED");
+
+/// TTL threshold / bump used for persistent configuration entries.
+pub const MIN_TTL: u32 = 6_307_200;
+pub const MAX_TTL: u32 = 12_614_400;
+
+fn bump_persistent<K>(env: &Env, key: &K)
+where
+    K: soroban_sdk::IntoVal<Env, soroban_sdk::Val>,
+{
+    env.storage()
+        .persistent()
+        .extend_ttl(key, MIN_TTL, MAX_TTL);
+}
 
 pub fn is_initialized(env: &Env) -> bool {
-    env.storage().instance().get(&DataKey::Initialized).unwrap_or(false)
+    env.storage()
+        .persistent()
+        .get(&DataKey::Initialized)
+        .unwrap_or(false)
 }
 
 pub fn set_initialized(env: &Env) {
-    env.storage().instance().set(&DataKey::Initialized, &true);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Initialized, &true);
+    bump_persistent(env, &DataKey::Initialized);
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().instance().get(&DataKey::Admin)
+    env.storage().persistent().get(&DataKey::Admin)
 }
 
 pub fn set_admin(env: &Env, admin: &Address) {
-    env.storage().instance().set(&DataKey::Admin, admin);
+    env.storage().persistent().set(&DataKey::Admin, admin);
+    bump_persistent(env, &DataKey::Admin);
 }
 
+pub fn has_been_rewarded(env: &Env, student: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Rewarded(student.clone()))
+        .unwrap_or(false)
+}
+
+pub fn set_rewarded_flag(env: &Env, student: &Address, value: bool) {
+    let key = DataKey::Rewarded(student.clone());
+    env.storage().persistent().set(&key, &value);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+/// Marks a student as rewarded (claim completed).
+pub fn set_rewarded(env: &Env, student: &Address) {
+    set_rewarded_flag(env, student, true);
 pub fn has_been_rewarded(env: &Env, user: &Address) -> bool {
-    env.storage().persistent().get(&(REWARDED, user)).unwrap_or(false)
+    env.storage()
+        .persistent()
+        .get(&(REWARDED, user))
+        .unwrap_or(false)
 }
 
 pub fn set_rewarded(env: &Env, user: &Address) {
     let key = (REWARDED, user.clone());
     env.storage().persistent().set(&key, &true);
-    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+    bump_persistent(env, &key);
 }
 
 pub fn set_treasury(env: &Env, treasury: &Address) {
-    env.storage().instance().set(&TREASURY, treasury);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Treasury, treasury);
+    bump_persistent(env, &DataKey::Treasury);
 }
 
 pub fn get_treasury(env: &Env) -> Result<Address, Error> {
-    env.storage().instance().get(&TREASURY).ok_or(Error::NotInitialized)
+    env.storage()
+        .persistent()
+        .get(&DataKey::Treasury)
+        .ok_or(Error::NotInitialized)
 }
 
 pub fn set_token(env: &Env, token: &Address) {
-    env.storage().instance().set(&TOKEN, token);
+    env.storage().persistent().set(&DataKey::Token, token);
+    bump_persistent(env, &DataKey::Token);
 }
 
 pub fn get_token(env: &Env) -> Result<Address, Error> {
-    env.storage().instance().get(&TOKEN).ok_or(Error::NotInitialized)
+    env.storage()
+        .persistent()
+        .get(&DataKey::Token)
+        .ok_or(Error::NotInitialized)
 }
 
 pub fn set_reward_amount(env: &Env, amount: i128) {
-    env.storage().instance().set(&REWARD_AMOUNT, &amount);
+    env.storage()
+        .persistent()
+        .set(&DataKey::RewardAmount, &amount);
+    bump_persistent(env, &DataKey::RewardAmount);
 }
 
 pub fn get_reward_amount(env: &Env) -> Result<i128, Error> {
-    env.storage().instance().get(&REWARD_AMOUNT).ok_or(Error::NotInitialized)
+    env.storage()
+        .persistent()
+        .get(&DataKey::RewardAmount)
+        .ok_or(Error::NotInitialized)
 }
 
 pub fn get_penalty_pool(env: &Env) -> i128 {
-    env.storage().instance().get(&PENALTY_POOL).unwrap_or(0)
+    env.storage()
+        .persistent()
+        .get(&DataKey::PenaltyPool)
+        .unwrap_or(0)
 }
 
 pub fn set_penalty_pool(env: &Env, amount: i128) {
-    env.storage().instance().set(&PENALTY_POOL, &amount);
+    env.storage()
+        .persistent()
+        .set(&DataKey::PenaltyPool, &amount);
+    bump_persistent(env, &DataKey::PenaltyPool);
 }
 
 pub fn set_backend_pubkey(env: &Env, key: &BytesN<32>) {
-    env.storage().instance().set(&DataKey::BackendPubKey, key);
+    env.storage()
+        .persistent()
+        .set(&DataKey::BackendPubKey, key);
+    bump_persistent(env, &DataKey::BackendPubKey);
 }
 
-/// Returns the stored backend public key, or None if not initialized.
+/// Returns the stored backend public key, or None if not set.
 pub fn get_backend_pubkey(env: &Env) -> Option<BytesN<32>> {
-    env.storage().instance().get(&DataKey::BackendPubKey)
+    env.storage().persistent().get(&DataKey::BackendPubKey)
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::Paused, &paused);
+    bump_persistent(env, &DataKey::Paused);
 }
