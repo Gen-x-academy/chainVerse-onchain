@@ -95,6 +95,24 @@ impl RewardContract {
         reward::claim_reward(env, user)
     }
 
+    /// Admin-only: update the per-student reward amount without redeploying.
+    pub fn set_reward_amount(env: Env, new_amount: i128) -> Result<(), errors::Error> {
+        reward::update_reward_amount(env, new_amount)
+    }
+
+    /// Returns the current per-student reward amount.
+    pub fn get_reward_amount(env: Env) -> Result<i128, errors::Error> {
+        reward::current_reward_amount(env)
+    }
+
+    /// Admin-only: distribute rewards to many students in a single transaction.
+    pub fn batch_claim_reward(
+        env: Env,
+        recipients: soroban_sdk::Vec<Address>,
+    ) -> Result<(), errors::Error> {
+        reward::batch_claim_reward(env, recipients)
+    }
+
     /// Accumulate a penalty when a user emergency-unstakes.
     ///
     /// Called internally by the staking logic; the penalty amount is credited
