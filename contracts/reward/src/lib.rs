@@ -3,6 +3,7 @@
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 
 mod admin;
+mod eligibility;
 mod errors;
 mod events;
 mod reward;
@@ -12,6 +13,8 @@ mod storage;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod reward_test;
 pub use errors::Error;
 
 use admin::require_admin;
