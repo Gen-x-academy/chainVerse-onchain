@@ -50,7 +50,7 @@ See [docs/contracts-overview.md](docs/contracts-overview.md) for the full flow-b
 ## Prerequisites
 
 - Rust 1.78 with the `wasm32-unknown-unknown` target (pinned in [`rust-toolchain.toml`](rust-toolchain.toml))
-- [Stellar CLI](https://developers.stellar.org/docs/tools/stellar-cli) 21.x
+- [Stellar CLI](https://developers.stellar.org/docs/tools/stellar-cli) 22.x
 
 ## Quick Start
 
@@ -59,7 +59,7 @@ git clone https://github.com/Gen-x-academy/chainVerse-onchain
 cd chainVerse-onchain
 
 rustup target add wasm32-unknown-unknown
-cargo install --locked stellar-cli@21.0.0 --features opt
+cargo install --locked stellar-cli@22.0.0 --features opt
 
 stellar contract build
 cargo test --workspace

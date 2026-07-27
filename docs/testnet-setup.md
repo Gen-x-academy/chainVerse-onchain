@@ -10,7 +10,7 @@ For a deeper walkthrough of just the identity/funding step, see
 ## 1. Install Stellar CLI
 
 ```sh
-cargo install --locked stellar-cli --features opt
+cargo install --locked stellar-cli@22.0.0 --features opt
 ```
 
 Verify the installation:

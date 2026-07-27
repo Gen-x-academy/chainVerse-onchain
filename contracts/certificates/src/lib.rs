@@ -1,22 +1,53 @@
 #![no_std]
-mod errors; mod storage; mod types; mod verify;
-#[cfg(test)] mod test;
+mod errors;
+mod storage;
+mod types;
+mod verify;
+#[cfg(test)]
+mod test;
+
 pub use errors::ContractError;
 pub use types::Certificate;
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env};
+
+use soroban_sdk::{contract, contractclient, contractimpl, symbol_short, Address, Bytes, BytesN, Env};
 use storage::{MAX_TTL, MIN_TTL};
+
+// ---------------------------------------------------------------------------
+// Typed cross-contract client interface (#742)
+//
+// Exposes a `CertificateContractClient` that can be imported by any other
+// contract (e.g. the payment contract) to perform a cross-contract call:
+//
+//   use certificates::CertificateContractClient;
+//
+//   let cert_client = CertificateContractClient::new(&env, &cert_contract_id);
+//   cert_client.mint(&recipient, &course_id, &proof)?;
+// ---------------------------------------------------------------------------
+#[contractclient(name = "CertificateContractClient")]
+pub trait CertificateInterface {
+    fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError>;
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
+    fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError>;
+    fn transfer(env: Env, from: Address, to: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
+    fn revoke(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
+    fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate>;
+    fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError>;
+    fn is_paused(env: Env) -> bool;
+    fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError>;
+}
 
 #[contract]
 pub struct CertificateContract;
 
 #[contractimpl]
 impl CertificateContract {
-    pub fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError> {
+    pub fn init(env: Env, admin: Address, backend_public_key: Bytes, minter: Address) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() { return Err(ContractError::AlreadyInitialized); }
         admin.require_auth();
         storage::set_admin(&env, &admin);
         storage::set_backend_pubkey(&env, &backend_public_key);
+        storage::set_minter(&env, &minter);
         storage::set_paused(&env, false);
         Ok(())
     }
@@ -47,15 +78,14 @@ impl CertificateContract {
         Ok(())
     }
 
-    /// Fix #627: Admin-only mint_certificate — only the stored admin can call this.
+    /// Fix #691: Minter-only mint_certificate — only the stored minter (e.g., payment contract) can call this.
     pub fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
-        let admin: Address = storage::get_admin(&env).ok_or(ContractError::NotInitialized)?;
-        admin.require_auth();
+        let minter: Address = storage::get_minter(&env).ok_or(ContractError::NotInitialized)?;
+        minter.require_auth();
         let cert_key = (student.clone(), course_id.clone());
         if storage::certificate_exists(&env, &cert_key) { return Err(ContractError::CertificateExists); }
-        // Fix #628: token_id from persistent storage (survives contract upgrades)
         let token_id = storage::next_token_id(&env);
         let cert = Certificate { recipient: student.clone(), course_id: course_id.clone(), token_id, soul_bound: true };
         storage::save_certificate(&env, cert_key, &cert);

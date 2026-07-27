@@ -9,7 +9,14 @@ mod payment_test;
 #[cfg(test)]
 mod test;
 
+#[cfg(test)]
+mod suite;
+
 const MAX_BATCH_SIZE: u32 = 100;
+
+// TTL constants: ~1 year at 6-second ledgers (issue #735)
+const PAYOUT_MIN_TTL: u32 = 3_110_400;
+const PAYOUT_MAX_TTL: u32 = 6_220_800;
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, require, symbol_short,
@@ -38,6 +45,10 @@ pub struct Course {
     pub price: i128,
     pub instructor: Address,
     pub is_active: bool,
+    InsufficientTreasury = 8,
+    TooEarly = 9,
+    NotScheduled = 10,
+    ScheduleInPast = 11,
 }
 
 #[contracttype]
@@ -50,6 +61,19 @@ pub enum DataKey {
     Enrollment(Address, u64),
     InstructorBalance(Address),
     Treasury,
+    ScheduledPayout(u64),
+    ScheduledPayoutCounter,
+}
+
+/// A payout scheduled for a future ledger timestamp (issue #734).
+/// Requires `#[contracttype]` for stable XDR serialization (issue #738).
+#[contracttype]
+#[derive(Clone)]
+pub struct ScheduledPayout {
+    pub recipient: Address,
+    pub amount: i128,
+    /// Unix timestamp (seconds) at or after which the payout may be executed.
+    pub execute_after: u64,
 }
 
 #[contract]
@@ -118,7 +142,13 @@ impl PayoutAutomation {
             .set(&DataKey::Course(course_id), &course);
         env.storage()
             .persistent()
+            .extend_ttl(&DataKey::Course(course_id), PAYOUT_MIN_TTL, PAYOUT_MAX_TTL);
+        env.storage()
+            .persistent()
             .set(&DataKey::CourseFee(course_id), &fee_bps);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::CourseFee(course_id), PAYOUT_MIN_TTL, PAYOUT_MAX_TTL);
         Ok(())
     }
 
@@ -226,7 +256,10 @@ impl PayoutAutomation {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Enrollment(student, course_id), &true);
+            .set(&DataKey::Enrollment(student.clone(), course_id), &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Enrollment(student, course_id), PAYOUT_MIN_TTL, PAYOUT_MAX_TTL);
         Ok(())
     }
 
@@ -260,7 +293,10 @@ impl PayoutAutomation {
     }
 
     /// Executes a batch of payouts. Batch size must not exceed MAX_BATCH_SIZE (100).
-    /// Each payout amount must be positive.
+    ///
+    /// Uses a two-pass approach: ALL amounts are validated before ANY transfer is
+    /// executed. This guarantees atomicity — a batch with even one invalid entry is
+    /// rejected in full with no tokens moved (fixes issue #301 / #729).
     pub fn execute(
         env: Env,
         caller: Address,
@@ -272,12 +308,131 @@ impl PayoutAutomation {
         if payouts.len() > MAX_BATCH_SIZE {
             return Err(PayoutError::BatchTooLarge);
         }
+
+        // --- Pass 1: validate ALL amounts before touching any balances ---
+        // This ensures a batch with any invalid entry is rejected entirely,
+        // preventing partial execution that could leave funds in an inconsistent state.
+        for (_recipient, amount) in payouts.iter() {
+            if amount <= 0 {
+                return Err(PayoutError::NegativeAmount);
+            }
+        }
+
+        // --- Pass 1b: verify the contract holds enough funds for the full batch ---
         let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(PayoutError::NotInitialized)?;
         let client = TokenClient::new(&env, &token);
+        let contract_balance = client.balance(&env.current_contract_address());
+        let mut total: i128 = 0;
+        for (_recipient, amount) in payouts.iter() {
+            total += amount;
+        }
+        if contract_balance < total {
+            return Err(PayoutError::InsufficientTreasury);
+        }
+
+        // --- Pass 2: all amounts are valid — now execute all transfers ---
         for (recipient, amount) in payouts.iter() {
-            if amount <= 0 { return Err(PayoutError::NegativeAmount); }
             client.transfer(&env.current_contract_address(), &recipient, &amount);
         }
+        Ok(())
+    }
+
+    /// Schedule a single payout to be executed no earlier than `execute_after`
+    /// (Unix seconds). Returns the schedule ID.
+    ///
+    /// `execute_after` must be strictly in the future (> current ledger timestamp).
+    pub fn schedule_payout(
+        env: Env,
+        caller: Address,
+        recipient: Address,
+        amount: i128,
+        execute_after: u64,
+    ) -> Result<u64, PayoutError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(PayoutError::NotInitialized)?;
+        if caller != admin {
+            return Err(PayoutError::Unauthorized);
+        }
+        caller.require_auth();
+
+        if amount <= 0 {
+            return Err(PayoutError::NegativeAmount);
+        }
+
+        // Reject schedules set in the past to prevent accidental immediate execution.
+        if execute_after <= env.ledger().timestamp() {
+            return Err(PayoutError::ScheduleInPast);
+        }
+
+        let id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledPayoutCounter)
+            .unwrap_or(0_u64);
+
+        let schedule = ScheduledPayout { recipient, amount, execute_after };
+        let key = DataKey::ScheduledPayout(id);
+        env.storage().persistent().set(&key, &schedule);
+        env.storage().persistent().extend_ttl(&key, PAYOUT_MIN_TTL, PAYOUT_MAX_TTL);
+
+        // Increment counter in instance storage.
+        env.storage().instance().set(&DataKey::ScheduledPayoutCounter, &(id + 1));
+
+        env.events().publish((symbol_short!("scheduled"),), id);
+        Ok(id)
+    }
+
+    /// Execute a previously scheduled payout by ID.
+    ///
+    /// Fails with `TooEarly` if the current ledger timestamp is before
+    /// `execute_after`, and `NotScheduled` if no such schedule exists.
+    pub fn execute_scheduled(
+        env: Env,
+        caller: Address,
+        schedule_id: u64,
+    ) -> Result<(), PayoutError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(PayoutError::NotInitialized)?;
+        if caller != admin {
+            return Err(PayoutError::Unauthorized);
+        }
+        caller.require_auth();
+
+        let key = DataKey::ScheduledPayout(schedule_id);
+        let schedule: ScheduledPayout = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(PayoutError::NotScheduled)?;
+
+        if env.ledger().timestamp() < schedule.execute_after {
+            return Err(PayoutError::TooEarly);
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(PayoutError::NotInitialized)?;
+        let client = TokenClient::new(&env, &token);
+
+        let contract_balance = client.balance(&env.current_contract_address());
+        if contract_balance < schedule.amount {
+            return Err(PayoutError::InsufficientTreasury);
+        }
+
+        client.transfer(&env.current_contract_address(), &schedule.recipient, &schedule.amount);
+
+        // Remove the schedule entry after execution to reclaim storage.
+        env.storage().persistent().remove(&key);
+
+        env.events().publish((symbol_short!("paid_out"),), schedule_id);
         Ok(())
     }
 
