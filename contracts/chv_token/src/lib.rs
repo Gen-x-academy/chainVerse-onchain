@@ -3,6 +3,7 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
 };
 mod error;
+mod events;
 use error::TokenError;
 
 const DECIMALS: u32 = 7;
@@ -58,7 +59,7 @@ impl CHVToken {
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().instance().set(&DataKey::TotalMinted, &(total_minted + amount));
-        env.events().publish((symbol_short!("MINT"),), (to, amount));
+        events::emit_mint(&env, &to, amount);
         Ok(())
     }
 
@@ -84,7 +85,7 @@ impl CHVToken {
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
-        env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
+        events::emit_transfer(&env, &from, &to, amount);
         Ok(())
     }
 
@@ -135,7 +136,7 @@ impl CHVToken {
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
-        env.events().publish((symbol_short!("TRANSFER"),), (from, to, amount));
+        events::emit_transfer(&env, &from, &to, amount);
         Ok(())
     }
 
@@ -152,7 +153,7 @@ impl CHVToken {
             .ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Frozen(account.clone()), &true);
-        env.events().publish((symbol_short!("frozen"),), account);
+        events::emit_freeze(&env, &account);
         Ok(())
     }
 
@@ -162,7 +163,7 @@ impl CHVToken {
             .ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         env.storage().persistent().set(&DataKey::Frozen(account.clone()), &false);
-        env.events().publish((symbol_short!("unfrozen"),), account);
+        events::emit_unfreeze(&env, &account);
         Ok(())
     }
 
@@ -182,7 +183,7 @@ impl CHVToken {
             return Err(TokenError::InsufficientBalance);
         }
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &(bal - amount));
-        env.events().publish((symbol_short!("BURN"),), (from, amount));
+        events::emit_burn(&env, &from, amount);
         Ok(())
     }
 
