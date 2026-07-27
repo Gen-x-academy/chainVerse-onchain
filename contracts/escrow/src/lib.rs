@@ -1,8 +1,10 @@
 #![no_std]
 
 mod create;
+mod dispute;
 mod errors;
 mod events;
+mod fund;
 mod refund;
 mod release;
 mod storage;
@@ -12,7 +14,7 @@ mod version;
 pub use errors::EscrowError;
 pub use types::{Escrow, EscrowStatus, FeeRecord};
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 #[contract]
 pub struct EscrowContract;
@@ -29,23 +31,19 @@ impl EscrowContract {
             admin.require_auth();
         }
         storage::set_admin(&env, &admin);
-        env.events().publish((soroban_sdk::symbol_short!("ADM_CHNG"),), (old_admin, admin));
+        env.events()
+            .publish((soroban_sdk::symbol_short!("ADM_CHNG"),), (old_admin, admin));
         Ok(())
     }
 
     /// Whitelists a token for use in new escrows. Only callable by admin.
     pub fn whitelist_token(env: Env, admin: Address, token: Address) -> Result<(), EscrowError> {
-        storage::require_admin(&env, &admin)?;
+        storage::require_admin_addr(&env, &admin)?;
         storage::whitelist_token(&env, &token);
         Ok(())
     }
 
-    /// Creates a new escrow. Buyer funds are held by the contract until release or refund.
-    /// - `buyer`: the address funding the escrow (must authorize)
-    /// - `seller`: the address to receive funds on release
-    /// - `token`: whitelisted token address
-    /// - `amount`: must be greater than zero
-    /// - `expiration`: must be in the future
+    /// Creates an unfunded escrow. Buyer must later call `fund_escrow`.
     pub fn create_escrow(
         env: Env,
         buyer: Address,
@@ -57,12 +55,32 @@ impl EscrowContract {
         create::create_escrow(&env, buyer, seller, token, amount, expiration)
     }
 
-    /// Releases funds to the seller. Only callable by the buyer or admin.
+    /// Deposits the escrow amount. Only the buyer may fund.
+    pub fn fund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        fund::fund_escrow(&env, caller, escrow_id)
+    }
+
+    /// Releases remaining funds to the seller. Buyer or admin.
     pub fn release_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         release::release_escrow(&env, caller, escrow_id)
     }
 
-    /// Refunds the buyer after expiry. Only callable after the expiration timestamp.
+    /// Releases a portion of locked funds to the seller.
+    pub fn partial_release(
+        env: Env,
+        caller: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        release::partial_release(&env, caller, escrow_id, amount)
+    }
+
+    /// Opens a dispute on a funded escrow (buyer or seller).
+    pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
+        dispute::dispute_escrow(&env, caller, escrow_id)
+    }
+
+    /// Refunds the buyer after the expiration timestamp.
     pub fn refund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         refund::refund_escrow(&env, caller, escrow_id)
     }
@@ -72,11 +90,15 @@ impl EscrowContract {
         storage::get_escrow(&env, escrow_id)
     }
 
-    /// #638 — Sets the protocol fee in basis points. Hard-capped at 5000 bps (50%)
-    /// to prevent admin from setting a fee that drains all payments.
+    /// Returns escrow IDs indexed by buyer.
+    pub fn get_by_buyer_index(env: Env, buyer: Address) -> Vec<u64> {
+        storage::get_buyer_index(&env, &buyer)
+    }
+
+    /// Sets the protocol fee in basis points. Hard-capped at 5000 bps (50%).
     pub fn set_protocol_fee_bps(env: Env, admin: Address, bps: u32) -> Result<(), EscrowError> {
-        const MAX_FEE_BPS: u32 = 5_000; // 50% hard cap
-        storage::require_admin(&env, &admin)?;
+        const MAX_FEE_BPS: u32 = 5_000;
+        storage::require_admin_addr(&env, &admin)?;
         if bps > MAX_FEE_BPS {
             return Err(EscrowError::Unauthorized);
         }
@@ -87,8 +109,10 @@ impl EscrowContract {
     /// Admin-only: upgrade the current contract to `new_wasm_hash`.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), EscrowError> {
         storage::require_admin(&env)?;
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
-        env.events().publish((soroban_sdk::symbol_short!("upgraded"),), new_wasm_hash);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((soroban_sdk::symbol_short!("upgraded"),), new_wasm_hash);
         Ok(())
     }
 }
