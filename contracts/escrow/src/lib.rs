@@ -3,6 +3,7 @@
 mod create;
 mod dispute;
 mod errors;
+mod escrow_state;
 mod events;
 mod fund;
 mod refund;
