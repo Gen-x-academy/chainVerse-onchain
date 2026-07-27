@@ -4,6 +4,12 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, Env,
 };
 
+// TTL constants: ~1 year at 6-second ledgers (issue #735)
+const BALANCE_MIN_TTL: u32 = 3_110_400;
+const BALANCE_MAX_TTL: u32 = 6_220_800;
+
+#[contract]
+pub struct TokenContract;
 // ---------------------------------------------------------------------------
 // Error types  (#737 — replace panic!/unwrap with typed errors)
 // ---------------------------------------------------------------------------
@@ -32,6 +38,8 @@ enum DataKey {
     Allowance(Address, Address),
 }
 
+/// Allowance record stored in persistent storage.
+/// Requires `#[contracttype]` for stable XDR serialization (issue #738).
 // ---------------------------------------------------------------------------
 // Allowance record
 // ---------------------------------------------------------------------------
@@ -85,6 +93,15 @@ impl TokenContract {
             return Err(TokenError::InsufficientBalance);
         }
         let to_balance = Self::balance(env.clone(), to.clone());
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from), &(from_balance - amount));
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to), &(to_balance + amount));
+        // no persistent storage used here — instance storage has no TTL
         env.storage().instance().set(&DataKey::Balance(from), &(from_balance - amount));
         env.storage().instance().set(&DataKey::Balance(to), &(to_balance + amount));
         Ok(())
@@ -94,7 +111,10 @@ impl TokenContract {
     pub fn approve(env: Env, owner: Address, spender: Address, amount: i128, expires_at: Option<u64>) {
         owner.require_auth();
         let allowance = Allowance { amount, expires_at };
-        env.storage().persistent().set(&DataKey::Allowance(owner.clone(), spender.clone()), &allowance);
+        let key = DataKey::Allowance(owner.clone(), spender.clone());
+        env.storage().persistent().set(&key, &allowance);
+        // Extend TTL so the allowance entry survives on testnet (issue #735)
+        env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
     }
 
     /// Returns remaining allowance for `spender` on `owner`.
@@ -131,7 +151,9 @@ impl TokenContract {
         if allow.amount == 0 {
             env.storage().persistent().remove(&DataKey::Allowance(from.clone(), spender.clone()));
         } else {
-            env.storage().persistent().set(&DataKey::Allowance(from.clone(), spender.clone()), &allow);
+            let key = DataKey::Allowance(from.clone(), spender.clone());
+            env.storage().persistent().set(&key, &allow);
+            env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         }
 
         let from_bal = Self::balance(env.clone(), from.clone());
