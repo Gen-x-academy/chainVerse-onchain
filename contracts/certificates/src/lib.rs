@@ -11,12 +11,13 @@ pub struct CertificateContract;
 
 #[contractimpl]
 impl CertificateContract {
-    pub fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError> {
+    pub fn init(env: Env, admin: Address, backend_public_key: Bytes, minter: Address) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_admin(&env).is_some() { return Err(ContractError::AlreadyInitialized); }
         admin.require_auth();
         storage::set_admin(&env, &admin);
         storage::set_backend_pubkey(&env, &backend_public_key);
+        storage::set_minter(&env, &minter);
         storage::set_paused(&env, false);
         Ok(())
     }
@@ -47,15 +48,14 @@ impl CertificateContract {
         Ok(())
     }
 
-    /// Fix #627: Admin-only mint_certificate — only the stored admin can call this.
+    /// Fix #691: Minter-only mint_certificate — only the stored minter (e.g., payment contract) can call this.
     pub fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
-        let admin: Address = storage::get_admin(&env).ok_or(ContractError::NotInitialized)?;
-        admin.require_auth();
+        let minter: Address = storage::get_minter(&env).ok_or(ContractError::NotInitialized)?;
+        minter.require_auth();
         let cert_key = (student.clone(), course_id.clone());
         if storage::certificate_exists(&env, &cert_key) { return Err(ContractError::CertificateExists); }
-        // Fix #628: token_id from persistent storage (survives contract upgrades)
         let token_id = storage::next_token_id(&env);
         let cert = Certificate { recipient: student.clone(), course_id: course_id.clone(), token_id, soul_bound: true };
         storage::save_certificate(&env, cert_key, &cert);

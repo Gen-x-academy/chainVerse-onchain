@@ -15,6 +15,8 @@ pub enum DataKey {
     BackendPubKey,
     /// Fix #628: persistent counter — survives contract upgrades (unlike instance storage)
     NextTokenId,
+    /// Fix #691: separate minter authorization for mint_certificate
+    Minter,
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
@@ -23,6 +25,14 @@ pub fn get_admin(env: &Env) -> Option<Address> {
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn get_minter(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Minter)
+}
+
+pub fn set_minter(env: &Env, minter: &Address) {
+    env.storage().instance().set(&DataKey::Minter, minter);
 }
 
 pub fn get_paused(env: &Env) -> bool {
