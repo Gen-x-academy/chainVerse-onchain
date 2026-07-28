@@ -1,3 +1,7 @@
+
+
+H@DESKTOP-6UNRFN2 MINGW64 ~/chainVerse-onchain (fix/pin-actions-sha)
+$ cat .github/workflows/deploy-testnet.yml
 name: Deploy Testnet
 
 on:
@@ -59,3 +63,6 @@ jobs:
 
       - name: Smoke test
         run: bash scripts/smoke-test.sh
+
+H@DESKTOP-6UNRFN2 MINGW64 ~/chainVerse-onchain (fix/pin-actions-sha)
+$
