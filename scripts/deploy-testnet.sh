@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # scripts/deploy-testnet.sh
 #
+# Deploy all ChainVerse contracts to Stellar testnet and atomically write
+# contract addresses to deployments/testnet.json and .env.testnet.
 # Deploy all ChainVerse contracts to Stellar testnet and write
 # contract addresses to deployments/testnet.json and .env.testnet.
 # Deploy all ChainVerse contracts to Stellar testnet and atomically write
@@ -16,6 +18,8 @@ set -euo pipefail
 NETWORK="${STELLAR_NETWORK:-testnet}"
 STELLAR_IDENTITY="${STELLAR_IDENTITY:-deployer}"
 CONTRACTS_DIR="${CONTRACTS_DIR:-contracts}"
+OUTPUT_JSON="deployments/testnet.json"
+ENV_OUTPUT=".env.testnet"
 
 # ---------------------------------------------------------------------------
 # Pre-flight: validate working directory
@@ -98,6 +102,9 @@ COURSE_REGISTRY_CONTRACT_ID=$(deploy course_registry course_registry)
 
 # ---------------------------------------------------------------------------
 # Atomic write: deployment manifest (JSON)
+# ---------------------------------------------------------------------------
+mkdir -p "$(dirname "$OUTPUT_JSON")"
+TEMP_JSON="${OUTPUT_JSON}.tmp.$$"
   local wasm_sha
   wasm_sha=$(sha256sum "$wasm_path" | cut -d' ' -f1)
 
@@ -175,6 +182,16 @@ cat > "$TEMP_JSON" <<EOJSON
     "staking": "$STAKING_CONTRACT_ID",
     "payout_automation": "$PAYOUT_AUTOMATION_CONTRACT_ID",
     "course_registry": "$COURSE_REGISTRY_CONTRACT_ID"
+  }
+}
+EOJSON
+mv "$TEMP_JSON" "$OUTPUT_JSON"
+echo "Deployment manifest written to $OUTPUT_JSON"
+
+# ---------------------------------------------------------------------------
+# Atomic write: environment file for scripts/smoke-test
+# ---------------------------------------------------------------------------
+TEMP_ENV="${ENV_OUTPUT}.tmp.$$"
   "passphrase": "Test SDF Network ; September 2015",
   "rpc_url": "https://soroban-testnet.stellar.org",
   "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -215,6 +232,8 @@ STAKING_CONTRACT_ID=$STAKING_CONTRACT_ID
 PAYOUT_AUTOMATION_CONTRACT_ID=$PAYOUT_AUTOMATION_CONTRACT_ID
 COURSE_REGISTRY_CONTRACT_ID=$COURSE_REGISTRY_CONTRACT_ID
 EOENV
+mv "$TEMP_ENV" "$ENV_OUTPUT"
+echo "Environment written to $ENV_OUTPUT"
 mv "$TEMP_ENV" ".env.testnet"
 echo "Environment written to .env.testnet"
 
