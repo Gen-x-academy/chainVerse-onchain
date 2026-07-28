@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # scripts/deploy-testnet.sh
 #
+# Deploy all ChainVerse contracts to Stellar testnet and write
+# contract addresses to deployments/testnet.json and .env.testnet.
 # Deploy all ChainVerse contracts to Stellar testnet and atomically write
 # contract addresses to deployments/testnet.json and .env.testnet.
 # Deploy all ChainVerse contracts to Stellar testnet. Records WASM hashes,

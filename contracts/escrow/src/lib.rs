@@ -76,21 +76,14 @@ impl EscrowContract {
         release::partial_release(&env, caller, escrow_id, amount)
     }
 
-    /// Opens a dispute on a funded escrow (buyer or seller).
+    /// Opens a dispute on a funded escrow (buyer only).
     pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
-        dispute::dispute_escrow(&env, caller, escrow_id)
+        dispute::dispute(&env, caller, escrow_id)
     }
 
     /// Refunds the buyer after the expiration timestamp (#709).
     pub fn refund_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         refund::refund_escrow(&env, caller, escrow_id)
-    }
-
-    /// Opens a dispute on a still-funded escrow. Only the buyer may dispute, and
-    /// only while the escrow is `Pending` — a released or cancelled escrow can
-    /// no longer be disputed, preventing post-settlement state corruption.
-    pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
-        dispute::dispute(&env, caller, escrow_id)
     }
 
     /// Returns the escrow record for the given ID, if it exists.
