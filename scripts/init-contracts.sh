@@ -31,6 +31,9 @@ REWARD_TREASURY_FUND="${REWARD_TREASURY_FUND:-10000000000}"
 # Escrow protocol fee in basis points (default 100 = 1%).
 ESCROW_PROTOCOL_FEE_BPS="${ESCROW_PROTOCOL_FEE_BPS:-100}"
 
+# Escrow protocol fee in basis points (default 100 = 1%, max 5000 = 50%).
+ESCROW_PROTOCOL_FEE_BPS="${ESCROW_PROTOCOL_FEE_BPS:-100}"
+
 invoke() {
   local contract_id=$1
   local name=$2
@@ -56,6 +59,12 @@ invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init --admin "$ADMIN" --backen
 # 2. Certificates (with minter)
 # ---------------------------------------------------------------------------
 echo "Initializing Certificates..."
+invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init --admin "$ADMIN" --backend_public_key "$CERTIFICATES_BACKEND_PUBKEY_HEX" --minter "$ADMIN"
+
+echo "Initializing Escrow..."
+invoke "$ESCROW_CONTRACT_ID" "escrow" set_admin --admin "$ADMIN"
+invoke "$ESCROW_CONTRACT_ID" "escrow" whitelist_token --admin "$ADMIN" --token "$CHV_TOKEN_CONTRACT_ID"
+invoke "$ESCROW_CONTRACT_ID" "escrow" set_protocol_fee_bps --admin "$ADMIN" --bps "$ESCROW_PROTOCOL_FEE_BPS"
 invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init \
   --admin "$ADMIN" \
   --backend_public_key "$CERTIFICATES_BACKEND_PUBKEY_HEX" \
