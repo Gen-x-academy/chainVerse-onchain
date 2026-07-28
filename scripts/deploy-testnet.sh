@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # scripts/deploy-testnet.sh
 #
+# Deploy all ChainVerse contracts to Stellar testnet and atomically write
+# contract addresses to deployments/testnet.json and .env.testnet.
 # Deploy all ChainVerse contracts to Stellar testnet. Records WASM hashes,
 # source revision, SDK version, and deployer in the deployment manifest.
 #
@@ -14,6 +16,13 @@ STELLAR_IDENTITY="${STELLAR_IDENTITY:-deployer}"
 CONTRACTS_DIR="${CONTRACTS_DIR:-contracts}"
 
 # ---------------------------------------------------------------------------
+# Pre-flight: validate working directory
+# ---------------------------------------------------------------------------
+if [ ! -d "$CONTRACTS_DIR" ]; then
+  echo "ERROR: contracts directory not found: $CONTRACTS_DIR" >&2
+  exit 1
+fi
+
 # Pre-flight: validate network passphrase
 # ---------------------------------------------------------------------------
 EXPECTED_PASSPHRASE="Test SDF Network ; September 2015"
@@ -65,6 +74,28 @@ deploy() {
     exit 1
   fi
 
+  echo "Deploying $crate_name..."
+  stellar contract deploy \
+    --wasm "$wasm_path" \
+    --source "$STELLAR_IDENTITY" \
+    --network "$NETWORK"
+}
+
+# ---------------------------------------------------------------------------
+# Deploy all platform contracts (order matters for cross-contract refs)
+# ---------------------------------------------------------------------------
+CHV_TOKEN_CONTRACT_ID=$(deploy chv_token chv_token)
+CERTIFICATES_CONTRACT_ID=$(deploy certificates certificates)
+ESCROW_CONTRACT_ID=$(deploy escrow escrow)
+ESCROW_VAULT_CONTRACT_ID=$(deploy escrow-vault escrow_vault)
+CHAINVERSE_CORE_CONTRACT_ID=$(deploy chainverse-core chainverse_core)
+REWARD_CONTRACT_ID=$(deploy reward reward)
+STAKING_CONTRACT_ID=$(deploy staking staking)
+PAYOUT_AUTOMATION_CONTRACT_ID=$(deploy payout-automation payout_automation)
+COURSE_REGISTRY_CONTRACT_ID=$(deploy course_registry course_registry)
+
+# ---------------------------------------------------------------------------
+# Atomic write: deployment manifest (JSON)
   local wasm_sha
   wasm_sha=$(sha256sum "$wasm_path" | cut -d' ' -f1)
 
@@ -128,6 +159,20 @@ TEMP_JSON="deployments/testnet.json.tmp.$$"
 cat > "$TEMP_JSON" <<EOJSON
 {
   "network": "$NETWORK",
+  "rpc_url": "https://soroban-testnet.stellar.org",
+  "passphrase": "Test SDF Network ; September 2015",
+  "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "deployer": "$STELLAR_IDENTITY",
+  "contracts": {
+    "chv_token": "$CHV_TOKEN_CONTRACT_ID",
+    "certificates": "$CERTIFICATES_CONTRACT_ID",
+    "escrow": "$ESCROW_CONTRACT_ID",
+    "escrow_vault": "$ESCROW_VAULT_CONTRACT_ID",
+    "chainverse_core": "$CHAINVERSE_CORE_CONTRACT_ID",
+    "reward": "$REWARD_CONTRACT_ID",
+    "staking": "$STAKING_CONTRACT_ID",
+    "payout_automation": "$PAYOUT_AUTOMATION_CONTRACT_ID",
+    "course_registry": "$COURSE_REGISTRY_CONTRACT_ID"
   "passphrase": "Test SDF Network ; September 2015",
   "rpc_url": "https://soroban-testnet.stellar.org",
   "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",

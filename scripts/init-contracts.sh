@@ -19,10 +19,17 @@ source .env.testnet
 STELLAR_IDENTITY="${STELLAR_IDENTITY:-deployer}"
 ADMIN=$(stellar keys address "$STELLAR_IDENTITY")
 
+# 32-byte ed25519 public key (hex) used to verify certificate mint proofs.
+: "${CERTIFICATES_BACKEND_PUBKEY_HEX:?Set CERTIFICATES_BACKEND_PUBKEY_HEX in .env.testnet (32-byte ed25519 pubkey, hex)}"
+
+# Minimum enforced by the staking contract is 100 (1%).
 : "${CERTIFICATES_BACKEND_PUBKEY_HEX:?Set CERTIFICATES_BACKEND_PUBKEY_HEX in .env.testnet}"
 STAKING_EMERGENCY_PENALTY_BPS="${STAKING_EMERGENCY_PENALTY_BPS:-500}"
 ESCROW_PROTOCOL_FEE_BPS="${ESCROW_PROTOCOL_FEE_BPS:-100}"
 REWARD_TREASURY_FUND="${REWARD_TREASURY_FUND:-10000000000}"
+
+# Escrow protocol fee in basis points (default 100 = 1%).
+ESCROW_PROTOCOL_FEE_BPS="${ESCROW_PROTOCOL_FEE_BPS:-100}"
 
 invoke() {
   local contract_id=$1
@@ -41,6 +48,9 @@ invoke() {
 # ---------------------------------------------------------------------------
 echo "Initializing CHV Token..."
 invoke "$CHV_TOKEN_CONTRACT_ID" "chv_token" initialize --admin "$ADMIN" --treasury "$ADMIN"
+
+echo "Initializing Certificates (with minter)..."
+invoke "$CERTIFICATES_CONTRACT_ID" "certificates" init --admin "$ADMIN" --backend_public_key "$CERTIFICATES_BACKEND_PUBKEY_HEX" --minter "$ADMIN"
 
 # ---------------------------------------------------------------------------
 # 2. Certificates (with minter)
@@ -64,6 +74,12 @@ invoke "$ESCROW_CONTRACT_ID" "escrow" set_protocol_fee_bps --admin "$ADMIN" --bp
 # ---------------------------------------------------------------------------
 echo "Initializing Escrow Vault..."
 invoke "$ESCROW_VAULT_CONTRACT_ID" "escrow-vault" set_admin --admin "$ADMIN"
+
+echo "Initializing ChainVerse Core..."
+invoke "$CHAINVERSE_CORE_CONTRACT_ID" "chainverse-core" initialize --admin "$ADMIN" --protocol_fee "$ESCROW_PROTOCOL_FEE_BPS" --supported_tokens "[\"$CHV_TOKEN_CONTRACT_ID\"]"
+
+echo "Initializing Reward..."
+invoke "$REWARD_CONTRACT_ID" "reward" initialize --admin "$ADMIN" --treasury "$ADMIN" --token "$CHV_TOKEN_CONTRACT_ID" --reward_amount 10000000
 
 # ---------------------------------------------------------------------------
 # 5. ChainVerse Core
