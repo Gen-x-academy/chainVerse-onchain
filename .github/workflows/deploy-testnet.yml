@@ -1,7 +1,18 @@
+# Permission model
+# -----------------
+# This workflow intentionally uses the least-privilege permission model.
+#
+# Workflow-level defaults are set to read-only (contents: read,
+# pull-requests: read). The deploy job inherits those defaults and never
+# writes back to the repository — it only uploads deployments/testnet.json
+# as a GitHub Actions artifact.
+#
+# A second job (open-pr) is the only place with elevated permissions
+# (contents: write, pull-requests: write). It runs after deploy succeeds,
+# downloads the artifact, and opens a PR via peter-evans/create-pull-request
+# so that any update to deployments/testnet.json goes through a normal
+# review cycle rather than bypassing branch protection with a direct push.
 
-
-H@DESKTOP-6UNRFN2 MINGW64 ~/chainVerse-onchain (fix/pin-actions-sha)
-$ cat .github/workflows/deploy-testnet.yml
 name: Deploy Testnet
 
 on:
@@ -9,15 +20,23 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+# Deny everything by default; individual jobs opt in to what they need.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   deploy:
     name: Build, Test & Deploy to Testnet
     runs-on: ubuntu-latest
+    # Inherits workflow-level read-only permissions — no write access here.
+    permissions:
+      contents: read
 
     steps:
+      # No token override — the default GITHUB_TOKEN with read-only scope is
+      # sufficient for a plain checkout.
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust + WASM target
         uses: dtolnay/rust-toolchain@1.85.0
@@ -53,16 +72,49 @@ jobs:
       - name: Deploy to testnet
         run: bash scripts/deploy-testnet.sh
 
-      - name: Commit updated deployments/testnet.json
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add deployments/testnet.json
-          git diff --cached --quiet || git commit -m "chore: update deployments/testnet.json [skip ci]"
-          git push
-
       - name: Smoke test
         run: bash scripts/smoke-test.sh
 
-H@DESKTOP-6UNRFN2 MINGW64 ~/chainVerse-onchain (fix/pin-actions-sha)
-$
+      # Upload the updated deployments/testnet.json as a workflow artifact so
+      # the open-pr job (and any human) can retrieve it without needing a
+      # direct push to main.
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-deployment-${{ github.run_number }}
+          path: deployments/testnet.json
+          if-no-files-found: warn
+
+  open-pr:
+    name: Open PR to update deployments/testnet.json
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    # Only bother opening a PR for pushes to main or explicit workflow_dispatch
+    # runs — not for PR-triggered builds on feature branches.
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Elevated permissions scoped to this job only.
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: testnet-deployment-${{ github.run_number }}
+          # Place the file back where it belongs in the repo tree.
+          path: deployments
+
+      - name: Open or update PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update deployments/testnet.json [skip ci]"
+          branch: chore/update-testnet-deployments
+          title: "chore: update testnet deployment addresses"
+          body: |
+            Automated PR from testnet deployment run ${{ github.run_number }}.
+            Review and merge to update contract addresses.
+          add-paths: deployments/testnet.json

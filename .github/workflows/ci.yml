@@ -231,3 +231,74 @@ jobs:
             exit 1
           fi
           echo "All WASM artifacts within budget"
+
+  reproducible-wasm:
+    name: Reproducible WASM Artifacts
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      # ── Build 1 ──────────────────────────────────────────────────────────────
+      - name: Build 1 — compile all contracts
+        working-directory: contracts
+        run: cargo build --locked --target wasm32-unknown-unknown --release
+
+      - name: Build 1 — hash WASM artifacts
+        run: |
+          sha256sum contracts/target/wasm32-unknown-unknown/release/*.wasm \
+            | tee /tmp/hashes_build1.txt
+
+      # ── Clean WASM artifacts between builds ──────────────────────────────────
+      - name: Delete WASM artifacts before second build
+        run: find contracts/target/wasm32-unknown-unknown/release -name '*.wasm' -delete
+
+      # ── Build 2 ──────────────────────────────────────────────────────────────
+      - name: Build 2 — compile all contracts
+        working-directory: contracts
+        run: cargo build --locked --target wasm32-unknown-unknown --release
+
+      - name: Build 2 — hash WASM artifacts
+        run: |
+          sha256sum contracts/target/wasm32-unknown-unknown/release/*.wasm \
+            | tee /tmp/hashes_build2.txt
+
+      # ── Verify reproducibility ───────────────────────────────────────────────
+      - name: Verify builds are identical
+        run: |
+          echo "=== Build 1 hashes ==="
+          cat /tmp/hashes_build1.txt
+          echo ""
+          echo "=== Build 2 hashes ==="
+          cat /tmp/hashes_build2.txt
+          echo ""
+          if ! diff /tmp/hashes_build1.txt /tmp/hashes_build2.txt; then
+            echo "ERROR: WASM artifacts are not reproducible — hashes differ between builds."
+            echo "This means the compiled output changed between two identical builds from the same source."
+            echo "Check for embedded timestamps, random salts, or non-deterministic codegen."
+            exit 1
+          fi
+          echo "SUCCESS: All WASM artifacts are reproducible."
+
+      # ── Upload hashes as artifact ─────────────────────────────────────────────
+      - name: Upload WASM hashes artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-hashes
+          path: /tmp/hashes_build1.txt
+          retention-days: 30
