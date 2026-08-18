@@ -36,7 +36,7 @@ jobs:
     steps:
       # No token override — the default GITHUB_TOKEN with read-only scope is
       # sufficient for a plain checkout.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust + WASM target
         uses: dtolnay/rust-toolchain@1.100.0
@@ -98,7 +98,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download deployment artifact
         uses: actions/download-artifact@v8
