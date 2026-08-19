@@ -1,44 +1,9 @@
-# Rust / Cargo
-**/target/
-
-# contracts are libraries; exclude lock file
-Cargo.lock
-
-# Compiled contracts (always rebuild from source)
-**/*.wasm
-**/*.wasm.gz
-
-# Environment files (contain secrets)
-.env
-.env.testnet
-.env.local
-.env.*.local
-!.env.testnet.example
-!.env.example
-
-# Stellar CLI local data
-.soroban/
-.stellar/
-
-# Editor
-.vscode/
-.idea/
-.vs
-*.swp
-*~
-
-# Scratch files
-*.scratch.rs
-.codex
-
-# Misc
 node_modules/
-.rustc_info.json
-.secret_key
-Cargo.lock
-.secret_key
+artifacts/
+cache/
+coverage/
+coverage.json
+typechain-types/
+.env
+.DS_Store
 
-# Scratch files
-*.scratch.rs
-.codex
-scratch/

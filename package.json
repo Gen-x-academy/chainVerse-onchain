@@ -1,0 +1,25 @@
+{
+  "name": "chainverse-onchain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Solidity smart contracts for ChainVerse Academy on World Chain",
+  "scripts": {
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "lint": "solhint 'contracts/**/*.sol'",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.19",
+    "solhint": "^5.0.5",
+    "solidity-coverage": "^0.8.14"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.1.0"
+  },
+  "engines": {
+    "node": ">=20 <23"
+  }
+}
