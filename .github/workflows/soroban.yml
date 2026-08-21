@@ -1,0 +1,79 @@
+name: Soroban CI
+
+on:
+  push:
+    paths:
+      - "soroban/**"
+      - ".github/workflows/soroban.yml"
+  pull_request:
+    paths:
+      - "soroban/**"
+      - ".github/workflows/soroban.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  soroban-ci:
+    name: fmt / clippy / test / wasm-build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: soroban
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98.0"
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry and build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            soroban/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('soroban/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Downgrade ed25519-dalek 3.x back to 2.2.0 to work around a known
+      # incompatibility in soroban-env-host 21.x testutils.
+      - name: Pin ed25519-dalek to 2.2.0
+        run: cargo update ed25519-dalek@3.0.0 --precise 2.2.0
+
+      # ── Formatting ────────────────────────────────────────────────────────
+      - name: Check formatting (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      # ── Linting ───────────────────────────────────────────────────────────
+      - name: Lint (cargo clippy)
+        run: cargo clippy --all-targets --features testutils -- -D warnings
+
+      # ── Unit tests ────────────────────────────────────────────────────────
+      - name: Run unit tests
+        run: cargo test --features testutils
+
+      # ── WASM build ────────────────────────────────────────────────────────
+      - name: Build WASM release binary
+        run: >
+          cargo build
+          --target wasm32-unknown-unknown
+          --release
+          -p chainverse-payment
+
+      - name: Upload WASM artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chainverse-payment-wasm
+          path: soroban/target/wasm32-unknown-unknown/release/chainverse_payment.wasm
+          retention-days: 7
