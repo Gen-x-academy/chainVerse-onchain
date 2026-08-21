@@ -6,4 +6,4 @@ coverage.json
 typechain-types/
 .env
 .DS_Store
-
+scripts/*
