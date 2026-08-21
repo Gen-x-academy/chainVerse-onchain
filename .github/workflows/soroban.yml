@@ -46,11 +46,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # Downgrade ed25519-dalek 3.x back to 2.2.0 to work around a known
-      # incompatibility in soroban-env-host 21.x testutils.
-      - name: Pin ed25519-dalek to 2.2.0
-        run: cargo update ed25519-dalek@3.0.0 --precise 2.2.0
-
       # ── Formatting ────────────────────────────────────────────────────────
       - name: Check formatting (cargo fmt)
         run: cargo fmt --all -- --check
