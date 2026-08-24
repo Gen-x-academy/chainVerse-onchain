@@ -1,0 +1,17 @@
+[package]
+name = "chainverse-types"
+version = "0.1.0"
+edition = "2021"
+description = "ChainVerse Academy – shared Soroban types and interface definitions"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]

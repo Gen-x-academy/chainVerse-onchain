@@ -1,14 +1,19 @@
-[package]
-name = "chainverse-soroban-types"
-version = "0.1.0"
-edition = "2021"
-description = "ChainVerse Academy Soroban contract types and interfaces"
+[workspace]
+resolver = "2"
+members = [
+    "contracts/chainverse-types",
+    "contracts/payment",
+]
 
-[lib]
-crate-type = ["lib"]
+[workspace.dependencies]
+soroban-sdk = "=21.7.6"
 
-[dependencies]
-soroban-sdk = "22.0.0"
-
-[dev-dependencies]
-soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+[profile.release]
+codegen-units = 1
+debug = false
+debug-assertions = false
+lto = true
+opt-level = "z"
+overflow-checks = true
+panic = "abort"
+strip = "symbols"
