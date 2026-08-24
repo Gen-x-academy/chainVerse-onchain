@@ -201,18 +201,49 @@ pub fn configure_course(
 
 ### 2. Business-Level Idempotency
 
-Payment ID derived from `(student, course_id)` tuple:
+Implemented in `pay_for_course` (issue #915). Each purchase carries a
+caller-supplied `payment_id` (a Soroban symbol of up to 32 bytes; clients
+typically derive it from `(student, course_id)`). The contract reserves the
+ID globally on success, so a replay is rejected regardless of arguments:
 
 ```rust
+pub fn pay_for_course(
+    env: Env,
+    student: Address,
+    course_id: Symbol,
+    payment_id: Symbol,
+) -> Result<(), ContractError>;
+
 pub struct PaymentRecord {
     pub student: Address,
     pub course_id: Symbol,
-    pub amount: i128,
-    pub asset: Address,
+    pub amount: i128,            // gross, always the configured price
+    pub asset: Address,          // Stellar Asset Contract used
     pub paid_at: u64,
     pub payment_id: Symbol,
+    pub fee_amount: i128,        // persisted split: fee + instructor == amount
+    pub instructor_amount: i128,
 }
 ```
+
+Execution order guarantees atomicity and replay safety:
+
+1. Validate the payment ID is non-empty (`InvalidPaymentId`).
+2. Require student authorization (`student.require_auth()`).
+3. Load course/asset configuration at execution time (`CourseNotFound`,
+   `CourseInactive`, `AssetNotEnabled`).
+4. Reject duplicates **before** any funds move (`AlreadyEnrolled`,
+   `DuplicatePaymentId`).
+5. Transfer exactly the configured price via the SAC token client
+   (`PaymentFailed` on failure).
+6. Persist record + enrollment + reservation + instructor credit, then emit
+   the frozen `PYMT_RCD` event.
+
+If any step fails the host rolls the invocation back, so a failed call never
+leaves partial payment or enrollment state.
+
+Query APIs: `is_enrolled`, `get_payment_record`, `get_payment_by_id`,
+`get_instructor_balance`.
 
 ### 3. Refund Window
 
