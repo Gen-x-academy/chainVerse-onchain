@@ -44,4 +44,9 @@ pub enum ContractError {
     AssetNotFound = 17,
     /// The supplied address (admin, treasury, instructor) is invalid.
     InvalidAddress = 18,
+    /// The supplied payment ID was already reserved by another purchase
+    /// (with identical or conflicting arguments).
+    DuplicatePaymentId = 19,
+    /// The supplied payment ID is empty or otherwise malformed.
+    InvalidPaymentId = 20,
 }

@@ -58,6 +58,7 @@ pub const EVENT_ADMIN_SET: &str = "ADMIN_SET";
 /// | `Enrollment(Address,Symbol)` | Persistent   | Student enrollment record         |
 /// | `PaymentRecord(Address,Symbol)` | Persistent | Full payment receipt             |
 /// | `InstructorBalance(Address)` | Persistent   | Instructor claimable balance      |
+/// | `PaymentIdOwner(Symbol)`     | Persistent   | Reservation map for payment IDs   |
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataKey {
@@ -79,11 +80,18 @@ pub enum DataKey {
     PaymentRecord(Address, Symbol),
     /// Claimable instructor balance keyed by instructor address (persistent).
     InstructorBalance(Address),
+    /// Business-level payment-ID reservation keyed by the payment ID itself
+    /// (persistent). Maps a reserved 32-byte ID to the (student, course_id)
+    /// pair that owns it, guaranteeing global uniqueness across purchases.
+    PaymentIdOwner(Symbol),
 }
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
 /// Full payment receipt stored after a successful course purchase.
+///
+/// The split allocation required by ADR-001 is persisted alongside the gross
+/// payment: `fee_amount + instructor_amount == amount` always holds.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaymentRecord {
@@ -97,8 +105,12 @@ pub struct PaymentRecord {
     pub asset: Address,
     /// Ledger timestamp at the time of payment.
     pub paid_at: u64,
-    /// Business-level idempotency key derived from (student, course_id).
+    /// Business-level idempotency key (up to 32 bytes).
     pub payment_id: Symbol,
+    /// Platform fee retained from the gross amount (truncated integer split).
+    pub fee_amount: i128,
+    /// Net proceeds credited to the instructor (`amount - fee_amount`).
+    pub instructor_amount: i128,
 }
 
 /// Course payment configuration stored by the administrator.
