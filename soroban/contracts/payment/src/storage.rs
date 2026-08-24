@@ -9,7 +9,7 @@
 //! least `MIN_TTL` ledgers and at most `MAX_TTL` ledgers.
 use soroban_sdk::{Address, Env, Symbol};
 
-use chainverse_types::{AssetConfig, CourseConfig, DataKey, MAX_TTL, MIN_TTL};
+use chainverse_types::{AssetConfig, CourseConfig, DataKey, PaymentRecord, MAX_TTL, MIN_TTL};
 
 use crate::errors::ContractError;
 
@@ -142,4 +142,112 @@ pub fn read_course_config(env: &Env, course_id: &Symbol) -> Option<CourseConfig>
         bump_persistent(env, &key);
     }
     result
+}
+
+// ─── Enrollment ──────────────────────────────────────────────────────────────
+
+/// Record a student's enrollment in a course (value = enrollment timestamp).
+pub fn write_enrollment(env: &Env, student: &Address, course_id: &Symbol, paid_at: u64) {
+    let key = DataKey::Enrollment(student.clone(), course_id.clone());
+    env.storage().persistent().set(&key, &paid_at);
+    bump_persistent(env, &key);
+}
+
+/// Return the enrollment timestamp for (student, course_id), or `None`.
+#[allow(dead_code)]
+pub fn read_enrollment(env: &Env, student: &Address, course_id: &Symbol) -> Option<u64> {
+    let key = DataKey::Enrollment(student.clone(), course_id.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        bump_persistent(env, &key);
+    }
+    result
+}
+
+/// Return `true` if the student is enrolled in the course.
+pub fn has_enrollment(env: &Env, student: &Address, course_id: &Symbol) -> bool {
+    env.storage()
+        .persistent()
+        .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
+}
+
+// ─── Payment records ─────────────────────────────────────────────────────────
+
+/// Persist the full payment receipt keyed by (student, course_id).
+pub fn write_payment_record(env: &Env, record: &PaymentRecord) {
+    let key = DataKey::PaymentRecord(record.student.clone(), record.course_id.clone());
+    env.storage().persistent().set(&key, record);
+    bump_persistent(env, &key);
+}
+
+/// Read the payment receipt for (student, course_id), or `None` if absent.
+///
+/// Also bumps the entry TTL so recently inspected receipts stay live.
+pub fn read_payment_record(
+    env: &Env,
+    student: &Address,
+    course_id: &Symbol,
+) -> Option<PaymentRecord> {
+    let key = DataKey::PaymentRecord(student.clone(), course_id.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        bump_persistent(env, &key);
+    }
+    result
+}
+
+/// Look up a payment receipt by its globally unique business payment ID.
+pub fn read_payment_record_by_id(env: &Env, payment_id: &Symbol) -> Option<PaymentRecord> {
+    let (student, course_id) = read_payment_id_owner(env, payment_id)?;
+    read_payment_record(env, &student, &course_id)
+}
+
+// ─── Payment-ID reservations ────────────────────────────────────────────────
+
+/// Reserve `payment_id` for the (student, course_id) pair.
+pub fn write_payment_id_owner(
+    env: &Env,
+    payment_id: &Symbol,
+    student: &Address,
+    course_id: &Symbol,
+) {
+    let key = DataKey::PaymentIdOwner(payment_id.clone());
+    let owner = (student.clone(), course_id.clone());
+    env.storage().persistent().set(&key, &owner);
+    bump_persistent(env, &key);
+}
+
+/// Return the (student, course_id) pair that owns `payment_id`, or `None`.
+fn read_payment_id_owner(env: &Env, payment_id: &Symbol) -> Option<(Address, Symbol)> {
+    let key = DataKey::PaymentIdOwner(payment_id.clone());
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        bump_persistent(env, &key);
+    }
+    result
+}
+
+// ─── Instructor balances ────────────────────────────────────────────────────
+
+/// Credit `amount` to the instructor's claimable balance.
+pub fn add_to_instructor_balance(env: &Env, instructor: &Address, amount: i128) {
+    let current = read_instructor_balance(env, instructor);
+    write_instructor_balance(env, instructor, current + amount);
+}
+
+/// Overwrite the instructor's claimable balance.
+pub fn write_instructor_balance(env: &Env, instructor: &Address, amount: i128) {
+    let key = DataKey::InstructorBalance(instructor.clone());
+    env.storage().persistent().set(&key, &amount);
+    bump_persistent(env, &key);
+}
+
+/// Read the instructor's claimable balance (zero when never credited).
+pub fn read_instructor_balance(env: &Env, instructor: &Address) -> i128 {
+    let key = DataKey::InstructorBalance(instructor.clone());
+    let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    amount
 }

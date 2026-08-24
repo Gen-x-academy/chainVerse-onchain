@@ -66,3 +66,29 @@ pub fn course_configured(
         ),
     );
 }
+
+/// Emitted after a successful course purchase.
+///
+/// Topic: `PYMT_RCD`
+/// Payload: `(student, course_id, amount, asset, instructor, payment_id)`
+pub fn payment_recorded(
+    env: &Env,
+    student: &Address,
+    course_id: &Symbol,
+    amount: i128,
+    asset: &Address,
+    instructor: &Address,
+    payment_id: &Symbol,
+) {
+    env.events().publish(
+        (symbol_short!("PYMT_RCD"),),
+        (
+            student.clone(),
+            course_id.clone(),
+            amount,
+            asset.clone(),
+            instructor.clone(),
+            payment_id.clone(),
+        ),
+    );
+}

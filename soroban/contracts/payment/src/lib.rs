@@ -1,26 +1,30 @@
-//! ChainVerse Academy – Soroban payment configuration contract.
+//! ChainVerse Academy – Soroban payment contract.
 //!
-//! Implements the administrative configuration boundary defined in issue #914:
-//! - Single-use initialisation.
-//! - Administrator and treasury management.
-//! - Supported-asset CRUD (add, update, enable, disable, query).
-//! - Course payment-configuration CRUD (add, update, activate, deactivate, query).
-//! - All configuration events from the frozen schema (ADR-001).
+//! Implements the administrative configuration boundary defined in issue
+//! #914 (single-use initialisation, administrator/treasury management,
+//! supported-asset CRUD, course payment-configuration CRUD) and the
+//! authorized purchase execution defined in issue #915 (SAC token transfer,
+//! business-level payment idempotency, enrollment, revenue split records).
 //!
-//! Purchase execution and instructor withdrawals are intentionally excluded
-//! from this issue and will be implemented in subsequent tasks.
+//! Instructor withdrawals are intentionally excluded from this issue and
+//! will be implemented in a subsequent task.
 #![no_std]
 
 mod errors;
 mod events;
+mod purchase;
 mod storage;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_purchase;
 
 pub use errors::ContractError;
 
-use chainverse_types::{AssetConfig, CourseConfig, CONTRACT_VERSION, MAX_FEE_BASIS_POINTS};
+use chainverse_types::{
+    AssetConfig, CourseConfig, PaymentRecord, CONTRACT_VERSION, MAX_FEE_BASIS_POINTS,
+};
 use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol};
 
 use storage::{
@@ -458,6 +462,75 @@ impl PaymentContract {
         read_course_config(&env, &course_id)
             .map(|c| c.active)
             .unwrap_or(false)
+    }
+
+    // ── Purchase execution (issue #915) ───────────────────────────────────
+
+    /// Pay for a course and enroll the student, atomically.
+    ///
+    /// The exact configured price is transferred from `student` to this
+    /// contract through the Stellar Asset Contract configured for the
+    /// course; the gross payment plus its fee/instructor split are stored,
+    /// the enrollment is created, and the frozen `PYMT_RCD` event is emitted.
+    ///
+    /// `payment_id` is a caller-supplied business idempotency key of up to
+    /// 32 bytes (clients typically derive it from `(student, course_id)`).
+    /// It is reserved globally: a second purchase reusing the ID fails with
+    /// [`ContractError::DuplicatePaymentId`] regardless of arguments, and an
+    /// empty ID fails with [`ContractError::InvalidPaymentId`].
+    ///
+    /// Requires `student.require_auth()`.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotInitialized`]
+    /// - [`ContractError::InvalidPaymentId`] – empty payment ID.
+    /// - [`ContractError::CourseNotFound`] – course has no configuration.
+    /// - [`ContractError::CourseInactive`] – course is not open for purchase.
+    /// - [`ContractError::AssetNotEnabled`] – asset unregistered or disabled.
+    /// - [`ContractError::AlreadyEnrolled`] – student already owns the course.
+    /// - [`ContractError::DuplicatePaymentId`] – payment ID already reserved.
+    /// - [`ContractError::PaymentFailed`] – SAC transfer failed (e.g.
+    ///   insufficient balance) or the token contract panicked.
+    pub fn pay_for_course(
+        env: Env,
+        student: Address,
+        course_id: Symbol,
+        payment_id: Symbol,
+    ) -> Result<(), ContractError> {
+        purchase::execute_purchase(&env, &student, &course_id, &payment_id)
+    }
+
+    // ── Payment / enrollment queries ─────────────────────────────────────
+
+    /// Return `true` if `student` is enrolled in `course_id`.
+    pub fn is_enrolled(env: Env, student: Address, course_id: Symbol) -> bool {
+        storage::has_enrollment(&env, &student, &course_id)
+    }
+
+    /// Return the full payment receipt for `(student, course_id)`, or `None`.
+    ///
+    /// The receipt contains the gross amount and the persisted split
+    /// allocation (`fee_amount + instructor_amount == amount`).
+    pub fn get_payment_record(
+        env: Env,
+        student: Address,
+        course_id: Symbol,
+    ) -> Option<PaymentRecord> {
+        storage::read_payment_record(&env, &student, &course_id)
+    }
+
+    /// Return the payment receipt identified by its globally unique
+    /// business `payment_id`, or `None`.
+    pub fn get_payment_by_id(env: Env, payment_id: Symbol) -> Option<PaymentRecord> {
+        storage::read_payment_record_by_id(&env, &payment_id)
+    }
+
+    /// Return the instructor's claimable balance (zero when never credited).
+    ///
+    /// Balances accumulate on purchase via the split allocation defined by
+    /// ADR-001 and are consumed by withdrawals in a subsequent task.
+    pub fn get_instructor_balance(env: Env, instructor: Address) -> i128 {
+        storage::read_instructor_balance(&env, &instructor)
     }
 
     /// Return the deployed contract version string.
