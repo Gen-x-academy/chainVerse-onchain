@@ -229,20 +229,70 @@ fn read_payment_id_owner(env: &Env, payment_id: &Symbol) -> Option<(Address, Sym
 
 // ─── Instructor balances ────────────────────────────────────────────────────
 
-/// Credit `amount` to the instructor's claimable balance.
-pub fn add_to_instructor_balance(env: &Env, instructor: &Address, amount: i128) {
-    let current = read_instructor_balance(env, instructor);
-    write_instructor_balance(env, instructor, current + amount);
+/// Credit `amount` to the instructor's claimable balance for a specific asset.
+pub fn add_to_instructor_balance(env: &Env, instructor: &Address, asset: &Address, amount: i128) {
+    let current = read_instructor_balance_asset(env, instructor, asset);
+    write_instructor_balance_asset(env, instructor, asset, current + amount);
 }
 
-/// Overwrite the instructor's claimable balance.
+/// Overwrite the per-asset instructor claimable balance.
+pub fn write_instructor_balance_asset(
+    env: &Env,
+    instructor: &Address,
+    asset: &Address,
+    amount: i128,
+) {
+    let key = DataKey::InstructorBalanceAsset(instructor.clone(), asset.clone());
+    env.storage().persistent().set(&key, &amount);
+    bump_persistent(env, &key);
+}
+
+/// Read the per-asset instructor claimable balance (zero when never credited).
+pub fn read_instructor_balance_asset(env: &Env, instructor: &Address, asset: &Address) -> i128 {
+    let key = DataKey::InstructorBalanceAsset(instructor.clone(), asset.clone());
+    let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    amount
+}
+
+/// Credit `amount` to the platform claimable balance for a specific asset.
+pub fn add_to_platform_balance(env: &Env, asset: &Address, amount: i128) {
+    let current = read_platform_balance_asset(env, asset);
+    write_platform_balance_asset(env, asset, current + amount);
+}
+
+/// Overwrite the per-asset platform claimable balance.
+pub fn write_platform_balance_asset(env: &Env, asset: &Address, amount: i128) {
+    let key = DataKey::PlatformBalanceAsset(asset.clone());
+    env.storage().persistent().set(&key, &amount);
+    bump_persistent(env, &key);
+}
+
+/// Read the per-asset platform claimable balance (zero when never credited).
+pub fn read_platform_balance_asset(env: &Env, asset: &Address) -> i128 {
+    let key = DataKey::PlatformBalanceAsset(asset.clone());
+    let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    amount
+}
+
+// ─── Legacy instructor balance (kept for backwards-compatibility) ────────────
+
+/// Overwrite the legacy aggregate instructor claimable balance.
+/// Kept so that previously-deployed data keys remain readable.
+#[allow(dead_code)]
 pub fn write_instructor_balance(env: &Env, instructor: &Address, amount: i128) {
     let key = DataKey::InstructorBalance(instructor.clone());
     env.storage().persistent().set(&key, &amount);
     bump_persistent(env, &key);
 }
 
-/// Read the instructor's claimable balance (zero when never credited).
+/// Read the legacy aggregate instructor claimable balance (zero when absent).
+#[allow(dead_code)]
 pub fn read_instructor_balance(env: &Env, instructor: &Address) -> i128 {
     let key = DataKey::InstructorBalance(instructor.clone());
     let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);

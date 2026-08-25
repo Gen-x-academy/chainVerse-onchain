@@ -47,18 +47,20 @@ pub const EVENT_ADMIN_SET: &str = "ADMIN_SET";
 
 /// Typed storage keys used across the payment contract.
 ///
-/// | Key                          | Storage kind | Purpose                           |
-/// |------------------------------|--------------|-----------------------------------|
-/// | `Admin`                      | Instance     | Contract administrator address    |
-/// | `Treasury`                   | Instance     | Platform treasury address         |
-/// | `FeePercent`                 | Instance     | Platform fee in basis points      |
-/// | `RefundWindowSeconds`        | Instance     | Refund deadline in seconds        |
-/// | `AssetConfig(Address)`       | Persistent   | Per-asset supported flag          |
-/// | `CourseConfig(Symbol)`       | Persistent   | Per-course payment settings       |
-/// | `Enrollment(Address,Symbol)` | Persistent   | Student enrollment record         |
-/// | `PaymentRecord(Address,Symbol)` | Persistent | Full payment receipt             |
-/// | `InstructorBalance(Address)` | Persistent   | Instructor claimable balance      |
-/// | `PaymentIdOwner(Symbol)`     | Persistent   | Reservation map for payment IDs   |
+/// | Key                                    | Storage kind | Purpose                                |
+/// |----------------------------------------|--------------|----------------------------------------|
+/// | `Admin`                                | Instance     | Contract administrator address         |
+/// | `Treasury`                             | Instance     | Platform treasury address              |
+/// | `FeePercent`                           | Instance     | Platform fee in basis points           |
+/// | `RefundWindowSeconds`                  | Instance     | Refund deadline in seconds             |
+/// | `AssetConfig(Address)`                 | Persistent   | Per-asset supported flag               |
+/// | `CourseConfig(Symbol)`                 | Persistent   | Per-course payment settings            |
+/// | `Enrollment(Address,Symbol)`           | Persistent   | Student enrollment record              |
+/// | `PaymentRecord(Address,Symbol)`        | Persistent   | Full payment receipt                   |
+/// | `InstructorBalance(Address)`           | Persistent   | Legacy aggregate instructor balance    |
+/// | `InstructorBalanceAsset(Address,Address)` | Persistent| Per-asset instructor claimable balance |
+/// | `PlatformBalanceAsset(Address)`        | Persistent   | Per-asset platform claimable balance   |
+/// | `PaymentIdOwner(Symbol)`               | Persistent   | Reservation map for payment IDs        |
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataKey {
@@ -78,8 +80,15 @@ pub enum DataKey {
     Enrollment(Address, Symbol),
     /// Full payment receipt keyed by (student, course_id) (persistent).
     PaymentRecord(Address, Symbol),
-    /// Claimable instructor balance keyed by instructor address (persistent).
+    /// Legacy aggregate instructor claimable balance (deprecated, kept for
+    /// schema continuity; new code uses `InstructorBalanceAsset`).
     InstructorBalance(Address),
+    /// Per-asset instructor claimable balance keyed by (instructor, asset)
+    /// (persistent).  Balances for different assets are fully isolated.
+    InstructorBalanceAsset(Address, Address),
+    /// Per-asset platform claimable balance keyed by asset address
+    /// (persistent).  Accumulates the fee portion of every purchase.
+    PlatformBalanceAsset(Address),
     /// Business-level payment-ID reservation keyed by the payment ID itself
     /// (persistent). Maps a reserved 32-byte ID to the (student, course_id)
     /// pair that owns it, guaranteeing global uniqueness across purchases.
@@ -140,4 +149,21 @@ pub struct AssetConfig {
     pub asset: Address,
     /// Whether this asset is currently accepted for payment.
     pub enabled: bool,
+}
+
+/// Record emitted and returned for a successful withdrawal.
+///
+/// Provides a complete audit trail: who withdrew, which asset, how much,
+/// and when.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithdrawalRecord {
+    /// Address that received the withdrawn tokens.
+    pub recipient: Address,
+    /// Stellar Asset Contract address of the withdrawn token.
+    pub asset: Address,
+    /// Amount transferred out of the contract.
+    pub amount: i128,
+    /// Ledger timestamp at the time of withdrawal.
+    pub withdrawn_at: u64,
 }

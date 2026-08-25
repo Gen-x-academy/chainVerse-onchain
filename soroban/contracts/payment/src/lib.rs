@@ -2,12 +2,12 @@
 //!
 //! Implements the administrative configuration boundary defined in issue
 //! #914 (single-use initialisation, administrator/treasury management,
-//! supported-asset CRUD, course payment-configuration CRUD) and the
-//! authorized purchase execution defined in issue #915 (SAC token transfer,
-//! business-level payment idempotency, enrollment, revenue split records).
-//!
-//! Instructor withdrawals are intentionally excluded from this issue and
-//! will be implemented in a subsequent task.
+//! supported-asset CRUD, course payment-configuration CRUD), the authorized
+//! purchase execution defined in issue #915 (SAC token transfer,
+//! business-level payment idempotency, enrollment, revenue split records),
+//! and the per-asset revenue accounting and pull-based withdrawals defined
+//! in issue #916 (isolated instructor/platform balances per asset,
+//! instructor_withdraw, platform_withdraw, balance queries, withdrawal events).
 #![no_std]
 
 mod errors;
@@ -19,18 +19,21 @@ mod storage;
 mod test;
 #[cfg(test)]
 mod test_purchase;
+#[cfg(test)]
+mod test_withdrawal;
 
 pub use errors::ContractError;
 
 use chainverse_types::{
-    AssetConfig, CourseConfig, PaymentRecord, CONTRACT_VERSION, MAX_FEE_BASIS_POINTS,
+    AssetConfig, CourseConfig, PaymentRecord, WithdrawalRecord, CONTRACT_VERSION,
+    MAX_FEE_BASIS_POINTS,
 };
-use soroban_sdk::{contract, contractimpl, Address, Env, String as SorobanString, Symbol};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String as SorobanString, Symbol};
 
 use storage::{
     is_asset_enabled, is_initialized, read_admin, read_asset_config, read_course_config, read_fee,
-    read_treasury, write_admin, write_asset_config, write_course_config, write_fee,
-    write_refund_window, write_treasury,
+    read_instructor_balance_asset, read_platform_balance_asset, read_treasury, write_admin,
+    write_asset_config, write_course_config, write_fee, write_refund_window, write_treasury,
 };
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -525,12 +528,153 @@ impl PaymentContract {
         storage::read_payment_record_by_id(&env, &payment_id)
     }
 
-    /// Return the instructor's claimable balance (zero when never credited).
+    /// Return the instructor's claimable balance for a specific asset (zero when never credited).
     ///
-    /// Balances accumulate on purchase via the split allocation defined by
-    /// ADR-001 and are consumed by withdrawals in a subsequent task.
-    pub fn get_instructor_balance(env: Env, instructor: Address) -> i128 {
-        storage::read_instructor_balance(&env, &instructor)
+    /// Balances are isolated by Stellar Asset Contract address.  Two calls
+    /// with different `asset` values may return different amounts for the same
+    /// instructor.
+    pub fn get_instructor_balance(env: Env, instructor: Address, asset: Address) -> i128 {
+        storage::read_instructor_balance_asset(&env, &instructor, &asset)
+    }
+
+    /// Return the platform's claimable balance for a specific asset (zero when
+    /// never credited).
+    ///
+    /// Accumulates the platform fee portion of every purchase denominated in
+    /// `asset`.
+    pub fn get_platform_balance(env: Env, asset: Address) -> i128 {
+        storage::read_platform_balance_asset(&env, &asset)
+    }
+
+    // ── Withdrawal entrypoints (issue #916) ───────────────────────────────
+
+    /// Withdraw all or part of the instructor's claimable balance for `asset`.
+    ///
+    /// Applies checks-effects-interactions:
+    /// 1. Verify the instructor's authorization.
+    /// 2. Load and validate the current balance.
+    /// 3. Reduce the stored balance **before** the token transfer.
+    /// 4. Execute the SAC transfer; on failure, the whole invocation is
+    ///    rolled back by the Soroban host, restoring the original balance.
+    ///
+    /// Requires `instructor.require_auth()`.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotInitialized`]
+    /// - [`ContractError::InvalidAmount`] – `amount` ≤ 0.
+    /// - [`ContractError::InsufficientBalance`] – balance < `amount`.
+    /// - [`ContractError::TransferFailed`] – SAC transfer failed.
+    pub fn instructor_withdraw(
+        env: Env,
+        instructor: Address,
+        asset: Address,
+        amount: i128,
+    ) -> Result<WithdrawalRecord, ContractError> {
+        // ── 1. Guard: contract must be initialized ──────────────────────
+        // read_admin is a lightweight existence check; we don't need the value.
+        let _ = storage::read_admin(&env)?;
+
+        // ── 2. Amount validation ────────────────────────────────────────
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // ── 3. Authorization ────────────────────────────────────────────
+        instructor.require_auth();
+
+        // ── 4. Balance check ────────────────────────────────────────────
+        let balance = read_instructor_balance_asset(&env, &instructor, &asset);
+        if balance < amount {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        // ── 5. Effects: reduce balance before the transfer ──────────────
+        storage::write_instructor_balance_asset(&env, &instructor, &asset, balance - amount);
+
+        // ── 6. Interactions: SAC transfer ────────────────────────────────
+        let token_client = token::Client::new(&env, &asset);
+        let escrow = env.current_contract_address();
+        token_client
+            .try_transfer(&escrow, &instructor, &amount)
+            .map_err(|_| ContractError::TransferFailed)?
+            .map_err(|_| ContractError::TransferFailed)?;
+
+        // ── 7. Event & return record ─────────────────────────────────────
+        let withdrawn_at = env.ledger().timestamp();
+        events::withdrawal_processed(&env, &instructor, &asset, amount, withdrawn_at);
+
+        Ok(WithdrawalRecord {
+            recipient: instructor,
+            asset,
+            amount,
+            withdrawn_at,
+        })
+    }
+
+    /// Withdraw all or part of the platform's claimable balance for `asset`.
+    ///
+    /// Only the configured treasury address may call this method.
+    ///
+    /// Applies checks-effects-interactions in the same order as
+    /// [`Self::instructor_withdraw`].
+    ///
+    /// Requires `treasury.require_auth()`.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotInitialized`]
+    /// - [`ContractError::NotAdmin`] – caller is not the treasury address.
+    /// - [`ContractError::InvalidAmount`] – `amount` ≤ 0.
+    /// - [`ContractError::InsufficientBalance`] – balance < `amount`.
+    /// - [`ContractError::TransferFailed`] – SAC transfer failed.
+    pub fn platform_withdraw(
+        env: Env,
+        caller: Address,
+        asset: Address,
+        amount: i128,
+    ) -> Result<WithdrawalRecord, ContractError> {
+        // ── 1. Guard: contract must be initialized ──────────────────────
+        let treasury = storage::read_treasury(&env)?;
+
+        // ── 2. Treasury authorization ────────────────────────────────────
+        if caller != treasury {
+            return Err(ContractError::NotAdmin);
+        }
+
+        // ── 3. Amount validation ────────────────────────────────────────
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // ── 4. Authorization ────────────────────────────────────────────
+        caller.require_auth();
+
+        // ── 5. Balance check ────────────────────────────────────────────
+        let balance = read_platform_balance_asset(&env, &asset);
+        if balance < amount {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        // ── 6. Effects: reduce balance before the transfer ──────────────
+        storage::write_platform_balance_asset(&env, &asset, balance - amount);
+
+        // ── 7. Interactions: SAC transfer ────────────────────────────────
+        let token_client = token::Client::new(&env, &asset);
+        let escrow = env.current_contract_address();
+        token_client
+            .try_transfer(&escrow, &treasury, &amount)
+            .map_err(|_| ContractError::TransferFailed)?
+            .map_err(|_| ContractError::TransferFailed)?;
+
+        // ── 8. Event & return record ─────────────────────────────────────
+        let withdrawn_at = env.ledger().timestamp();
+        events::withdrawal_processed(&env, &treasury, &asset, amount, withdrawn_at);
+
+        Ok(WithdrawalRecord {
+            recipient: treasury,
+            asset,
+            amount,
+            withdrawn_at,
+        })
     }
 
     /// Return the deployed contract version string.

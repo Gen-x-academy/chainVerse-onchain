@@ -92,3 +92,20 @@ pub fn payment_recorded(
         ),
     );
 }
+
+/// Emitted after a successful instructor or platform withdrawal.
+///
+/// Topic: `WTHDW`
+/// Payload: `(recipient, asset, amount, withdrawn_at)`
+pub fn withdrawal_processed(
+    env: &Env,
+    recipient: &Address,
+    asset: &Address,
+    amount: i128,
+    withdrawn_at: u64,
+) {
+    env.events().publish(
+        (symbol_short!("WTHDW"),),
+        (recipient.clone(), asset.clone(), amount, withdrawn_at),
+    );
+}
