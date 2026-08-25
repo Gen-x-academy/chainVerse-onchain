@@ -173,7 +173,7 @@ fn test_purchase_success_moves_funds_creates_enrollment_and_record() {
 
     // Instructor credited with the net proceeds.
     assert_eq!(
-        f.client().get_instructor_balance(&f.instructor),
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
         990_000i128
     );
 }
@@ -229,9 +229,14 @@ fn test_second_course_on_different_asset_for_same_student() {
     assert!(f.client().is_enrolled(&f.student, &web3));
 
     // asset2 purchase uses the global 500 bps fee: 100_000 fee / 1_900_000 net.
+    // Per-asset balances: asset1 → 990_000, asset2 → 1_900_000.
     assert_eq!(
-        f.client().get_instructor_balance(&f.instructor),
-        2_890_000i128
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
+        990_000i128
+    );
+    assert_eq!(
+        f.client().get_instructor_balance(&f.instructor, &f.asset2),
+        1_900_000i128
     );
     let rec = f.client().get_payment_record(&f.student, &web3).unwrap();
     assert_eq!(rec.asset, f.asset2);
@@ -262,9 +267,9 @@ fn test_multiple_students_can_buy_the_same_course() {
     assert_eq!(rec1.payment_id, f.payment_id("S1"));
     assert_eq!(rec2.payment_id, f.payment_id("S2"));
 
-    // Both net proceeds accumulate for the instructor.
+    // Both net proceeds accumulate for the instructor (same asset1).
     assert_eq!(
-        f.client().get_instructor_balance(&f.instructor),
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
         1_980_000i128
     );
     assert_eq!(f.escrow_balance(&f.asset1), 2_000_000i128);
@@ -294,7 +299,10 @@ fn test_purchase_without_student_authorization_fails_with_no_state_change() {
         .client()
         .get_payment_record(&f.student, &f.course_id())
         .is_none());
-    assert_eq!(f.client().get_instructor_balance(&f.instructor), 0i128);
+    assert_eq!(
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
+        0i128
+    );
     assert_eq!(f.escrow_balance(&f.asset1), 0i128);
 }
 
@@ -395,7 +403,10 @@ fn test_insufficient_balance_fails_atomically() {
         .client()
         .get_payment_by_id(&f.payment_id("BROKE"))
         .is_none());
-    assert_eq!(f.client().get_instructor_balance(&f.instructor), 0i128);
+    assert_eq!(
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
+        0i128
+    );
     assert_eq!(f.escrow_balance(&f.asset1), 0i128);
 }
 
@@ -423,7 +434,7 @@ fn test_duplicate_enrollment_rejected_even_with_new_payment_id() {
         .unwrap();
     assert_eq!(rec.payment_id, f.payment_id("FIRST"));
     assert_eq!(
-        f.client().get_instructor_balance(&f.instructor),
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
         990_000i128
     );
 }
@@ -493,7 +504,7 @@ fn test_price_changed_before_execution_charges_current_configured_price() {
     assert_eq!(rec.fee_amount, 25_000i128);
     assert_eq!(rec.instructor_amount, 2_475_000i128);
     assert_eq!(
-        f.client().get_instructor_balance(&f.instructor),
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
         2_475_000i128
     );
 }
@@ -523,7 +534,10 @@ fn test_fee_rounding_truncates_to_floor() {
     assert_eq!(rec.fee_amount, 33i128);
     assert_eq!(rec.instructor_amount, 966i128);
     assert_eq!(rec.fee_amount + rec.instructor_amount, rec.amount);
-    assert_eq!(f.client().get_instructor_balance(&f.instructor), 966i128);
+    assert_eq!(
+        f.client().get_instructor_balance(&f.instructor, &f.asset1),
+        966i128
+    );
 }
 
 #[test]
@@ -648,7 +662,9 @@ fn test_escrow_holds_at_least_sum_of_instructor_balances() {
         .pay_for_course(&f.student, &web3, &f.payment_id("A3"));
 
     // RUST101: 990_000 × 2 ; WEB3: 2_000_000 − 50_000 fee = 1_950_000.
-    let instructor_total = f.client().get_instructor_balance(&f.instructor);
+    let instructor_asset1 = f.client().get_instructor_balance(&f.instructor, &f.asset1);
+    let instructor_asset2 = f.client().get_instructor_balance(&f.instructor, &f.asset2);
+    let instructor_total = instructor_asset1 + instructor_asset2;
     assert_eq!(instructor_total, 3_930_000i128);
 
     // Custody invariant: tokens held in each asset ≥ the claimable share

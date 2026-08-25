@@ -129,7 +129,9 @@ pub(crate) fn execute_purchase(
     storage::write_payment_record(env, &record);
     storage::write_enrollment(env, student, course_id, paid_at);
     storage::write_payment_id_owner(env, payment_id, student, course_id);
-    storage::add_to_instructor_balance(env, &course.instructor, instructor_amount);
+    // Credit per-asset balances (isolated by Stellar Asset Contract address).
+    storage::add_to_instructor_balance(env, &course.instructor, &course.asset, instructor_amount);
+    storage::add_to_platform_balance(env, &course.asset, fee_amount);
 
     // ── 9. Event ────────────────────────────────────────────────────────
     events::payment_recorded(
