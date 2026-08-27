@@ -16,4 +16,6 @@ pub enum TokenError {
     InsufficientAllowance = 9,
     UnsupportedStorageVersion = 10,
     InvalidMigration = 11,
+    InvalidExpiry = 10,
+    AdminTransferExpired = 11,
 }

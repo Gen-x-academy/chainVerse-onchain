@@ -1,4 +1,5 @@
 use crate::errors::EscrowError;
+use crate::events::escrow_funded;
 use crate::storage::{add_to_total_volume, load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
@@ -28,8 +29,17 @@ pub fn fund_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), Esc
         &escrow.amount,
     );
 
+    let funded_amount = escrow.amount;
     escrow.status = EscrowStatus::Funded;
     save_escrow(env, escrow_id, &escrow);
     add_to_total_volume(env, escrow.amount);
+    escrow_funded(
+        env,
+        escrow_id,
+        &caller,
+        &escrow.token,
+        funded_amount,
+        &EscrowStatus::Funded,
+    );
     Ok(())
 }

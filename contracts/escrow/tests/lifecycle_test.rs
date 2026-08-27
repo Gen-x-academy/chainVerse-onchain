@@ -91,7 +91,7 @@ fn test_fund_escrow_by_buyer() {
     ctx.client.fund_escrow(&ctx.buyer, &id);
 
     let escrow = ctx.client.get_escrow(&id).unwrap();
-    assert_eq!(escrow.status, EscrowStatus::Pending);
+    assert_eq!(escrow.status, EscrowStatus::Funded);
     assert_eq!(token_balance(&ctx.env, &ctx.token, &ctx.buyer), 9_500);
     assert_eq!(
         token_balance(&ctx.env, &ctx.token, &ctx.client.address),
@@ -141,7 +141,7 @@ fn test_release_unfunded_escrow_fails() {
         .create_escrow(&ctx.buyer, &ctx.seller, &ctx.token, &500, &9_000);
 
     let result = ctx.client.try_release_escrow(&ctx.buyer, &id);
-    assert_eq!(result, Err(Ok(EscrowError::NotPending)));
+    assert_eq!(result, Err(Ok(EscrowError::InvalidEscrowState)));
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn test_dispute_funded_escrow() {
 
     // Release must be blocked while disputed.
     let result = ctx.client.try_release_escrow(&ctx.buyer, &id);
-    assert_eq!(result, Err(Ok(EscrowError::NotPending)));
+    assert_eq!(result, Err(Ok(EscrowError::InvalidEscrowState)));
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn test_partial_release() {
     ctx.client.partial_release(&ctx.buyer, &id, &200);
 
     let escrow = ctx.client.get_escrow(&id).unwrap();
-    assert_eq!(escrow.status, EscrowStatus::Pending);
+    assert_eq!(escrow.status, EscrowStatus::Funded);
     assert_eq!(escrow.amount, 300);
     assert_eq!(token_balance(&ctx.env, &ctx.token, &ctx.seller), 200);
     assert_eq!(
@@ -253,4 +253,58 @@ fn test_get_by_buyer_index() {
 
     let other_ids = ctx.client.get_by_buyer_index(&other_buyer);
     assert_eq!(other_ids.len(), 1);
+}
+
+/// #858 — every escrow is indexed by its seller at creation, and the returns
+/// paginate over the stored list in insertion order.
+#[test]
+fn test_get_by_seller_index() {
+    let ctx = setup(1_000);
+
+    let seller_a = ctx.seller.clone();
+    let id1 = ctx
+        .client
+        .create_escrow(&ctx.buyer, &seller_a, &ctx.token, &100, &9_000);
+    let id2 = ctx
+        .client
+        .create_escrow(&ctx.buyer, &seller_a, &ctx.token, &200, &9_000);
+
+    // A different seller with a single escrow.
+    let other_seller = Address::generate(&ctx.env);
+    let id3 = ctx.client.create_escrow(
+        &ctx.buyer,
+        &other_seller,
+        &ctx.token,
+        &50,
+        &9_000,
+    );
+
+    let ids = ctx.client.get_by_seller_index(&seller_a);
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids.get(0).unwrap(), id1);
+    assert_eq!(ids.get(1).unwrap(), id2);
+
+    let other_ids = ctx.client.get_by_seller_index(&other_seller);
+    assert_eq!(other_ids.len(), 1);
+    assert_eq!(other_ids.get(0).unwrap(), id3);
+
+    // A seller with no escrows returns an empty list.
+    let nobody = Address::generate(&ctx.env);
+    assert_eq!(ctx.client.get_by_seller_index(&nobody).len(), 0);
+}
+
+/// #858 — each escrow is indexed exactly once per seller, buyer, and token.
+#[test]
+fn test_each_escrow_indexed_once_per_actor() {
+    let ctx = setup(1_000);
+
+    let seller = ctx.seller.clone();
+    let buyer = ctx.buyer.clone();
+    let token = ctx.token.clone();
+
+    let id = ctx.client.create_escrow(&buyer, &seller, &token, &100, &9_000);
+
+    assert_eq!(ctx.client.get_by_seller_index(&seller).len(), 1);
+    assert_eq!(ctx.client.get_by_seller_index(&seller).get(0).unwrap(), id);
+    assert_eq!(ctx.client.get_by_buyer_index(&buyer).get(0).unwrap(), id);
 }
