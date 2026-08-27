@@ -1,7 +1,8 @@
 use crate::errors::EscrowError;
 use crate::events::escrow_created;
 use crate::storage::{
-    append_to_buyer_index, append_to_token_index, is_token_whitelisted, next_escrow_id, save_escrow,
+    append_to_buyer_index, append_to_seller_index, append_to_token_index, is_token_whitelisted,
+    next_escrow_id, save_escrow,
 };
 use crate::types::{Escrow, EscrowStatus};
 use soroban_sdk::{Address, Env};
@@ -37,12 +38,14 @@ pub fn create_escrow(
         seller: seller.clone(),
         token: token.clone(),
         amount,
+        original_amount: amount,
         status: EscrowStatus::Created,
         expiration,
     };
     save_escrow(env, escrow_id, &escrow);
     append_to_token_index(env, &token, escrow_id);
     append_to_buyer_index(env, &buyer, escrow_id);
+    append_to_seller_index(env, &seller, escrow_id);
     escrow_created(env, escrow_id, &buyer, &seller, &token, amount);
     Ok(escrow_id)
 }

@@ -20,4 +20,11 @@ pub enum EscrowError {
     ContractPaused = 14,
     /// Escrow is not in the expected lifecycle state for this action.
     InvalidEscrowState = 15,
+    /// No arbiter is configured to resolve disputes (#864).
+    NoArbiterConfigured = 16,
+    /// Attempted to resolve an escrow that is not in the Disputed state (#864).
+    NotDisputed = 17,
+    /// The dispute resolution allocation is invalid (negative, or exceeds the
+    /// remaining escrow balance once fees are accounted for) (#864).
+    InvalidAllocation = 18,
 }
