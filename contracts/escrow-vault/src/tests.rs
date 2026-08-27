@@ -1,6 +1,6 @@
 #![cfg(test)]
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Vec};
-use crate::{EscrowVault, VaultError};
+use crate::{DataKey, EscrowVault, Vault, VaultError, VaultStatus};
 
 fn setup() -> (Env, Address) {
     let env = Env::default();
@@ -265,4 +265,110 @@ fn test_emergency_cancel_by_non_admin_fails() {
     let reason = String::from_str(&env, "unauthorized attempt");
     let result = client.try_emergency_cancel(&vault_id, &reason);
     assert_eq!(result, Err(Ok(VaultError::NotInitialized)));
+}
+
+// #866 — two vaults born in the same ledger must get distinct ids. The test
+// env keeps the ledger timestamp fixed, so only the monotonic nonce separates
+// the two vault ids.
+#[test]
+fn test_same_ledger_timestamp_vaults_get_unique_ids() {
+    let (env, contract_id) = setup();
+    let client = crate::EscrowVaultClient::new(&env, &contract_id);
+    let depositor = Address::generate(&env);
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let approver1 = Address::generate(&env);
+    let approver2 = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(depositor.clone()).address();
+    let mut approvers_a = Vec::new(&env);
+    approvers_a.push_back(approver1.clone());
+    let mut approvers_b = Vec::new(&env);
+    approvers_b.push_back(approver2.clone());
+    let id1 = client.create_vault(&depositor, &recipient1, &token, &1000_i128, &approvers_a, &1u32);
+    let id2 = client.create_vault(&depositor, &recipient2, &token, &2000_i128, &approvers_b, &1u32);
+    assert_ne!(id1, id2);
+}
+
+// #865 — with two unique approvers, a threshold equal to that count is valid;
+// it must not be rejected as ThresholdExceedsApprovers.
+#[test]
+fn test_threshold_equal_to_unique_count_succeeds() {
+    let (env, contract_id) = setup();
+    let client = crate::EscrowVaultClient::new(&env, &contract_id);
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(depositor.clone()).address();
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(alice.clone());
+    approvers.push_back(bob.clone());
+    let vault_id = client.create_vault(&depositor, &recipient, &token, &1000_i128, &approvers, &2u32);
+    // The vault is stored: a stranger is Unauthorized (not NotFound), and the
+    // single approval below leaves it Pending until bob also approves.
+    let stranger = Address::generate(&env);
+    assert_eq!(client.try_approve_vault(&vault_id, &stranger), Err(Ok(VaultError::Unauthorized)));
+    client.approve_vault(&vault_id, &alice);
+    let res = client.try_approve_vault(&vault_id, &alice);
+    assert_eq!(res, Err(Ok(VaultError::AlreadyVoted)));
+}
+
+// #867 positive — with the recipient/depositor excluded from the approver set,
+// a legitimate external approver releases the payout to the recipient.
+#[test]
+fn test_external_approver_releases_funds_to_recipient() {
+    let (env, contract_id) = setup();
+    let client = crate::EscrowVaultClient::new(&env, &contract_id);
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let approver = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(depositor.clone()).address();
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(approver.clone());
+    let vault_id = client.create_vault(&depositor, &recipient, &token, &1000_i128, &approvers, &1u32);
+    let bal_before = soroban_sdk::token::Client::new(&env, &token).balance(&recipient);
+    client.approve_vault(&vault_id, &approver);
+    let bal_after = soroban_sdk::token::Client::new(&env, &token).balance(&recipient);
+    assert_eq!(bal_after, bal_before + 1000_i128);
+}
+
+// #867 adversarial — create_vault already rejects a recipient-as-approver with
+// ConflictOfInterest, so the attacker can never reach threshold release that
+// way. To prove the approve-time guard is defense-in-depth, inject the hostile
+// vault state directly (recipient IS an approver, threshold 1) and verify the
+// recipient approving its own payout still fails with ConflictOfInterest and
+// no funds move to the recipient.
+#[test]
+fn test_recipient_in_approvers_threshold_one_cannot_self_approve() {
+    let (env, contract_id) = setup();
+    let client = crate::EscrowVaultClient::new(&env, &contract_id);
+    let depositor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(depositor.clone()).address();
+    let vault_id = BytesN::from_array(&env, &[7u8; 32]);
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(recipient.clone());
+    let vault = Vault {
+        depositor: depositor.clone(),
+        recipient: recipient.clone(),
+        token: token.clone(),
+        amount: 1000_i128,
+        approvers,
+        approvals: 0,
+        threshold: 1,
+        status: VaultStatus::Pending,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Vault(vault_id.clone()), &vault);
+        env.storage().persistent().extend_ttl(&DataKey::Vault(vault_id.clone()), 100_000, 500_000);
+    });
+    // Fund the contract so a release would be observable as a recipient balance move.
+    soroban_sdk::token::Client::new(&env, &token).transfer(&depositor, &contract_id, &1000_i128);
+    let bal_before = soroban_sdk::token::Client::new(&env, &token).balance(&recipient);
+    // The recipient's single vote would meet threshold 1, but role-overlap must
+    // block it with ConflictOfInterest before any funds can be released.
+    let result = client.try_approve_vault(&vault_id, &recipient);
+    assert_eq!(result, Err(Ok(VaultError::ConflictOfInterest)));
+    let bal_after = soroban_sdk::token::Client::new(&env, &token).balance(&recipient);
+    assert_eq!(bal_after, bal_before);
 }

@@ -1,4 +1,5 @@
 use crate::errors::EscrowError;
+use crate::events::dispute_opened;
 use crate::storage::{load_escrow, save_escrow};
 use crate::types::EscrowStatus;
 use soroban_sdk::{Address, Env};
@@ -27,7 +28,16 @@ pub fn dispute(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowE
     // #714 — validate the status transition before writing it.
     crate::escrow_state::assert_transition_allowed(&escrow.status, &EscrowStatus::Disputed)?;
 
+    let affected_amount = escrow.amount;
     escrow.status = EscrowStatus::Disputed;
     save_escrow(env, escrow_id, &escrow);
+    dispute_opened(
+        env,
+        escrow_id,
+        &caller,
+        &escrow.token,
+        affected_amount,
+        &EscrowStatus::Disputed,
+    );
     Ok(())
 }

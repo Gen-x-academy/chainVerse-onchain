@@ -8,6 +8,7 @@ mod events;
 mod fund;
 mod refund;
 mod release;
+mod resolve;
 mod storage;
 mod types;
 mod version;
@@ -81,6 +82,30 @@ impl EscrowContract {
     /// Opens a dispute on a funded escrow (buyer only).
     pub fn dispute_escrow(env: Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
         dispute::dispute(&env, caller, escrow_id)
+    }
+
+    /// Sets or rotates the dispute arbiter. Only callable by admin.
+    pub fn set_arbiter(env: Env, admin: Address, arbiter: Address) -> Result<(), EscrowError> {
+        storage::require_admin_addr(&env, &admin)?;
+        storage::set_arbiter(&env, &arbiter);
+        Ok(())
+    }
+
+    /// Resolves a disputed escrow by allocating remaining funds between the
+    /// buyer and seller, plus an optional resolution fee. Only callable by the
+    /// configured arbiter.
+    pub fn resolve_dispute(
+        env: Env,
+        arbiter: Address,
+        escrow_id: u64,
+        buyer_amount: i128,
+        seller_amount: i128,
+        fee_amount: i128,
+        reason_hash: BytesN<32>,
+    ) -> Result<(), EscrowError> {
+        resolve::resolve_dispute(
+            &env, arbiter, escrow_id, buyer_amount, seller_amount, fee_amount, reason_hash,
+        )
     }
 
     /// Refunds the buyer after the expiration timestamp (#709).
