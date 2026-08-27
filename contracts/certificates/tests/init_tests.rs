@@ -25,7 +25,7 @@ fn init_sets_admin_and_backend_pubkey() {
     let pubkey = backend_pubkey(&env);
 
     // Should succeed without error
-    client.init(&admin, &pubkey);
+    client.init(&admin, &pubkey, &admin);
 
     // Contract must not be paused after init
     assert!(!client.is_paused());
@@ -43,9 +43,9 @@ fn init_rejects_double_initialization() {
     let admin = Address::generate(&env);
     let pubkey = backend_pubkey(&env);
 
-    client.init(&admin, &pubkey);
+    client.init(&admin, &pubkey, &admin);
 
-    let result = client.try_init(&admin, &pubkey);
+    let result = client.try_init(&admin, &pubkey, &admin);
     assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
 }
 
@@ -65,7 +65,7 @@ fn init_rejects_without_admin_auth() {
     // With mock_all_auths_allowing_non_root_auth the call itself succeeds —
     // the important thing is that the admin address must have been authorized.
     // We verify by checking the auth tree recorded by the environment.
-    client.init(&admin, &pubkey);
+    client.init(&admin, &pubkey, &admin);
 
     // Confirm the admin's authorization was required (auths must be non-empty)
     let auths = env.auths();

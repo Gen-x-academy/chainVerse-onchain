@@ -1,8 +1,12 @@
 #![no_std]
 
+pub mod royalty;
+
 use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
 };
+pub use royalty::RoyaltyConfig;
 
 // TTL constants: ~1 year at 6-second ledgers (issue #735)
 const BALANCE_MIN_TTL: u32 = 3_110_400;
@@ -19,6 +23,12 @@ pub enum TokenError {
     InsufficientAllowance = 4,
     AllowanceNotFound    = 5,
     AllowanceExpired     = 6,
+    InvalidAmount         = 7,
+    Unauthorized          = 8,
+    RoyaltyBpsTooHigh     = 9,
+    ArithmeticOverflow    = 10,
+    ContractPaused        = 11,
+    NoPendingAdmin        = 12,
     InvalidAmount        = 7,
     SupplyCapExceeded    = 8,
 }
@@ -29,6 +39,10 @@ enum DataKey {
     Balance(Address),
     TotalSupply,
     Initialized,
+    Admin,
+    PendingAdmin,
+    Paused,
+    Royalty,
     Allowance(Address, Address),
 }
 
@@ -85,6 +99,8 @@ impl TokenContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
         env.storage().instance().set(&DataKey::Balance(admin.clone()), &total_supply);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
         emit_init(&env, &admin, total_supply);
         Ok(())
@@ -112,17 +128,72 @@ impl TokenContract {
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
-        from.require_auth();
-        let from_balance = Self::balance(env.clone(), from.clone());
-        if from_balance < amount {
-            return Err(TokenError::InsufficientBalance);
+        if Self::is_paused(env.clone()) {
+            return Err(TokenError::ContractPaused);
         }
-        let to_balance = Self::balance(env.clone(), to.clone());
+        from.require_auth();
+        Self::apply_transfer(&env, from, to, amount)
+    }
 
+    pub fn pause(env: Env, admin: Address) -> Result<(), TokenError> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish((symbol_short!("PAUSED"),), (admin,));
+        Ok(())
+    }
+
+    pub fn unpause(env: Env, admin: Address) -> Result<(), TokenError> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish((symbol_short!("UNPAUSED"),), (admin,));
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), TokenError> {
+        Self::require_admin(&env, &current_admin)?;
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish((symbol_short!("ADM_PROP"),), (current_admin, new_admin));
+        Ok(())
+    }
+
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), TokenError> {
+        let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
+            .ok_or(TokenError::NoPendingAdmin)?;
+        if pending != new_admin {
+            return Err(TokenError::Unauthorized);
+        }
+        new_admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish((symbol_short!("ADM_NEW"),), (new_admin,));
+        Ok(())
+    }
+
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), TokenError> {
+        Self::require_admin(&env, &admin)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("UPGRADED"),), (new_wasm_hash,));
         env.storage().instance().set(&DataKey::Balance(from.clone()), &(from_balance - amount));
         env.storage().instance().set(&DataKey::Balance(to.clone()), &(to_balance + amount));
         emit_transfer(&env, &from, &to, amount);
         Ok(())
+    }
+
+    pub fn set_royalty(
+        env: Env,
+        admin: Address,
+        recipient: Address,
+        bps: u32,
+    ) -> Result<(), TokenError> {
+        royalty::set_royalty(&env, admin, recipient, bps)
+    }
+
+    pub fn royalty(env: Env) -> Option<RoyaltyConfig> {
+        royalty::get_royalty(&env)
     }
 
     pub fn approve(env: Env, owner: Address, spender: Address, amount: i128, expires_at: Option<u64>) {
@@ -148,6 +219,9 @@ impl TokenContract {
     }
 
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if Self::is_paused(env.clone()) {
+            return Err(TokenError::ContractPaused);
+        }
         let mut allow = env.storage()
             .persistent()
             .get::<DataKey, Allowance>(&DataKey::Allowance(from.clone(), spender.clone()))
@@ -161,20 +235,75 @@ impl TokenContract {
         if allow.amount < amount {
             return Err(TokenError::InsufficientAllowance);
         }
+        Self::apply_transfer(&env, from.clone(), to, amount)?;
 
         allow.amount -= amount;
         if allow.amount == 0 {
-            env.storage().persistent().remove(&DataKey::Allowance(from.clone(), spender.clone()));
+            env.storage().persistent().remove(&DataKey::Allowance(from, spender));
         } else {
-            let key = DataKey::Allowance(from.clone(), spender.clone());
+            let key = DataKey::Allowance(from, spender);
             env.storage().persistent().set(&key, &allow);
             env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         }
+        Ok(())
+    }
 
-        let from_bal = Self::balance(env.clone(), from.clone());
-        if from_bal < amount {
+    fn apply_transfer(env: &Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        let from_balance = Self::balance(env.clone(), from.clone());
+        if from_balance < amount {
             return Err(TokenError::InsufficientBalance);
         }
+        let royalty = royalty::get_royalty(env);
+        let royalty_amount = royalty.as_ref()
+            .map(|config| amount.checked_mul(config.bps as i128).ok_or(TokenError::ArithmeticOverflow))
+            .transpose()?
+            .map(|value| value / 10_000)
+            .unwrap_or(0);
+        let proceeds = amount.checked_sub(royalty_amount).ok_or(TokenError::ArithmeticOverflow)?;
+        let recipient = royalty.map(|config| config.recipient);
+
+        if from == to {
+            if let Some(recipient) = recipient {
+                if recipient != from && royalty_amount > 0 {
+                    let from_after = from_balance.checked_sub(royalty_amount)
+                        .ok_or(TokenError::ArithmeticOverflow)?;
+                    let recipient_balance = Self::balance(env.clone(), recipient.clone());
+                    let recipient_after = recipient_balance.checked_add(royalty_amount)
+                        .ok_or(TokenError::ArithmeticOverflow)?;
+                    env.storage().instance().set(&DataKey::Balance(from), &from_after);
+                    env.storage().instance().set(&DataKey::Balance(recipient), &recipient_after);
+                }
+            }
+            return Ok(());
+        }
+
+        let from_after = from_balance.checked_sub(amount).ok_or(TokenError::ArithmeticOverflow)?;
+        let to_balance = Self::balance(env.clone(), to.clone());
+        let to_credit = if recipient.as_ref() == Some(&to) { amount } else { proceeds };
+        let to_after = to_balance.checked_add(to_credit).ok_or(TokenError::ArithmeticOverflow)?;
+        env.storage().instance().set(&DataKey::Balance(from.clone()), &from_after);
+        env.storage().instance().set(&DataKey::Balance(to.clone()), &to_after);
+        if let Some(recipient) = recipient {
+            if royalty_amount > 0 && recipient != to {
+                let recipient_balance = Self::balance(env.clone(), recipient.clone());
+                let recipient_after = recipient_balance.checked_add(royalty_amount)
+                    .ok_or(TokenError::ArithmeticOverflow)?;
+                env.storage().instance().set(&DataKey::Balance(recipient), &recipient_after);
+            }
+        }
+        Ok(())
+    }
+
+    fn require_admin(env: &Env, admin: &Address) -> Result<(), TokenError> {
+        let configured_admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        if configured_admin != *admin {
+            return Err(TokenError::Unauthorized);
+        }
+        admin.require_auth();
         let to_bal = Self::balance(env.clone(), to.clone());
         env.storage().instance().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
         env.storage().instance().set(&DataKey::Balance(to.clone()), &(to_bal + amount));

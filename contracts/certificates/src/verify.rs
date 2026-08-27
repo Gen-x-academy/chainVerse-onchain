@@ -1,4 +1,5 @@
 use ed25519_dalek::{Signature, VerifyingKey};
+use soroban_sdk::{xdr::ToXdr, Address, Bytes, BytesN, Env};
 use soroban_sdk::{Address, Bytes, BytesN, Env};
 
 use crate::ContractError;
@@ -20,6 +21,8 @@ pub fn verify_backend_proof(
     backend_public_key: &Bytes,
     recipient: &Address,
     course_id: &BytesN<32>,
+    expires_at: u64,
+    nonce: &BytesN<32>,
     nonce: &BytesN<32>,
     expires_at: u64,
     proof: &Bytes,
@@ -29,6 +32,7 @@ pub fn verify_backend_proof(
     let verifying_key =
         VerifyingKey::from_bytes(&public_key).map_err(|_| ContractError::InvalidProof)?;
     let signature = Signature::from_bytes(&signature);
+    let payload = (recipient.clone(), course_id.clone(), expires_at, nonce.clone()).to_xdr(env);
 
     let contract_id = env.current_contract_address();
     let network_id = env.ledger().network_id();

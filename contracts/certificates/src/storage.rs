@@ -19,6 +19,7 @@ pub enum DataKey {
     NextTokenId,
     /// Fix #691: separate minter authorization for mint_certificate
     Minter,
+    ConsumedNonce(BytesN<32>),
     /// Fix #841: nominated pending admin for the two-step admin transfer.
     PendingAdmin,
     /// Fix #841: ledger timestamp at which the pending admin proposal expires.
@@ -109,6 +110,16 @@ pub fn set_backend_pubkey(env: &Env, pubkey: &Bytes) {
 
 pub fn get_backend_pubkey(env: &Env) -> Option<Bytes> {
     env.storage().instance().get(&DataKey::BackendPubKey)
+}
+
+pub fn nonce_consumed(env: &Env, nonce: &BytesN<32>) -> bool {
+    env.storage().persistent().has(&DataKey::ConsumedNonce(nonce.clone()))
+}
+
+pub fn consume_nonce(env: &Env, nonce: &BytesN<32>) {
+    let key = DataKey::ConsumedNonce(nonce.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
 }
 
 /// Fix #628: Returns the next token ID and increments the counter in persistent storage.

@@ -14,13 +14,12 @@ certificate. Certificates cannot be transferred, and a wallet cannot mint the sa
 
 | Function | Parameters | Who can call | Returns |
 |---|---|---|---|
-| `init` | `admin: Address` | `admin` (`require_auth`) — only once | `Result<(), ContractError>` |
+| `init` | `admin: Address, backend_public_key: Bytes, minter: Address` | `admin` (`require_auth`) — only once | `Result<(), ContractError>` |
 | `toggle_pause` | `caller: Address, paused: bool` | admin only (`require_auth` + admin check) | `Result<(), ContractError>` |
 | `is_paused` | — | anyone | `bool` |
-| `mint` | `wallet: Address, course_id: u64, backend_public_key: Bytes, proof: Bytes` | `wallet` (`require_auth`) | `Result<(), ContractError>` |
-| `get_certificate` | `wallet: Address, course_id: u64` | anyone | `Option<Certificate>` |
-| `has_certificate` | `wallet: Address, course_id: u64` | anyone | `bool` |
-| `transfer` | `_from: Address, _to: Address, _course_id: u64` | n/a | `Result<(), ContractError>` — always returns `Err(SoulboundTransferNotAllowed)` |
+| `mint` | `recipient: Address, course_id: BytesN<32>, expires_at: u64, nonce: BytesN<32>, proof: Bytes` | caller supplies a signed proof; rejected when ledger time is `>= expires_at` | `Result<(), ContractError>` |
+| `get_certificate` | `recipient: Address, course_id: BytesN<32>` | anyone | `Option<Certificate>` |
+| `transfer` | `from: Address, to: Address, course_id: BytesN<32>` | n/a | `Result<(), ContractError>` — always returns `Err(SoulboundTransferNotAllowed)` |
 
 ## Storage layout
 
@@ -29,6 +28,9 @@ certificate. Certificates cannot be transferred, and a wallet cannot mint the sa
 | `Admin` | instance | `Address` | none (no `extend_ttl` in crate) |
 | `Paused` | instance | `bool` (defaults to `false` if unset) | none |
 | `Certificate(Address, u64)` | persistent | `Certificate { wallet: Address, course_id: u64, issued_at: u64 }` | none |
+| `ConsumedNonce(BytesN<32>)` | persistent | `bool` | `MIN_TTL` to `MAX_TTL` |
+
+The backend signs the XDR encoding of `(recipient, course_id, expires_at, nonce)`. A nonce is written to persistent storage only after signature and certificate checks pass, then retained with the certificate storage TTL to prevent replay.
 
 ## Events
 
@@ -47,6 +49,8 @@ certificate. Certificates cannot be transferred, and a wallet cannot mint the sa
 | `CertificateExists` | 5 | `mint` called twice for the same wallet + course |
 | `InvalidProof` | 6 | Backend ed25519 signature fails verification |
 | `SoulboundTransferNotAllowed` | 7 | `transfer` called at all — certificates are non-transferable |
+| `ProofExpired` | 9 | `mint` called at or after `expires_at` |
+| `NonceAlreadyConsumed` | 10 | `mint` reuses a nonce with an active replay-protection entry |
 
 ## Testing
 
@@ -71,18 +75,16 @@ export CONTRACT_ID=<id from deploy output>
 
 # Initialize with an admin
 soroban contract invoke --id $CONTRACT_ID --source alice --network local -- \
-  init --admin $ADMIN
+  init --admin $ADMIN --backend_public_key $BACKEND_PUBKEY_HEX --minter $MINTER
 
 # Mint a certificate (proof/backend_public_key are hex-encoded bytes from your backend)
 soroban contract invoke --id $CONTRACT_ID --source wallet --network local -- \
-  mint --wallet $WALLET --course_id 42 \
-  --backend_public_key $BACKEND_PUBKEY_HEX --proof $PROOF_HEX
+  mint --recipient $WALLET --course_id $COURSE_ID \
+  --expires_at $EXPIRES_AT --nonce $NONCE --proof $PROOF_HEX
 
 # Check certificate state
 soroban contract invoke --id $CONTRACT_ID --source alice --network local -- \
-  has_certificate --wallet $WALLET --course_id 42
-soroban contract invoke --id $CONTRACT_ID --source alice --network local -- \
-  get_certificate --wallet $WALLET --course_id 42
+  get_certificate --recipient $WALLET --course_id $COURSE_ID
 
 # Pause / unpause minting (admin only)
 soroban contract invoke --id $CONTRACT_ID --source alice --network local -- \

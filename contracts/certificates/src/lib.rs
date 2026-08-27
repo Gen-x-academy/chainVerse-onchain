@@ -15,6 +15,7 @@ use storage::{MAX_TTL, MIN_TTL};
 #[contractclient(name = "CertificateContractClient")]
 pub trait CertificateInterface {
     fn init(env: Env, admin: Address, backend_public_key: Bytes, minter: Address) -> Result<(), ContractError>;
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, expires_at: u64, nonce: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
     /// Proofs are bound to the recipient, course ID, contract ID, network, nonce,
     /// and expiry before any certificate state is written.
     fn mint(env: Env, recipient: Address, course_id: BytesN<32>, nonce: BytesN<32>, expires_at: u64, proof: Bytes) -> Result<(), ContractError>;
@@ -61,13 +62,22 @@ impl CertificateContract {
         env: Env,
         recipient: Address,
         course_id: BytesN<32>,
+        expires_at: u64,
+        nonce: BytesN<32>,
         nonce: BytesN<32>,
         expires_at: u64,
         proof: Bytes,
     ) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
+        if env.ledger().timestamp() >= expires_at {
+            return Err(ContractError::ProofExpired);
+        }
+        if storage::nonce_consumed(&env, &nonce) {
+            return Err(ContractError::NonceAlreadyConsumed);
+        }
         let pubkey = storage::get_backend_pubkey(&env).ok_or(ContractError::NotInitialized)?;
+        verify::verify_backend_proof(&env, &pubkey, &recipient, &course_id, expires_at, &nonce, &proof)?;
         verify::verify_backend_proof(
             &env,
             &pubkey,
@@ -79,6 +89,7 @@ impl CertificateContract {
         )?;
         let cert_key = (recipient.clone(), course_id.clone());
         if storage::certificate_exists(&env, &cert_key) { return Err(ContractError::CertificateExists); }
+        storage::consume_nonce(&env, &nonce);
         let token_id = storage::next_token_id(&env);
         let cert = Certificate { recipient: recipient.clone(), course_id: course_id.clone(), token_id, soul_bound: true };
         storage::save_certificate(&env, cert_key, &cert);
