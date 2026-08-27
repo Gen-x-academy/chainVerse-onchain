@@ -30,6 +30,8 @@ pub enum StakingError {
     StillLocked = 6,
     NoStake = 7,
     PenaltyTooLow = 8,
+    PenaltyTooHigh = 9,
+    InvalidAmount = 10,
 }
 
 #[contracttype]
@@ -72,6 +74,9 @@ impl StakingContract {
         if emergency_unstake_penalty_bps < MIN_PENALTY_BPS {
             return Err(StakingError::PenaltyTooLow);
         }
+        if emergency_unstake_penalty_bps > 10_000 {
+            return Err(StakingError::PenaltyTooHigh);
+        }
         admin.require_auth();
         let config = StakingConfig { token, admin: admin.clone(), emergency_unstake_penalty_bps };
         env.storage().instance().set(&DataKey::Admin, &admin);
@@ -81,6 +86,7 @@ impl StakingContract {
 
     pub fn stake_tokens(env: Env, user: Address, tier: String, amount: i128) -> Result<(), StakingError> {
         user.require_auth();
+        if amount <= 0 { return Err(StakingError::InvalidAmount); }
         let config: StakingConfig = env.storage().instance().get(&DataKey::Config).ok_or(StakingError::NotInitialized)?;
         let tier_cfg: TierConfig = env.storage().persistent().get(&DataKey::Tier(tier.clone())).ok_or(StakingError::TierNotFound)?;
         if amount < tier_cfg.min_amount { return Err(StakingError::InsufficientBalance); }
@@ -96,11 +102,32 @@ impl StakingContract {
         user.require_auth();
         let config: StakingConfig = env.storage().instance().get(&DataKey::Config).ok_or(StakingError::NotInitialized)?;
         let record: StakeRecord = env.storage().persistent().get(&DataKey::Stake(user.clone())).ok_or(StakingError::NoStake)?;
-        let penalty = record.amount * config.emergency_unstake_penalty_bps as i128 / 10_000;
-        let payout = record.amount - penalty;
+        let penalty_bps = config.emergency_unstake_penalty_bps.min(10_000);
+        let penalty = record.amount * penalty_bps as i128 / 10_000;
+        let payout = (record.amount - penalty).max(0);
         env.storage().persistent().remove(&DataKey::Stake(user.clone()));
+        let total: i128 = env.storage().instance().get(&DataKey::TotalStaked).unwrap_or(0);
+        let new_total = total.checked_sub(record.amount).ok_or(StakingError::InsufficientBalance)?;
+        env.storage().instance().set(&DataKey::TotalStaked, &new_total);
         token::Client::new(&env, &config.token).transfer(&env.current_contract_address(), &user, &payout);
         Ok(payout)
+    }
+
+    pub fn unstake(env: Env, user: Address) -> Result<i128, StakingError> {
+        user.require_auth();
+        let config: StakingConfig = env.storage().instance().get(&DataKey::Config).ok_or(StakingError::NotInitialized)?;
+        let record: StakeRecord = env.storage().persistent().get(&DataKey::Stake(user.clone())).ok_or(StakingError::NoStake)?;
+        let tier_cfg: TierConfig = env.storage().persistent().get(&DataKey::Tier(record.tier.clone())).ok_or(StakingError::TierNotFound)?;
+        let now = env.ledger().timestamp();
+        if now < record.staked_at + tier_cfg.lock_period {
+            return Err(StakingError::StillLocked);
+        }
+        env.storage().persistent().remove(&DataKey::Stake(user.clone()));
+        let total: i128 = env.storage().instance().get(&DataKey::TotalStaked).unwrap_or(0);
+        let new_total = total.checked_sub(record.amount).ok_or(StakingError::InsufficientBalance)?;
+        env.storage().instance().set(&DataKey::TotalStaked, &new_total);
+        token::Client::new(&env, &config.token).transfer(&env.current_contract_address(), &user, &record.amount);
+        Ok(record.amount)
     }
 
     /// Admin-only: upgrade the current contract to `new_wasm_hash`.
