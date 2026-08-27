@@ -12,4 +12,6 @@ pub enum ContractError {
     InvalidProof = 6,
     SoulboundTransferNotAllowed = 7,
     CertificateNotFound = 8,
+    ProofExpired = 9,
+    NonceAlreadyConsumed = 10,
 }

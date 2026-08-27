@@ -15,7 +15,7 @@ use storage::{MAX_TTL, MIN_TTL};
 #[contractclient(name = "CertificateContractClient")]
 pub trait CertificateInterface {
     fn init(env: Env, admin: Address, backend_public_key: Bytes, minter: Address) -> Result<(), ContractError>;
-    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, expires_at: u64, nonce: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
     fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError>;
     fn transfer(env: Env, from: Address, to: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
     fn revoke(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
@@ -51,13 +51,27 @@ impl CertificateContract {
 
     pub fn is_paused(env: Env) -> bool { storage::get_paused(&env) }
 
-    pub fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError> {
+    pub fn mint(
+        env: Env,
+        recipient: Address,
+        course_id: BytesN<32>,
+        expires_at: u64,
+        nonce: BytesN<32>,
+        proof: Bytes,
+    ) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
+        if env.ledger().timestamp() >= expires_at {
+            return Err(ContractError::ProofExpired);
+        }
+        if storage::nonce_consumed(&env, &nonce) {
+            return Err(ContractError::NonceAlreadyConsumed);
+        }
         let pubkey = storage::get_backend_pubkey(&env).ok_or(ContractError::NotInitialized)?;
-        verify::verify_backend_proof(&env, &pubkey, &course_id.clone().into(), &proof)?;
+        verify::verify_backend_proof(&env, &pubkey, &recipient, &course_id, expires_at, &nonce, &proof)?;
         let cert_key = (recipient.clone(), course_id.clone());
         if storage::certificate_exists(&env, &cert_key) { return Err(ContractError::CertificateExists); }
+        storage::consume_nonce(&env, &nonce);
         let token_id = storage::next_token_id(&env);
         let cert = Certificate { recipient: recipient.clone(), course_id: course_id.clone(), token_id, soul_bound: true };
         storage::save_certificate(&env, cert_key, &cert);

@@ -33,3 +33,13 @@ This document describes all smart contracts in the ChainVerse monorepo and how t
 1. User calls `staking::stake_tokens` with a tier and amount
 2. After lock period, user calls `staking::unstake`
 3. Emergency unstake before lock period applies a penalty
+
+### Token Royalties
+1. The initializer becomes the token admin.
+2. The admin calls `token::set_royalty(admin, recipient, bps)` to configure a royalty from 0 to 10,000 basis points.
+3. `transfer` and `transfer_from` credit the recipient with the royalty and the destination with the net amount.
+
+The royalty configuration is stored on the token contract and is included in the public ABI as `set_royalty` and `royalty`. Existing deployments do not have an admin or royalty configuration; deploy a new token instance or migrate balances before enabling this behavior.
+
+### Token Administration
+The initializer is the initial admin. Admin changes use `propose_admin(current_admin, new_admin)` followed by `accept_admin(new_admin)`, which must be authorized by the proposed address. The admin can call `pause` and `unpause`; while paused, `transfer` and `transfer_from` reject balance mutations. The admin-only `upgrade(admin, new_wasm_hash)` entrypoint updates the current contract WASM after authorization.

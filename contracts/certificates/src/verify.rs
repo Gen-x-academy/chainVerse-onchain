@@ -1,9 +1,9 @@
 use ed25519_dalek::{Signature, VerifyingKey};
-use soroban_sdk::{Bytes, Env};
+use soroban_sdk::{xdr::ToXdr, Address, Bytes, BytesN, Env};
 
 use crate::ContractError;
 
-const MAX_PAYLOAD_LEN: usize = 128;
+const MAX_PAYLOAD_LEN: usize = 256;
 
 fn to_fixed_bytes<const N: usize>(value: &Bytes) -> Result<[u8; N], ContractError> {
     if value.len() != N as u32 {
@@ -16,9 +16,12 @@ fn to_fixed_bytes<const N: usize>(value: &Bytes) -> Result<[u8; N], ContractErro
 }
 
 pub fn verify_backend_proof(
-    _env: &Env,
+    env: &Env,
     backend_public_key: &Bytes,
-    payload: &Bytes,
+    recipient: &Address,
+    course_id: &BytesN<32>,
+    expires_at: u64,
+    nonce: &BytesN<32>,
     proof: &Bytes,
 ) -> Result<(), ContractError> {
     let public_key = to_fixed_bytes::<32>(backend_public_key)?;
@@ -26,6 +29,7 @@ pub fn verify_backend_proof(
     let verifying_key =
         VerifyingKey::from_bytes(&public_key).map_err(|_| ContractError::InvalidProof)?;
     let signature = Signature::from_bytes(&signature);
+    let payload = (recipient.clone(), course_id.clone(), expires_at, nonce.clone()).to_xdr(env);
     let payload_len = payload.len() as usize;
     if payload_len > MAX_PAYLOAD_LEN {
         return Err(ContractError::InvalidProof);
