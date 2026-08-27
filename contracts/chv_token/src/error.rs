@@ -14,4 +14,6 @@ pub enum TokenError {
     NoPendingAdmin = 7,
     AccountFrozen = 8,
     InsufficientAllowance = 9,
+    InvalidExpiry = 10,
+    AdminTransferExpired = 11,
 }

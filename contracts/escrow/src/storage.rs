@@ -12,6 +12,7 @@ pub const DEFAULT_PROTOCOL_FEE_BPS: u32 = 100;
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Arbiter,
     Escrow(u64),
     EscrowCount,
     TotalVolume,
@@ -30,6 +31,14 @@ pub fn get_admin(env: &Env) -> Option<Address> {
 
 pub fn set_admin(env: &Env, admin: &Address) {
     env.storage().instance().set(&DataKey::Admin, admin);
+}
+
+pub fn get_arbiter(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Arbiter)
+}
+
+pub fn set_arbiter(env: &Env, arbiter: &Address) {
+    env.storage().instance().set(&DataKey::Arbiter, arbiter);
 }
 
 pub fn is_paused(env: &Env) -> bool {
@@ -216,6 +225,7 @@ mod tests {
             seller: Address::generate(env),
             token: Address::generate(env),
             amount: 1_000,
+            original_amount: 1_000,
             status: EscrowStatus::Funded,
             expiration: 9999,
         }
