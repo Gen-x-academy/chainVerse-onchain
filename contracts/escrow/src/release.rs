@@ -39,6 +39,7 @@ fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<()
 }
 
 /// Releases the full remaining balance of a funded escrow to the seller.
+/// Requires the escrow to be in `Funded` state (#859).
 /// Requires the escrow to be in `Funded` or `Disputed` state (#708).
 /// Guard order: authorization, expiry, state guard, fee, transfer, accounting.
 pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
@@ -56,6 +57,10 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
     if escrow.status == EscrowStatus::Completed {
         return Err(EscrowError::AlreadyReleased);
     }
+
+    // #859: guard — only Funded escrows may be released. Disputed escrows are
+    // blocked until the dispute is resolved (release requires a Funded state).
+    if escrow.status != EscrowStatus::Funded {
     if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
         return Err(EscrowError::InvalidEscrowState);
     }
@@ -101,7 +106,7 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
 }
 
 /// Releases a portion of the locked funds to the seller. Remaining amount stays locked.
-/// Requires the escrow to be in `Funded` or `Disputed` state (#708).
+/// Requires the escrow to be in `Funded` state (#859).
 pub fn partial_release(
     env: &Env,
     caller: Address,
@@ -118,8 +123,9 @@ pub fn partial_release(
         return Err(EscrowError::AlreadyReleased);
     }
 
-    // #708: guard — only Funded or Disputed escrows may be partially released.
-    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
+    // #859: guard — only Funded escrows may be partially released. Disputed
+    // escrows are blocked until the dispute is resolved.
+    if escrow.status != EscrowStatus::Funded {
         return Err(EscrowError::InvalidEscrowState);
     }
 
