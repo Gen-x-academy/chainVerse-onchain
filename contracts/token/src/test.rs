@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::{Address as _}, Address, Env};
+use soroban_sdk::{
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    Address, Env, IntoVal,
+};
 
 fn setup_contract(env: &Env) -> (Address, Address, Address) {
     let contract_id = env.register_contract(None, TokenContract);
@@ -75,4 +78,120 @@ fn test_mint_attempt_after_deployment_fails() {
 
     // Attempt to re-initialize (simulate mint attempt)
     client.initialize(&admin, &5000);
+}
+
+#[test]
+fn test_generated_client_transfer_and_allowance_flow_with_explicit_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, TokenContract);
+    let client = TokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin, 1000_i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.initialize(&admin, &1000);
+
+    let transfer_amount = 300_i128;
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "transfer",
+            args: (&admin, &recipient, transfer_amount).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.transfer(&admin, &recipient, &transfer_amount);
+    assert_eq!(client.balance(&admin), 700);
+    assert_eq!(client.balance(&recipient), 300);
+
+    let approval_amount = 200_i128;
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "approve",
+            args: (&admin, &spender, approval_amount, Option::<u64>::None).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.approve(&admin, &spender, &approval_amount, &None);
+    assert_eq!(client.allowance(&admin, &spender), approval_amount);
+
+    let spent = 125_i128;
+    env.mock_auths(&[MockAuth {
+        address: &spender,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "transfer_from",
+            args: (&spender, &admin, &owner, spent).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.transfer_from(&spender, &admin, &owner, &spent);
+
+    assert_eq!(client.allowance(&admin, &spender), 75);
+    assert_eq!(client.balance(&admin), 575);
+    assert_eq!(client.balance(&owner), 125);
+}
+
+#[test]
+fn test_generated_client_approval_flow_without_blanket_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, TokenContract);
+    let client = TokenContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let transfer_to = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "initialize",
+            args: (&admin, 1000_i128).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.initialize(&admin, &1000);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "approve",
+            args: (&admin, &spender, 250_i128, Option::<u64>::None).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.approve(&admin, &spender, &250, &None);
+
+    let result = client.try_transfer_from(&spender, &admin, &transfer_to, &250);
+    assert!(result.is_ok());
+    assert_eq!(client.allowance(&admin, &spender), 0);
+    assert_eq!(client.balance(&transfer_to), 250);
+
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "revoke_allowance",
+            args: (&admin, &spender).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.revoke_allowance(&admin, &spender);
+    assert_eq!(client.allowance(&admin, &spender), 0);
 }
