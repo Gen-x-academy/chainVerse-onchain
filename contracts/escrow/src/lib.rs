@@ -15,7 +15,9 @@ mod version;
 pub use errors::EscrowError;
 pub use types::{Escrow, EscrowStatus, FeeRecord};
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    contract, contractimpl, token::Client as TokenClient, Address, BytesN, Env, Vec,
+};
 
 #[contract]
 pub struct EscrowContract;
@@ -96,6 +98,11 @@ impl EscrowContract {
         storage::get_buyer_index(&env, &buyer)
     }
 
+    /// Returns escrow IDs indexed by seller.
+    pub fn get_by_seller_index(env: Env, seller: Address) -> Vec<u64> {
+        storage::get_seller_index(&env, &seller)
+    }
+
     /// Sets the protocol fee in basis points. Hard-capped at 5000 bps (50%).
     pub fn set_protocol_fee_bps(env: Env, admin: Address, bps: u32) -> Result<(), EscrowError> {
         const MAX_FEE_BPS: u32 = 5_000;
@@ -104,6 +111,39 @@ impl EscrowContract {
             return Err(EscrowError::Unauthorized);
         }
         storage::set_protocol_fee_bps(&env, bps);
+        Ok(())
+    }
+
+    /// Returns the accumulated protocol fees accrued for `token`.
+    pub fn get_protocol_fee(env: Env, token: Address) -> i128 {
+        storage::get_protocol_fee(&env, &token)
+    }
+
+    /// Admin-only: withdraw accumulated protocol fees for `token` to `recipient`.
+    /// Only the accrued fee pool is touched — principal escrow (locked) funds
+    /// are never moved by a fee withdrawal (#860).
+    pub fn withdraw_fees(
+        env: Env,
+        caller: Address,
+        token: Address,
+        recipient: Address,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        storage::require_admin_addr(&env, &caller)?;
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        let accrued = storage::get_protocol_fee(&env, &token);
+        if amount > accrued {
+            return Err(EscrowError::NoFeesAvailable);
+        }
+        TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &recipient,
+            &amount,
+        );
+        storage::decrement_protocol_fee(&env, &token, amount);
+        events::fee_withdrawn(&env, &recipient, &token, amount);
         Ok(())
     }
 

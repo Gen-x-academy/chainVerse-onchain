@@ -19,6 +19,7 @@ pub enum DataKey {
     ProtocolFees(Address),
     TokenIndex(Address),
     BuyerIndex(Address),
+    SellerIndex(Address),
     FeeHistory,
     ProtocolFeeBps,
     Paused,
@@ -143,6 +144,22 @@ pub fn clear_protocol_fee(env: &Env, token: &Address) {
         .set(&DataKey::ProtocolFees(token.clone()), &0_i128);
 }
 
+/// Decrements the accumulated protocol fee liability for `token` by `fee`.
+/// Returns the remaining accumulated balance after the decrement. This must
+/// never go negative: withdrawing more than accrued fees would make the fee
+/// pool insolvent, so the caller validates the amount before calling.
+pub fn decrement_protocol_fee(env: &Env, token: &Address, fee: i128) -> i128 {
+    let key = DataKey::ProtocolFees(token.clone());
+    let current: i128 = env.storage().instance().get(&key).unwrap_or(0);
+    if current < fee {
+        // Liability solvency: never allow accumulated fees to go negative.
+        panic!("ProtocolEscrowError: fee withdrawal exceeds accrued fees");
+    }
+    let remaining = current - fee;
+    env.storage().instance().set(&key, &remaining);
+    remaining
+}
+
 pub fn append_to_token_index(env: &Env, token: &Address, escrow_id: u64) {
     let key = DataKey::TokenIndex(token.clone());
     let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(vec![env]);
@@ -170,6 +187,21 @@ pub fn get_buyer_index(env: &Env, buyer: &Address) -> Vec<u64> {
     env.storage()
         .persistent()
         .get(&DataKey::BuyerIndex(buyer.clone()))
+        .unwrap_or(vec![env])
+}
+
+pub fn append_to_seller_index(env: &Env, seller: &Address, escrow_id: u64) {
+    let key = DataKey::SellerIndex(seller.clone());
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or(vec![env]);
+    ids.push_back(escrow_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, MIN_TTL, MAX_TTL);
+}
+
+pub fn get_seller_index(env: &Env, seller: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SellerIndex(seller.clone()))
         .unwrap_or(vec![env])
 }
 

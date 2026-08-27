@@ -4,7 +4,7 @@ use crate::types::EscrowStatus;
 use soroban_sdk::{Address, Env};
 
 /// Opens a dispute on a funded escrow. Only the buyer may dispute, and
-/// only while the escrow is `Pending` — a released or cancelled escrow can
+/// only while the escrow is `Funded` — a released or cancelled escrow can
 /// no longer be disputed, preventing post-settlement state corruption.
 pub fn dispute(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
     caller.require_auth();
