@@ -19,6 +19,7 @@ pub enum DataKey {
     Initialized,
     TotalMinted,
     PendingAdmin,
+    PendingAdminExpiry,
     Allowance(Address, Address),
     Frozen(Address),
 }
@@ -95,7 +96,8 @@ impl CHVToken {
             return Err(TokenError::InvalidAmount);
         }
         owner.require_auth();
-        env.storage().persistent().set(&DataKey::Allowance(owner, spender), &amount);
+        env.storage().persistent().set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
+        events::emit_approval(&env, &owner, &spender, amount);
         Ok(())
     }
 
@@ -136,6 +138,7 @@ impl CHVToken {
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+        events::emit_allowance_decrement(&env, &from, &spender, amount, allow);
         events::emit_transfer(&env, &from, &to, amount);
         Ok(())
     }
@@ -143,7 +146,10 @@ impl CHVToken {
     /// Revoke a previously set allowance.
     pub fn revoke_allowance(env: Env, owner: Address, spender: Address) -> Result<(), TokenError> {
         owner.require_auth();
-        env.storage().persistent().remove(&DataKey::Allowance(owner, spender));
+        let amount: i128 = env.storage().persistent()
+            .get(&DataKey::Allowance(owner.clone(), spender.clone())).unwrap_or(0);
+        env.storage().persistent().remove(&DataKey::Allowance(owner.clone(), spender.clone()));
+        events::emit_allowance_revocation(&env, &owner, &spender, amount);
         Ok(())
     }
 
@@ -195,14 +201,21 @@ impl CHVToken {
         env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0)
     }
 
-    /// #635 — Step 1: current admin proposes a new admin. Does not transfer immediately.
-    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), TokenError> {
+    /// #635 — Step 1: current admin proposes a new admin until `expires_at`.
+    pub fn propose_admin(
+        env: Env,
+        current_admin: Address,
+        new_admin: Address,
+        expires_at: u64,
+    ) -> Result<(), TokenError> {
         let stored: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(TokenError::Unauthorized)?;
         if stored != current_admin { return Err(TokenError::Unauthorized); }
+        if expires_at <= env.ledger().timestamp() { return Err(TokenError::InvalidExpiry); }
         current_admin.require_auth();
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
-        env.events().publish((symbol_short!("ADM_PROP"),), (current_admin, new_admin));
+        env.storage().instance().set(&DataKey::PendingAdminExpiry, &expires_at);
+        env.events().publish((symbol_short!("ADM_PROP"),), (current_admin, new_admin, expires_at));
         Ok(())
     }
 
@@ -211,10 +224,28 @@ impl CHVToken {
         let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
             .ok_or(TokenError::NoPendingAdmin)?;
         if pending != new_admin { return Err(TokenError::Unauthorized); }
+        let expires_at: u64 = env.storage().instance().get(&DataKey::PendingAdminExpiry)
+            .ok_or(TokenError::NoPendingAdmin)?;
+        if env.ledger().timestamp() >= expires_at { return Err(TokenError::AdminTransferExpired); }
         new_admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &new_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage().instance().remove(&DataKey::PendingAdminExpiry);
         env.events().publish((symbol_short!("ADM_NEW"),), (new_admin,));
+        Ok(())
+    }
+
+    /// The current admin cancels the pending admin proposal.
+    pub fn cancel_admin(env: Env, current_admin: Address) -> Result<(), TokenError> {
+        let stored: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::Unauthorized)?;
+        if stored != current_admin { return Err(TokenError::Unauthorized); }
+        current_admin.require_auth();
+        let pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)
+            .ok_or(TokenError::NoPendingAdmin)?;
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage().instance().remove(&DataKey::PendingAdminExpiry);
+        env.events().publish((symbol_short!("ADM_CANC"),), (current_admin, pending));
         Ok(())
     }
 
