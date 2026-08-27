@@ -11,6 +11,9 @@ const DECIMALS: u32 = 7;
 const MAX_SUPPLY: i128 = 1_000_000_000 * 10_i128.pow(DECIMALS);
 const BALANCE_MIN_TTL: u32 = 100_000;
 const BALANCE_MAX_TTL: u32 = 200_000;
+const ALLOWANCE_MIN_TTL: u32 = 100_000;
+const ALLOWANCE_MAX_TTL: u32 = 200_000;
+const CURRENT_STORAGE_VERSION: u32 = 1;
 
 #[contracttype]
 pub enum DataKey {
@@ -18,6 +21,8 @@ pub enum DataKey {
     Balance(Address),
     Initialized,
     TotalMinted,
+    CirculatingSupply,
+    StorageVersion,
     PendingAdmin,
     Allowance(Address, Address),
     Frozen(Address),
@@ -38,6 +43,8 @@ impl CHVToken {
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&(DataKey::Balance(treasury.clone())), &initial_supply);
         env.storage().instance().set(&DataKey::TotalMinted, &initial_supply);
+        env.storage().instance().set(&DataKey::CirculatingSupply, &initial_supply);
+        env.storage().instance().set(&DataKey::StorageVersion, &CURRENT_STORAGE_VERSION);
         env.events().publish((symbol_short!("INIT"),), (admin, treasury, initial_supply));
         Ok(())
     }
@@ -51,14 +58,17 @@ impl CHVToken {
             .ok_or(TokenError::NotInitialized)?;
         admin.require_auth();
         let total_minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
-        if total_minted + amount > MAX_SUPPLY {
+        if total_minted > MAX_SUPPLY || amount > MAX_SUPPLY - total_minted {
             return Err(TokenError::SupplyCapExceeded);
         }
+        let circulating_supply: i128 = env.storage().instance()
+            .get(&DataKey::CirculatingSupply).unwrap_or(total_minted);
         let balance: i128 = env.storage().persistent()
             .get(&DataKey::Balance(to.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().instance().set(&DataKey::TotalMinted, &(total_minted + amount));
+        env.storage().instance().set(&DataKey::CirculatingSupply, &(circulating_supply + amount));
         events::emit_mint(&env, &to, amount);
         Ok(())
     }
@@ -95,13 +105,20 @@ impl CHVToken {
             return Err(TokenError::InvalidAmount);
         }
         owner.require_auth();
-        env.storage().persistent().set(&DataKey::Allowance(owner, spender), &amount);
+        let key = DataKey::Allowance(owner, spender);
+        env.storage().persistent().set(&key, &amount);
+        env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
         Ok(())
     }
 
     /// Returns remaining allowance for `spender` on `owner`.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
-        env.storage().persistent().get(&DataKey::Allowance(owner, spender)).unwrap_or(0)
+        let key = DataKey::Allowance(owner, spender);
+        let allowance = env.storage().persistent().get(&key);
+        if allowance.is_some() {
+            env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
+        }
+        allowance.unwrap_or(0)
     }
 
     /// Transfer tokens using allowance. `spender` does not need auth; allowance is checked and decremented.
@@ -125,7 +142,9 @@ impl CHVToken {
         if allow == 0 {
             env.storage().persistent().remove(&DataKey::Allowance(from.clone(), spender.clone()));
         } else {
-            env.storage().persistent().set(&DataKey::Allowance(from.clone(), spender.clone()), &allow);
+            let key = DataKey::Allowance(from.clone(), spender.clone());
+            env.storage().persistent().set(&key, &allow);
+            env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
         }
         let from_bal = env.storage().persistent().get(&DataKey::Balance(from.clone())).unwrap_or(0);
         if from_bal < amount {
@@ -182,7 +201,11 @@ impl CHVToken {
         if bal < amount {
             return Err(TokenError::InsufficientBalance);
         }
+        let total_minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
+        let circulating_supply: i128 = env.storage().instance()
+            .get(&DataKey::CirculatingSupply).unwrap_or(total_minted);
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &(bal - amount));
+        env.storage().instance().set(&DataKey::CirculatingSupply, &(circulating_supply - amount));
         events::emit_burn(&env, &from, amount);
         Ok(())
     }
@@ -193,6 +216,49 @@ impl CHVToken {
 
     pub fn total_minted(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0)
+    }
+
+    /// Returns the current token supply after burns.
+    pub fn circulating_supply(env: Env) -> i128 {
+        let total_minted: i128 = env.storage().instance().get(&DataKey::TotalMinted).unwrap_or(0);
+        env.storage().instance().get(&DataKey::CirculatingSupply).unwrap_or(total_minted)
+    }
+
+    /// Returns the storage schema version, treating unversioned legacy storage as version zero.
+    pub fn storage_version(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::StorageVersion).unwrap_or(0)
+    }
+
+    /// Initializes or confirms the storage schema version after a contract upgrade.
+    pub fn migrate(
+        env: Env,
+        admin: Address,
+        source_version: u32,
+        circulating_supply: i128,
+    ) -> Result<(), TokenError> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(TokenError::NotInitialized)?;
+        if stored_admin != admin {
+            return Err(TokenError::Unauthorized);
+        }
+        admin.require_auth();
+
+        let current_version = Self::storage_version(env.clone());
+        if source_version != current_version {
+            return Err(TokenError::UnsupportedStorageVersion);
+        }
+        if current_version == CURRENT_STORAGE_VERSION {
+            if circulating_supply != Self::circulating_supply(env) {
+                return Err(TokenError::InvalidMigration);
+            }
+            return Ok(());
+        }
+        if circulating_supply < 0 || circulating_supply > Self::total_minted(env.clone()) {
+            return Err(TokenError::InvalidMigration);
+        }
+        env.storage().instance().set(&DataKey::CirculatingSupply, &circulating_supply);
+        env.storage().instance().set(&DataKey::StorageVersion, &CURRENT_STORAGE_VERSION);
+        Ok(())
     }
 
     /// #635 — Step 1: current admin proposes a new admin. Does not transfer immediately.
@@ -226,6 +292,10 @@ impl CHVToken {
             return Err(TokenError::Unauthorized);
         }
         admin.require_auth();
+        let source_version = Self::storage_version(env.clone());
+        if source_version != 0 && source_version != CURRENT_STORAGE_VERSION {
+            return Err(TokenError::UnsupportedStorageVersion);
+        }
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         env.events().publish((symbol_short!("upgraded"),), new_wasm_hash);
         Ok(())
