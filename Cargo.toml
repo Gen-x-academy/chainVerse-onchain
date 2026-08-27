@@ -16,6 +16,7 @@ members = [
     "contracts/common",
     "contracts/staking",
     "contracts/token",
+    "contracts/library_licensing",
 ]
 
 [workspace.dependencies]
