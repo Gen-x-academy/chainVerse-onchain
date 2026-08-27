@@ -20,28 +20,32 @@ fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<()
 
 /// Releases the full remaining balance of a funded escrow to the seller.
 /// Requires the escrow to be in `Funded` or `Disputed` state (#708).
+/// Guard order: authorization, expiry, state guard, fee, transfer, accounting.
 pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
     let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
 
-    if escrow.status == EscrowStatus::Completed {
-        return Err(EscrowError::AlreadyReleased);
-    }
-
-    // #708: guard — only Funded or Disputed escrows may be released.
-    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
-        return Err(EscrowError::InvalidEscrowState);
-    }
-
+    // 1. Authorization — buyer or admin.
     authorize_releaser(env, &caller, &escrow.buyer)?;
 
+    // 2. Expiry — an escrow that has reached its deadline cannot be released.
     if env.ledger().timestamp() >= escrow.expiration {
         return Err(EscrowError::Expired);
     }
 
+    // 3. State guard — only Funded or Disputed escrows may be released.
+    if escrow.status == EscrowStatus::Completed {
+        return Err(EscrowError::AlreadyReleased);
+    }
+    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
+        return Err(EscrowError::InvalidEscrowState);
+    }
+
+    // 4. Fee calculation.
     let fee_bps = get_protocol_fee_bps(env) as i128;
     let fee_amount = escrow.amount * fee_bps / 10_000;
     let seller_amount = escrow.amount - fee_amount;
 
+    // 5. Token transfer to the seller.
     let token_client = TokenClient::new(env, &escrow.token);
     token_client.transfer(
         &env.current_contract_address(),
@@ -49,6 +53,7 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         &seller_amount,
     );
 
+    // 6. Final accounting.
     accumulate_protocol_fee(env, &escrow.token, fee_amount);
 
     let record = FeeRecord {
