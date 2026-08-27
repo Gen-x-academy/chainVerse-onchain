@@ -5,6 +5,8 @@ use crate::{Certificate, ContractError};
 // ~1 year expressed in ledger entries (5-second close time)
 pub const MIN_TTL: u32 = 3_110_400;
 pub const MAX_TTL: u32 = 6_220_800;
+// Fix #841: bounded validity window for a pending admin transfer (~30 days, 5s/entry).
+pub const ADMIN_TRANSFER_TTL: u64 = 518_400;
 
 #[contracttype]
 #[derive(Clone)]
@@ -17,6 +19,28 @@ pub enum DataKey {
     NextTokenId,
     /// Fix #691: separate minter authorization for mint_certificate
     Minter,
+    /// Fix #841: nominated pending admin for the two-step admin transfer.
+    PendingAdmin,
+    /// Fix #841: ledger timestamp at which the pending admin proposal expires.
+    PendingAdminExpiry,
+}
+
+pub fn get_pending_admin(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::PendingAdmin)
+}
+
+pub fn set_pending_admin(env: &Env, new_admin: &Address, expiry: u64) {
+    env.storage().instance().set(&DataKey::PendingAdmin, new_admin);
+    env.storage().instance().set(&DataKey::PendingAdminExpiry, &expiry);
+}
+
+pub fn clear_pending_admin(env: &Env) {
+    env.storage().instance().remove(&DataKey::PendingAdmin);
+    env.storage().instance().remove(&DataKey::PendingAdminExpiry);
+}
+
+pub fn get_pending_admin_expiry(env: &Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::PendingAdminExpiry)
 }
 
 pub fn get_admin(env: &Env) -> Option<Address> {
