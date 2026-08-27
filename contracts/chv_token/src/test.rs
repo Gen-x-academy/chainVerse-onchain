@@ -19,7 +19,7 @@ fn test_initialize_sets_admin() {
     client.initialize(&admin, &treasury);
 
     let new_admin = Address::generate(&env);
-    assert!(client.try_propose_admin(&admin, &new_admin).is_ok());
+    assert!(client.try_propose_admin(&admin, &new_admin, &(env.ledger().timestamp() + 86_400)).is_ok());
 }
 
 #[test]
@@ -118,6 +118,61 @@ fn test_transfer_from_exceeds_allowance_fails() {
 }
 
 #[test]
+fn test_allowance_state_changes_emit_events() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.mint(&admin, &owner, &1_000_i128);
+
+    let before_approval = env.events().all().len();
+    client.approve(&owner, &spender, &600_i128);
+    assert_eq!(client.allowance(&owner, &spender), 600_i128);
+    assert_eq!(env.events().all().len(), before_approval + 1);
+
+    let before_decrement = env.events().all().len();
+    client.transfer_from(&spender, &owner, &recipient, &250_i128);
+    assert_eq!(client.allowance(&owner, &spender), 350_i128);
+    assert_eq!(env.events().all().len(), before_decrement + 2);
+
+    let before_revocation = env.events().all().len();
+    client.revoke_allowance(&owner, &spender);
+    assert_eq!(client.allowance(&owner, &spender), 0_i128);
+    assert_eq!(env.events().all().len(), before_revocation + 1);
+}
+
+#[test]
+fn test_failed_allowance_changes_emit_no_events() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.mint(&admin, &owner, &100_i128);
+    client.approve(&owner, &spender, &50_i128);
+
+    let before_invalid_approval = env.events().all().len();
+    assert_eq!(
+        client.try_approve(&owner, &spender, &-1_i128),
+        Err(Ok(TokenError::InvalidAmount))
+    );
+    assert_eq!(env.events().all().len(), before_invalid_approval);
+
+    let before_excessive_transfer = env.events().all().len();
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &51_i128),
+        Err(Ok(TokenError::InsufficientAllowance))
+    );
+    assert_eq!(env.events().all().len(), before_excessive_transfer);
+    assert_eq!(client.allowance(&owner, &spender), 50_i128);
+}
+
+#[test]
 fn test_burn_reduces_supply() {
     let (env, contract_id, admin, treasury) = setup();
     let client = CHVTokenClient::new(&env, &contract_id);
@@ -166,7 +221,7 @@ fn test_two_step_admin_transfer() {
 
     let new_admin = Address::generate(&env);
 
-    client.propose_admin(&admin, &new_admin);
+    client.propose_admin(&admin, &new_admin, &(env.ledger().timestamp() + 86_400));
     client.accept_admin(&new_admin);
 
     let recipient = Address::generate(&env);
