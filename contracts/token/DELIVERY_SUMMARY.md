@@ -247,6 +247,14 @@ Layer 1: ROLE-BASED ACCESS CONTROL
 
 ## 🚀 Deployment Status
 
+## Balance Storage Migration
+
+Balances are stored in persistent storage and renewed to the configured balance TTL on reads and writes. Existing deployments that stored balances in instance storage must call `migrate_balances(admin, holders)` after upgrading the contract. The admin must provide every address that has held a balance; the migration copies each legacy balance into persistent storage and is safe to rerun for a holder.
+
+The migration does not alter the public token transfer, allowance, or event interfaces. Deployment operators should obtain the complete holder list from their ledger/indexer records before upgrading, upgrade the WASM, and then submit the migration call. Any holder omitted from the list will read as zero after the upgrade.
+
+All token amounts for initialization, approvals, and transfers must be positive and no greater than `MAX_SUPPLY`. Transfers to the same source and destination are rejected and emit no transfer event.
+
 ### ✅ Ready for Testnet
 - Code complete and fully tested
 - All acceptance criteria met
