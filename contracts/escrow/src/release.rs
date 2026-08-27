@@ -1,11 +1,31 @@
 use crate::errors::EscrowError;
-use crate::events::{escrow_released, fee_collected};
+use crate::events::{escrow_released, fee_collected, partial_released};
 use crate::storage::{
     accumulate_protocol_fee, append_fee_record, get_admin, get_protocol_fee_bps, load_escrow,
     save_escrow,
 };
 use crate::types::{EscrowStatus, FeeRecord};
 use soroban_sdk::{token::Client as TokenClient, Address, Env};
+
+/// Computes the protocol fee and the net payout for a released amount using
+/// checked arithmetic and consistent truncation (#861).
+///
+/// `fee = amount * fee_bps / 10_000` truncated to whole tokens; the payout is
+/// `amount - fee`, which is always non-negative for `fee_bps <= 10_000`.
+fn compute_fee_and_payout(amount: i128, fee_bps: u32) -> Result<(i128, i128), EscrowError> {
+    if amount < 0 {
+        return Err(EscrowError::InvalidAmount);
+    }
+    let amount_u = amount as u128;
+    let fee_u = (amount_u as u128)
+        .checked_mul(fee_bps as u128)
+        .and_then(|v| v.checked_div(10_000))
+        .ok_or(EscrowError::InvalidAmount)?;
+    let payout_u = amount_u
+        .checked_sub(fee_u)
+        .ok_or(EscrowError::InvalidAmount)?;
+    Ok((fee_u as i128, payout_u as i128))
+}
 
 fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<(), EscrowError> {
     caller.require_auth();
@@ -38,9 +58,8 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::Expired);
     }
 
-    let fee_bps = get_protocol_fee_bps(env) as i128;
-    let fee_amount = escrow.amount * fee_bps / 10_000;
-    let seller_amount = escrow.amount - fee_amount;
+    let fee_bps = get_protocol_fee_bps(env);
+    let (fee_amount, seller_amount) = compute_fee_and_payout(escrow.amount, fee_bps)?;
 
     let token_client = TokenClient::new(env, &escrow.token);
     token_client.transfer(
@@ -100,9 +119,8 @@ pub fn partial_release(
         return Err(EscrowError::InvalidAmount);
     }
 
-    let fee_bps = get_protocol_fee_bps(env) as i128;
-    let fee_amount = release_amount * fee_bps / 10_000;
-    let seller_amount = release_amount - fee_amount;
+    let fee_bps = get_protocol_fee_bps(env);
+    let (fee_amount, seller_amount) = compute_fee_and_payout(release_amount, fee_bps)?;
 
     let token_client = TokenClient::new(env, &escrow.token);
     token_client.transfer(
@@ -128,6 +146,14 @@ pub fn partial_release(
     }
     save_escrow(env, escrow_id, &escrow);
     escrow_released(env, escrow_id, &escrow.seller, seller_amount);
+    partial_released(
+        env,
+        escrow_id,
+        &caller,
+        &escrow.token,
+        release_amount,
+        &escrow.status,
+    );
     Ok(())
 }
 
