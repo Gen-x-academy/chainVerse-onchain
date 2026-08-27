@@ -37,6 +37,7 @@ pub fn create_escrow(
         seller: seller.clone(),
         token: token.clone(),
         amount,
+        original_amount: amount,
         status: EscrowStatus::Created,
         expiration,
     };
