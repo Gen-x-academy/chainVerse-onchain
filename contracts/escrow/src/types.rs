@@ -23,6 +23,8 @@ pub struct Escrow {
     pub token: Address,
     /// Remaining locked amount (reduced by partial releases).
     pub amount: i128,
+    /// Original deposit amount, preserved across partial and full releases (#862).
+    pub original_amount: i128,
     pub status: EscrowStatus,
     /// Unix timestamp after which the buyer may reclaim funds (#709).
     pub expiration: u64,

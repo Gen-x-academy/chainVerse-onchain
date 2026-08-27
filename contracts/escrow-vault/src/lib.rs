@@ -20,9 +20,8 @@ pub enum VaultError {
     NotInitialized = 9,
     ConflictOfInterest = 10,
     NotVoted = 11,
-    InvalidThreshold = 10,
-    ThresholdExceedsApprovers = 11,
-    NotVoted = 12,
+    InvalidThreshold = 12,
+    ThresholdExceedsApprovers = 13,
 }
 
 #[contracttype]
@@ -85,6 +84,15 @@ impl EscrowVault {
         Ok(())
     }
 
+    /// #866 — returns a monotonically increasing instance-storage nonce used to
+    /// make vault ids collision-resistant across creations in the same ledger.
+    fn next_vault_nonce(env: &Env) -> u64 {
+        let nonce: u64 = env.storage().instance().get(&DataKey::VaultCount).unwrap_or(0);
+        let next = nonce + 1;
+        env.storage().instance().set(&DataKey::VaultCount, &next);
+        next
+    }
+
     pub fn create_vault(
         env: Env,
         depositor: Address,
@@ -126,9 +134,16 @@ impl EscrowVault {
         depositor.require_auth();
         soroban_sdk::token::Client::new(&env, &token)
             .transfer(&depositor, &env.current_contract_address(), &amount);
-        let id: BytesN<32> = env.crypto().sha256(
-            &soroban_sdk::Bytes::from_slice(&env, &env.ledger().timestamp().to_be_bytes())
-        ).into();
+        // #866 — the vault id must be collision-resistant. A bare
+        // sha256(timestamp) collides when two vaults are created in the same
+        // ledger, so the hash input also includes a monotonic instance-storage
+        // nonce (incremented on every creation) and the depositor address.
+        let nonce = Self::next_vault_nonce(&env);
+        let mut id_input: soroban_sdk::Bytes = soroban_sdk::Bytes::new(&env);
+        id_input.append(&soroban_sdk::Bytes::from_slice(&env, &nonce.to_be_bytes()));
+        id_input.append(&soroban_sdk::Bytes::from_slice(&env, &env.ledger().timestamp().to_be_bytes()));
+        id_input.append(&depositor.clone().to_xdr(&env));
+        let id: BytesN<32> = env.crypto().sha256(&id_input).into();
         let vault = Vault {
             depositor: depositor.clone(),
             recipient,
@@ -186,8 +201,6 @@ impl EscrowVault {
 
     /// #718 — an approver revokes their prior approval before the threshold is
     /// met. Fails once the vault has been released or cancelled.
-    pub fn revoke_approval(env: Env, caller: Address, id: BytesN<32>) -> Result<(), VaultError> {
-    /// Lets an approver withdraw their approval before the vault releases.
     pub fn revoke_approval(
         env: Env,
         id: BytesN<32>,
@@ -207,7 +220,6 @@ impl EscrowVault {
         }
         env.storage().persistent().remove(&voted_key);
         vault.approvals = vault.approvals.saturating_sub(1);
-        vault.approvals -= 1;
         env.storage().persistent().set(&DataKey::Vault(id.clone()), &vault);
         env.storage().persistent().extend_ttl(&DataKey::Vault(id.clone()), VAULT_MIN_TTL, VAULT_MAX_TTL);
         Ok(())

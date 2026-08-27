@@ -16,11 +16,6 @@ pub fn assert_transition_allowed(
             EscrowStatus::Cancelled,
             EscrowStatus::Disputed,
         ],
-        EscrowStatus::Pending => &[
-            EscrowStatus::Completed,
-            EscrowStatus::Cancelled,
-            EscrowStatus::Disputed,
-        ],
         EscrowStatus::Disputed => &[EscrowStatus::Completed, EscrowStatus::Cancelled],
         // Completed / Cancelled are terminal.
         _ => &[],

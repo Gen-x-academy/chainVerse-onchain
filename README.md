@@ -12,7 +12,7 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 
 | Contract | Path | What it does |
 |---|---|---|
-| `chv_token` | `contracts/chv_token` | Platform utility token (CHV) — mint, burn, transfer, admin handoff |
+| `chv_token` | `contracts/chv_token` | Platform utility token (CHV) — cumulative minting, circulating supply, burn, transfer, admin handoff |
 | `token` | `contracts/token` | Generic token implementation with royalty support |
 | `certificates` | `contracts/certificates` | Mints and revokes on-chain course completion certificates |
 | `course_registry` | `contracts/course_registry` | Stores and manages course metadata and enrollment records |
