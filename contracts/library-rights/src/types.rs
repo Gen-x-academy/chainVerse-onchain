@@ -20,7 +20,7 @@ use soroban_sdk::{contracttype, Address, BytesN};
 /// A registered work's on-chain record.
 ///
 /// Contains only a content hash and a pseudonymous custodian address --
-/// never a name, email, raw content, reading position, or staff note.
+/// never a name, email, raw content, reading position, or staff notes.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkRecord {
@@ -28,4 +28,42 @@ pub struct WorkRecord {
     pub work_hash: BytesN<32>,
     /// Pseudonymous on-chain address of the work's current custodian.
     pub custodian: Address,
+}
+
+/// The on-chain record of a single loan.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoanRecord {
+    /// The ID of the work being loaned.
+    pub work_id: BytesN<32>,
+    /// The address of the borrower.
+    pub borrower: Address,
+    /// The timestamp when the loan expires.
+    pub expiry: u64,
+}
+
+/// The on-chain record of a single hold.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoldRecord {
+    /// The ID of the work being held.
+    pub work_id: BytesN<32>,
+    /// The address of the person who placed the hold.
+    pub holder: Address,
+    /// The timestamp when the hold expires.
+    pub expiry: u64,
+}
+
+/// The on-chain record of a course reserve.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReserveRecord {
+    /// The ID of the work being reserved.
+    pub work_id: BytesN<32>,
+    /// The ID of the course for which the work is reserved.
+    pub course_id: BytesN<32>,
+    /// The number of seats reserved for the course.
+    pub seats: u32,
+    /// The timestamp when the reserve expires.
+    pub expiry: u64,
 }

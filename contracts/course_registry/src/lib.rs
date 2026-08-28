@@ -29,7 +29,8 @@ pub enum ContractError {
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
-    Course(Symbol),
+    Course(BytesN<32>),
+    Enrollment(BytesN<32>, Address),
     Paused,
 }
 
@@ -37,7 +38,7 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone)]
 pub struct Course {
-    pub course_id: Symbol,
+    pub course_id: BytesN<32>,
     pub price_xlm: i128,
     pub price_chv: i128,
     pub is_active: bool,
@@ -74,7 +75,7 @@ impl CourseRegistryContract {
     // Add or Update Course
     pub fn upsert_course(
         env: Env,
-        course_id: Symbol,
+        course_id: BytesN<32>,
         price_xlm: i128,
         price_chv: i128,
         is_active: bool,
@@ -114,7 +115,7 @@ impl CourseRegistryContract {
     // Toggle Course Activation
     pub fn toggle_course(
         env: Env,
-        course_id: Symbol,
+        course_id: BytesN<32>,
         is_active: bool,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env)?;
@@ -135,7 +136,7 @@ impl CourseRegistryContract {
     }
 
     // Deactivate Course
-    pub fn deactivate_course(env: Env, course_id: Symbol) -> Result<(), ContractError> {
+    pub fn deactivate_course(env: Env, course_id: BytesN<32>) -> Result<(), ContractError> {
         Self::require_admin(&env)?;
 
         let key = DataKey::Course(course_id.clone());
@@ -153,7 +154,7 @@ impl CourseRegistryContract {
     }
 
     // Get Course
-    pub fn get_course(env: Env, course_id: Symbol) -> Result<Course, ContractError> {
+    pub fn get_course(env: Env, course_id: BytesN<32>) -> Result<Course, ContractError> {
         let key = DataKey::Course(course_id);
 
         let course = env
@@ -168,13 +169,46 @@ impl CourseRegistryContract {
 
     // Purchase Check
     // (Used by payment contract later)
-    pub fn assert_course_active(env: Env, course_id: Symbol) -> Result<(), ContractError> {
+    pub fn assert_course_active(env: Env, course_id: BytesN<32>) -> Result<(), ContractError> {
         let course = Self::get_course(env.clone(), course_id)?;
 
         if !course.is_active {
             return Err(ContractError::CourseInactive);
         }
         Ok(())
+    }
+
+    // Enroll a user in a course
+    pub fn enroll(env: Env, course_id: BytesN<32>, user: Address) -> Result<(), ContractError> {
+        user.require_auth();
+
+        let course_key = DataKey::Course(course_id.clone());
+        let course: Course = env
+            .storage()
+            .persistent()
+            .get(&course_key)
+            .ok_or(ContractError::CourseNotFound)?;
+
+        if !course.is_active {
+            return Err(ContractError::CourseInactive);
+        }
+
+        let enrollment_key = DataKey::Enrollment(course_id.clone(), user.clone());
+        env.storage().persistent().set(&enrollment_key, &());
+        env.storage()
+            .persistent()
+            .extend_ttl(&enrollment_key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("ENROLL"),), (course_id, user));
+
+        Ok(())
+    }
+
+    // Check if a user is enrolled in a course
+    pub fn is_enrolled(env: Env, course_id: BytesN<32>, user: Address) -> bool {
+        let enrollment_key = DataKey::Enrollment(course_id, user);
+        env.storage().persistent().has(&enrollment_key)
     }
 
     pub fn version(env: Env) -> String {
@@ -241,7 +275,7 @@ impl CourseRegistryContract {
             return Err(ContractError::NotAdmin);
         }
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_.hash);
         Ok(())
     }
 }
