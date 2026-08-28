@@ -22,4 +22,14 @@ pub enum ContractError {
     DuplicateRole = 4,
     /// No work record exists for the given work id.
     WorkNotFound = 5,
+    /// No policy record exists for the given policy id.
+    PolicyNotFound = 6,
+    /// Patron has exceeded their maximum concurrent loans for this policy.
+    PatronLoanLimitExceeded = 7,
+    /// Total policy-wide concurrent loan limit has been reached.
+    PolicyLoanLimitExceeded = 8,
+    /// Cannot check out a work that is already loaned out.
+    WorkAlreadyLoaned = 9,
+    /// Cannot return a loan that doesn't exist or is already inactive.
+    LoanNotFoundOrInactive = 10,
 }

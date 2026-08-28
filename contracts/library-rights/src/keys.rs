@@ -71,4 +71,6 @@ pub enum DataKey {
     Loan(BytesN<32>, Address),
     Hold(BytesN<32>, Address),
     Balance(Address),
+    /// Tracks active loan counts per patron per policy: (patron, policy_id) -> count
+    PatronPolicyActiveLoans(Address, Symbol),
 }
