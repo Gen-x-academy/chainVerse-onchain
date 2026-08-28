@@ -24,7 +24,7 @@ use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
 /// Bumped whenever a `DataKey` variant's shape changes in a
 /// backwards-incompatible way. Stored once at contract bootstrap.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Governance/role config: rarely written, must not lapse silently.
 /// ~30 days min / ~180 days max (assuming ~5s ledgers).
@@ -66,9 +66,14 @@ pub enum DataKey {
     SchemaVersion,
     Role(Role),
     Work(BytesN<32>),
+    ContentStatus(BytesN<32>),
+    Quarantine(BytesN<32>),
     Policy(Symbol),
     License(BytesN<32>, Address),
     Loan(BytesN<32>, Address),
     Hold(BytesN<32>, Address),
     Balance(Address),
+    MembershipAttestation(BytesN<32>),
+    MembershipCurrent(Address),
+    MembershipCount,
 }

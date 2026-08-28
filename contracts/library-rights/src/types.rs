@@ -29,3 +29,48 @@ pub struct WorkRecord {
     /// Pseudonymous on-chain address of the work's current custodian.
     pub custodian: Address,
 }
+
+/// Access state for a content commitment. Quarantine is intentionally
+/// separate from legal takedown and ordinary deactivation.
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentStatus {
+    Active,
+    Deactivated,
+    LegalTakedown,
+    Quarantined,
+}
+
+/// Forensic evidence for an emergency quarantine. Only a hash of the reason
+/// or incident record is stored on-chain.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuarantineRecord {
+    pub reason_hash: BytesN<32>,
+    pub quarantined_at: u64,
+    pub quarantined_by: Address,
+    pub restored_at: Option<u64>,
+    pub restoration_review_hash: Option<BytesN<32>>,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MembershipStatus {
+    Active,
+    Revoked,
+}
+
+/// A membership attestation contains only opaque commitments and timestamps;
+/// it never stores a name, student number, or plaintext institutional claim.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MembershipAttestation {
+    pub wallet: Address,
+    pub claim_commitment: BytesN<32>,
+    pub institution_domain_hash: BytesN<32>,
+    pub network_id: BytesN<32>,
+    pub nonce: u64,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub status: MembershipStatus,
+}

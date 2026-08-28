@@ -22,4 +22,14 @@ pub enum ContractError {
     DuplicateRole = 4,
     /// No work record exists for the given work id.
     WorkNotFound = 5,
+    /// The requested content state transition is not valid.
+    InvalidStateTransition = 6,
+    /// No membership attestation exists for the requested wallet/claim.
+    MembershipNotFound = 7,
+    /// The membership attestation is expired or revoked.
+    MembershipInactive = 8,
+    /// A content commitment is already quarantined.
+    AlreadyQuarantined = 9,
+    /// An attestation has already been revoked.
+    AlreadyRevoked = 10,
 }
