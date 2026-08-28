@@ -16,6 +16,7 @@ members = [
     "common",
     "staking",
     "token",
+    "library-rights",
 ]
 
 [workspace.dependencies]
