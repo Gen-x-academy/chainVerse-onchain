@@ -12,28 +12,24 @@ pub use types::Certificate;
 use soroban_sdk::{contract, contractclient, contractimpl, symbol_short, Address, Bytes, BytesN, Env};
 use storage::{MAX_TTL, MIN_TTL};
 
-// ---------------------------------------------------------------------------
-// Typed cross-contract client interface (#742)
-//
-// Exposes a `CertificateContractClient` that can be imported by any other
-// contract (e.g. the payment contract) to perform a cross-contract call:
-//
-//   use certificates::CertificateContractClient;
-//
-//   let cert_client = CertificateContractClient::new(&env, &cert_contract_id);
-//   cert_client.mint(&recipient, &course_id, &proof)?;
-// ---------------------------------------------------------------------------
 #[contractclient(name = "CertificateContractClient")]
 pub trait CertificateInterface {
-    fn init(env: Env, admin: Address, backend_public_key: Bytes) -> Result<(), ContractError>;
-    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
+    fn init(env: Env, admin: Address, backend_public_key: Bytes, minter: Address) -> Result<(), ContractError>;
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, expires_at: u64, nonce: BytesN<32>, proof: Bytes) -> Result<(), ContractError>;
+    /// Proofs are bound to the recipient, course ID, contract ID, network, nonce,
+    /// and expiry before any certificate state is written.
+    fn mint(env: Env, recipient: Address, course_id: BytesN<32>, nonce: BytesN<32>, expires_at: u64, proof: Bytes) -> Result<(), ContractError>;
     fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError>;
     fn transfer(env: Env, from: Address, to: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
     fn revoke(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>) -> Result<(), ContractError>;
-    fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate>;
+    fn revoke_with_reason(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>, reason: Bytes) -> Result<(), ContractError>;
+    fn get_certificate(env: Env, recipient: Address, course_id: BytesN<32>) -> Option<Certificate>;
     fn toggle_pause(env: Env, caller: Address, paused: bool) -> Result<(), ContractError>;
     fn is_paused(env: Env) -> bool;
     fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError>;
+    fn propose_admin_transfer(env: Env, caller: Address, new_admin: Address) -> Result<(), ContractError>;
+    fn accept_admin_transfer(env: Env) -> Result<(), ContractError>;
+    fn cancel_admin_transfer(env: Env, caller: Address) -> Result<(), ContractError>;
 }
 
 #[contract]
@@ -62,15 +58,38 @@ impl CertificateContract {
 
     pub fn is_paused(env: Env) -> bool { storage::get_paused(&env) }
 
-    /// Mints a certificate to the recipient after verifying the backend proof.
-    pub fn mint(env: Env, recipient: Address, course_id: BytesN<32>, proof: Bytes) -> Result<(), ContractError> {
+    pub fn mint(
+        env: Env,
+        recipient: Address,
+        course_id: BytesN<32>,
+        expires_at: u64,
+        nonce: BytesN<32>,
+        nonce: BytesN<32>,
+        expires_at: u64,
+        proof: Bytes,
+    ) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
+        if env.ledger().timestamp() >= expires_at {
+            return Err(ContractError::ProofExpired);
+        }
+        if storage::nonce_consumed(&env, &nonce) {
+            return Err(ContractError::NonceAlreadyConsumed);
+        }
         let pubkey = storage::get_backend_pubkey(&env).ok_or(ContractError::NotInitialized)?;
-        verify::verify_backend_proof(&env, &pubkey, &course_id.clone().into(), &proof)?;
+        verify::verify_backend_proof(&env, &pubkey, &recipient, &course_id, expires_at, &nonce, &proof)?;
+        verify::verify_backend_proof(
+            &env,
+            &pubkey,
+            &recipient,
+            &course_id,
+            &nonce,
+            expires_at,
+            &proof,
+        )?;
         let cert_key = (recipient.clone(), course_id.clone());
         if storage::certificate_exists(&env, &cert_key) { return Err(ContractError::CertificateExists); }
-        // Fix #628: token_id from persistent storage (survives contract upgrades)
+        storage::consume_nonce(&env, &nonce);
         let token_id = storage::next_token_id(&env);
         let cert = Certificate { recipient: recipient.clone(), course_id: course_id.clone(), token_id, soul_bound: true };
         storage::save_certificate(&env, cert_key, &cert);
@@ -78,7 +97,6 @@ impl CertificateContract {
         Ok(())
     }
 
-    /// Fix #691: Minter-only mint_certificate — only the stored minter (e.g., payment contract) can call this.
     pub fn mint_certificate(env: Env, student: Address, course_id: BytesN<32>, metadata_uri: Bytes) -> Result<(), ContractError> {
         env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
         if storage::get_paused(&env) { return Err(ContractError::ContractPaused); }
@@ -93,7 +111,6 @@ impl CertificateContract {
         Ok(())
     }
 
-    /// Fix #629: Transfer is blocked for soul-bound certificates.
     pub fn transfer(env: Env, from: Address, to: Address, course_id: BytesN<32>) -> Result<(), ContractError> {
         let cert_key = (from.clone(), course_id.clone());
         let cert = storage::get_certificate(&env, &cert_key)
@@ -109,24 +126,80 @@ impl CertificateContract {
         Ok(())
     }
 
-    /// Revokes a certificate. Only callable by admin.
     pub fn revoke(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>) -> Result<(), ContractError> {
-        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
-        storage::require_admin(&env, &caller)?;
-        storage::remove_certificate(&env, &recipient, &course_id);
-        env.events().publish((symbol_short!("CERT_RVK"),), (recipient, course_id));
-        Ok(())
+        // Fix #842: backward-compatible entrypoint — revokes without an explicit reason.
+        self::revoke_impl(&env, &caller, &recipient, &course_id, Bytes::new(&env))
     }
 
-    pub fn get_certificate(env: Env, recipient: Address, course_id: u64) -> Option<Certificate> {
-        storage::load_certificate(&env, &recipient, course_id)
+    pub fn revoke_with_reason(env: Env, caller: Address, recipient: Address, course_id: BytesN<32>, reason: Bytes) -> Result<(), ContractError> {
+        self::revoke_impl(&env, &caller, &recipient, &course_id, reason)
     }
 
-    /// Admin-only: upgrade the current contract to `new_wasm_hash`.
+    pub fn get_certificate(env: Env, recipient: Address, course_id: BytesN<32>) -> Option<Certificate> {
+        storage::get_certificate(&env, &(recipient, course_id))
+    }
+
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
         storage::require_admin(&env, &caller)?;
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         env.events().publish((symbol_short!("upgraded"),), new_wasm_hash);
         Ok(())
     }
+
+    /// Fix #841: current admin nominates `new_admin` as pending admin for a
+    /// bounded window during which the nominee may accept the role.
+    pub fn propose_admin_transfer(env: Env, caller: Address, new_admin: Address) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        storage::require_admin(&env, &caller)?;
+        if new_admin == caller {
+            return Err(ContractError::Unauthorized);
+        }
+        let expiry = env.ledger().timestamp().saturating_add(storage::ADMIN_TRANSFER_TTL);
+        storage::set_pending_admin(&env, &new_admin, expiry);
+        env.events().publish((symbol_short!("ADMIN_PROP"),), (caller, new_admin, expiry));
+        Ok(())
+    }
+
+    /// Fix #841: only the nominated pending admin may accept, and only before expiry.
+    pub fn accept_admin_transfer(env: Env) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        let pending: Address = storage::get_pending_admin(&env).ok_or(ContractError::NoPendingTransfer)?;
+        pending.require_auth();
+        let expiry: u64 = storage::get_pending_admin_expiry(&env).unwrap_or(0);
+        if env.ledger().timestamp() > expiry {
+            storage::clear_pending_admin(&env);
+            return Err(ContractError::PendingAdminExpired);
+        }
+        storage::set_admin(&env, &pending);
+        storage::clear_pending_admin(&env);
+        env.events().publish((symbol_short!("ADMIN_ACPT"),), pending);
+        Ok(())
+    }
+
+    /// Fix #841: current admin may cancel a pending proposal.
+    pub fn cancel_admin_transfer(env: Env, caller: Address) -> Result<(), ContractError> {
+        env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+        storage::require_admin(&env, &caller)?;
+        if storage::get_pending_admin(&env).is_none() {
+            return Err(ContractError::NoPendingTransfer);
+        }
+        storage::clear_pending_admin(&env);
+        env.events().publish((symbol_short!("ADMIN_CANCEL"),), caller);
+        Ok(())
+    }
+}
+
+fn revoke_impl(env: &Env, caller: &Address, recipient: &Address, course_id: &BytesN<32>, reason: Bytes) -> Result<(), ContractError> {
+    env.storage().instance().extend_ttl(MIN_TTL, MAX_TTL);
+    storage::require_admin(env, caller)?;
+    let cert_key = (recipient.clone(), course_id.clone());
+    let token_id = storage::get_certificate(env, &cert_key).map(|c| c.token_id).unwrap_or(0);
+    storage::remove_certificate(env, recipient, course_id);
+    // Fix #842: stable revocation event carrying actor, reason, token id,
+    // recipient, course and timestamp.
+    env.events().publish(
+        (symbol_short!("CERT_RVK"),),
+        (caller.clone(), reason, token_id, recipient.clone(), course_id.clone(), env.ledger().timestamp()),
+    );
+    Ok(())
 }

@@ -68,6 +68,28 @@ printed contract IDs:
 cp .env.testnet.example .env.testnet
 ```
 
+### Deployment output in CI (GitHub Actions)
+
+> **Note — no direct push to `main`.**
+> The `deploy-testnet` workflow no longer commits `deployments/testnet.json`
+> directly to `main`. Instead it uses a two-step approach that respects branch
+> protection rules:
+>
+> 1. **Artifact** — the updated `deployments/testnet.json` is uploaded as a
+>    GitHub Actions artifact named `testnet-deployment-<run_number>` at the end
+>    of every deploy run. To download it:
+>    1. Open the repository on GitHub and click **Actions**.
+>    2. Select the `Deploy Testnet` workflow run you are interested in.
+>    3. Scroll to the **Artifacts** section at the bottom of the summary page.
+>    4. Click `testnet-deployment-<run_number>` to download the zip — it
+>       contains a single `testnet.json` file.
+>
+> 2. **Pull Request** — for pushes to `main` and `workflow_dispatch` runs, a
+>    second job (`open-pr`) automatically opens (or force-updates) a pull
+>    request on the branch `chore/update-testnet-deployments` using the
+>    downloaded artifact. Review and merge that PR to land the updated contract
+>    addresses in the repository through the normal review process.
+
 ## 8. Initialize
 
 ```sh

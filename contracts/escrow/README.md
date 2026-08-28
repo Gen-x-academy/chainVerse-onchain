@@ -13,29 +13,61 @@ passed through it.
 
 | Function | Parameters | Who can call | Returns |
 |---|---|---|---|
-| `whitelist_token` | `token: Address` | anyone (no auth check — simplified for composability; gate this at an admin layer in production) | `()` |
+| `whitelist_token` | `token: Address` | admin | `()` |
 | `create_escrow` | `buyer: Address, seller: Address, token: Address, amount: i128, expiration: u64` | `buyer` (`require_auth`) | `Result<u64, EscrowError>` — new escrow id |
-| `release_funds` | `escrow_id: u64` | `buyer` of that escrow (`require_auth`) | `Result<(), EscrowError>` |
-| `refund_buyer` | `escrow_id: u64` | `buyer` of that escrow (`require_auth`) | `Result<(), EscrowError>` |
-| `get_escrow` | `escrow_id: u64` | anyone | `Result<Escrow, EscrowError>` |
-| `get_total_volume` | — | anyone | `i128` |
-| `version` | — | anyone | `String` (currently `"1.0.0"`) |
+| `fund_escrow` | `escrow_id: u64` | `buyer` of that escrow | `Result<(), EscrowError>` |
+| `release_escrow` | `escrow_id: u64` | `buyer` or admin | `Result<(), EscrowError>` |
+| `partial_release` | `escrow_id: u64, amount: i128` | `buyer` or admin | `Result<(), EscrowError>` |
+| `dispute_escrow` | `escrow_id: u64` | `buyer` | `Result<(), EscrowError>` |
+| `refund_escrow` | `escrow_id: u64` | `buyer` | `Result<(), EscrowError>` |
+| `get_escrow` | `escrow_id: u64` | anyone | `Option<Escrow>` |
+| `get_by_buyer_index` | `buyer: Address` | anyone | `Vec<u64>` |
+| `get_by_seller_index` | `seller: Address` | anyone | `Vec<u64>` |
+| `set_protocol_fee_bps` | `admin: Address, bps: u32` | admin | `Result<(), EscrowError>` |
+| `get_protocol_fee` | `token: Address` | anyone | `i128` |
+| `withdraw_fees` | `caller: Address, token: Address, recipient: Address, amount: i128` | admin | `Result<(), EscrowError>` |
+| `upgrade` | `new_wasm_hash: BytesN<32>` | admin | `Result<(), EscrowError>` |
+
+## State graph
+
+One canonical status per phase (#859). `Created` is the post-create, pre-deposit
+phase; once the buyer deposits the escrow becomes `Funded`. Only a `Funded` escrow
+may be released (fully or partially), disputed, or refunded. Disputing moves a
+`Funded` escrow to `Disputed`; release and refund are blocked while disputed.
+A full release or a partial release that empties the balance completes the escrow;
+a refund after the deadline cancels it. `Completed` and `Cancelled` are terminal.
+
+```
+Created ──fund──▶ Funded ──release/partial_release (full)──▶ Completed
+                   │  │
+                   │  └───dispute────▶ Disputed ──(resolution)──▶ Completed
+                   └─refund (after expiration)──▶ Cancelled
+```
+
+`EscrowStatus` canonical variants: `Created`, `Funded`, `Completed`, `Cancelled`,
+`Disputed`.
 
 ## Storage layout
 
-All keys live in **instance** storage (`env.storage().instance()`); no `extend_ttl` calls
-are made anywhere in the crate, so TTL management is left to the default instance-storage
-behavior.
+All escrow records and index lists live in **persistent** storage
+(`env.storage().persistent()`) with their TTL extended. Configuration (admin,
+whitelist, fee bps, paused, accumulated fees, volume) lives in instance storage.
 
-| `DataKey` variant | Stored type | TTL |
+| `DataKey` variant | Stored type | Bucket |
 |---|---|---|
-| `Escrow(u64)` | `Escrow { buyer, seller, token, amount: i128, status: EscrowStatus, expiration: u64 }` | none (instance default) |
-| `EscrowCount` | `u64` — monotonically incrementing id counter | none (instance default) |
-| `TotalVolume` | `i128` — cumulative deposited amount | none (instance default) |
-| `WhitelistedToken(Address)` | `bool` | none (instance default) |
+| `Admin` | `Address` | instance |
+| `Escrow(u64)` | `Escrow { buyer, seller, token, amount: i128, status: EscrowStatus, expiration: u64 }` | persistent |
+| `EscrowCount` | `u64` — monotonically incrementing id counter | instance |
+| `TotalVolume` | `i128` — cumulative deposited amount | instance |
+| `WhitelistedToken(Address)` | `bool` | instance |
+| `ProtocolFees(Address)` | `i128` — accrued fees per token | instance |
+| `TokenIndex(Address)` | `Vec<u64>` — escrow ids by token | persistent |
+| `BuyerIndex(Address)` | `Vec<u64>` — escrow ids by buyer | persistent |
+| `SellerIndex(Address)` | `Vec<u64>` — escrow ids by seller | persistent |
+| `FeeHistory` | `Vec<FeeRecord>` | persistent |
 
-`EscrowStatus` variants: `Pending`, `Completed`, `Cancelled`, `Disputed` (`Disputed` is
-defined but never assigned by current logic).
+Every escrow is indexed exactly once by its token, buyer, and seller at creation
+(#858).
 
 ## Events
 
@@ -50,7 +82,8 @@ defined but never assigned by current logic).
 | Variant | Code | When returned |
 |---|---|---|
 | `NotFound` | 1 | `escrow_id` has no matching record |
-| `NotPending` | 2 | Action attempted on an escrow that isn't `Pending` |
+| `NotPending` | 2 | Retained for backward compatibility (legacy name for an invalid lifecycle state) |
+| `InvalidEscrowState` | 15 | Action attempted on an escrow not in the required lifecycle state (e.g. releasing an unfunded/`Created` or `Disputed` escrow) |
 | `Expired` | 3 | `release_funds` called after `expiration` |
 | `Unauthorized` | 4 | Reserved — not currently returned anywhere; auth failures instead trap via `require_auth()` |
 | `TokenNotAllowed` | 5 | `create_escrow` called with a non-whitelisted token |

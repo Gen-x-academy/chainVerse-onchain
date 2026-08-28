@@ -12,7 +12,7 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 
 | Contract | Path | What it does |
 |---|---|---|
-| `chv_token` | `contracts/chv_token` | Platform utility token (CHV) — mint, burn, transfer, admin handoff |
+| `chv_token` | `contracts/chv_token` | Platform utility token (CHV) — cumulative minting, circulating supply, burn, transfer, admin handoff |
 | `token` | `contracts/token` | Generic token implementation with royalty support |
 | `certificates` | `contracts/certificates` | Mints and revokes on-chain course completion certificates |
 | `course_registry` | `contracts/course_registry` | Stores and manages course metadata and enrollment records |
@@ -21,6 +21,7 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 | `payout-automation` | `contracts/payout-automation` | Batches token payouts to multiple instructor recipients |
 | `reward` | `contracts/reward` | Issues one-time learner rewards via signed backend proofs |
 | `staking` | `contracts/staking` | Tiered CHV staking with lock periods and emergency unstake |
+| `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive) and derived access grants |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying the above contracts together |
 
 `contracts/common` and `contracts/shared` are internal Rust libraries (not deployable contracts) used by the crates above.

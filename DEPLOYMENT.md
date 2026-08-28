@@ -187,3 +187,49 @@ REWARD_AMOUNT=10000000 \
 | Network | `testnet` |
 | RPC URL | `https://soroban-testnet.stellar.org` |
 | Passphrase | `Test SDF Network ; September 2015` |
+
+## Upgrade and Rollback
+
+For a full step-by-step guide on upgrading contracts safely using a canary strategy,
+see [docs/runbook-canary-upgrade.md](docs/runbook-canary-upgrade.md).
+
+### Quick reference
+
+Upgrade a single deployed contract to a new WASM build:
+
+```bash
+./scripts/upgrade-contract.sh testnet deployer <contract-name> \
+  contracts/target/wasm32-unknown-unknown/release/<contract-name>.wasm
+```
+
+`upgrade-contract.sh` automatically saves a rollback reference file to
+`deployments/rollback-refs/<contract_name>-<timestamp>.json` before performing
+each upgrade. These files record the contract ID, previous WASM hash, WASM path,
+deployer identity, and git commit so that the prior WASM can be re-uploaded if a
+rollback is needed.
+
+> **Note:** the `deployments/rollback-refs/` directory is created automatically by
+> `upgrade-contract.sh` the first time an upgrade is performed. You do not need to
+> create it manually.
+
+### Rolling back a contract
+
+To preview and execute a rollback to the previous WASM:
+
+```bash
+./scripts/simulate-rollback.sh testnet <contract-name>
+# or, providing the WASM path explicitly:
+./scripts/simulate-rollback.sh testnet <contract-name> /path/to/previous.wasm
+```
+
+The script reads the most recent rollback ref from `deployments/rollback-refs/`,
+prints a dry-run summary (contract ID, WASM hash, timestamp), and asks for
+confirmation before calling `upgrade-contract.sh`.
+
+### Important: on-chain state is not reverted
+
+Soroban contracts on Stellar **cannot roll back ledger storage**. A rollback
+only restores the executing WASM code — any storage entries written by the new
+WASM while it was live persist after rollback. Consult
+[docs/runbook-canary-upgrade.md#rollback-procedure](docs/runbook-canary-upgrade.md#rollback-procedure)
+for the full list of scenarios where rollback is not safely possible.

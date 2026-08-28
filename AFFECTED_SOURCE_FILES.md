@@ -68,11 +68,6 @@ impl RewardContract {
 }
 ```
 
-**Key Changes:**
-- ✅ Removed: `set_backend_pubkey()` function
-- ✅ Kept: `rotate_backend_pubkey()` as the single entry point
-- ✅ Kept: `get_backend_pubkey()` helper function
-- ✅ Documentation: Added comments clarifying purpose
 
 ---
 
