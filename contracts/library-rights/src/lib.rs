@@ -20,34 +20,55 @@
 //! - **#927 (privacy):** [`WorkRecord`] holds only a content hash and a
 //!   pseudonymous custodian address -- no names, emails, raw content,
 //!   reading position, or staff notes ever land on-chain.
+//! - **#931 (classifications):** [`classifications`] commits hashes of
+//!   off-chain taxonomy/audience manifests with a schema version and
+//!   issuer. Updates are append-only (linked history) and publish
+//!   old/new commitments for indexers.
+//! - **#934 (provenance):** [`provenance`] attests acquisition/donation
+//!   provenance by hash only; private documents stay off-chain and
+//!   corrections append rather than overwrite history.
 //!
 //! ## Impact summary
 //! - **ABI:** `bootstrap(admin, treasury, policy_manager, emergency)`,
 //!   `get_role(role)`, `put_work(caller, work_id, work_hash, custodian)`,
-//!   `get_work(work_id)`, `version()`.
+//!   `get_work(work_id)`, `commit_classification(caller, kind,
+//!   manifest_hash, schema_version)`, `get_classification(kind)`,
+//!   `classification_history_len(kind)`, `classification_history(kind,
+//!   index)`, `attest_provenance(caller, work_id, provenance_type,
+//!   provenance_hash)`, `provenance_len(work_id)`,
+//!   `get_provenance(work_id, index)`, `version()`.
 //! - **Storage:** persistent, versioned keys per [`keys::DataKey`], each
 //!   TTL-tiered by domain and renewed on every read/write that touches
-//!   it. `SchemaVersion` lives in instance storage.
-//! - **Events:** `BOOTSTRP` published once, on successful bootstrap.
-//! - **Privacy:** see [`types`] -- hash + pseudonymous address only.
+//!   it. `SchemaVersion` lives in instance storage. Classification and
+//!   provenance history are append-only (never overwritten).
+//! - **Events:** `BOOTSTRP` on bootstrap; `CLS_NEW` (kind, old_hash,
+//!   new_hash, schema_version, issuer) on every classification commit;
+//!   `PROV_NEW` (work_id, provenance_type, old_hash, new_hash,
+//!   attested_by, attested_at) on every provenance attestation.
+//! - **Privacy:** see [`types`] -- hash + pseudonymous address only;
+//!   donor/invoice/manifest details never land on-chain.
 //! - **Deployment:** new, independently deployable contract; no existing
 //!   contract is replaced.
 //! - **Migration:** none yet -- no prior on-chain state exists. Future
 //!   schema changes bump [`keys::SCHEMA_VERSION`].
 
+mod classifications;
 mod errors;
 mod governance;
 mod keys;
+mod provenance;
 mod types;
 
 pub use errors::ContractError;
 pub use keys::{DataKey, Role};
-pub use types::WorkRecord;
+pub use types::{
+    ClassificationCommit, ClassificationKind, ProvenanceRecord, ProvenanceType, WorkRecord,
+};
 
 use keys::{DataKey as DK, CATALOG_MAX_TTL, CATALOG_MIN_TTL};
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String};
 
-const CONTRACT_VERSION: &str = "0.4.0";
+const CONTRACT_VERSION: &str = "0.5.0";
 
 #[contract]
 pub struct LibraryRightsContract;
@@ -107,6 +128,72 @@ impl LibraryRightsContract {
             .persistent()
             .extend_ttl(&key, CATALOG_MIN_TTL, CATALOG_MAX_TTL);
         Ok(record)
+    }
+
+    /// Role-gated (#931): commit the hash of an off-chain taxonomy or
+    /// audience classification manifest. Rejects malformed (all-zero)
+    /// hashes, preserves the previous commitment through the append-only
+    /// history, and publishes an event with the old and new hashes.
+    pub fn commit_classification(
+        env: Env,
+        caller: Address,
+        kind: ClassificationKind,
+        manifest_hash: BytesN<32>,
+        schema_version: u32,
+    ) -> Result<(), ContractError> {
+        classifications::commit_classification(&env, &caller, kind, manifest_hash, schema_version)
+    }
+
+    /// Returns the current classification commitment for `kind`.
+    pub fn get_classification(
+        env: Env,
+        kind: ClassificationKind,
+    ) -> Result<ClassificationCommit, ContractError> {
+        classifications::get_classification(&env, kind)
+    }
+
+    /// Returns how many classification commitments exist for `kind`.
+    pub fn classification_history_len(env: Env, kind: ClassificationKind) -> u64 {
+        classifications::classification_history_len(&env, kind)
+    }
+
+    /// Returns the `index`-th (1-based) classification commitment for
+    /// `kind`, queryable only within bounds.
+    pub fn classification_history(
+        env: Env,
+        kind: ClassificationKind,
+        index: u64,
+    ) -> Result<ClassificationCommit, ContractError> {
+        classifications::classification_history(&env, kind, index)
+    }
+
+    /// Role-gated (#934): attest the acquisition/donation provenance of
+    /// `work_id` by committing only the off-chain document hash. Private
+    /// document details stay off-chain; corrections append a new record
+    /// instead of overwriting history.
+    pub fn attest_provenance(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+        provenance_type: ProvenanceType,
+        provenance_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        provenance::attest_provenance(&env, &caller, work_id, provenance_type, provenance_hash)
+    }
+
+    /// Returns how many provenance records exist for `work_id`.
+    pub fn provenance_len(env: Env, work_id: BytesN<32>) -> u64 {
+        provenance::provenance_len(&env, &work_id)
+    }
+
+    /// Returns the `index`-th (1-based) provenance record for `work_id`,
+    /// queryable only within bounds.
+    pub fn get_provenance(
+        env: Env,
+        work_id: BytesN<32>,
+        index: u64,
+    ) -> Result<ProvenanceRecord, ContractError> {
+        provenance::get_provenance(&env, &work_id, index)
     }
 
     /// Returns this contract's ABI version string.

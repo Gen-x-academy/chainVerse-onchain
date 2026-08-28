@@ -22,4 +22,14 @@ pub enum ContractError {
     DuplicateRole = 4,
     /// No work record exists for the given work id.
     WorkNotFound = 5,
+    /// A commitment/attestation was supplied with a malformed (all-zero)
+    /// hash; a valid content address is required.
+    InvalidHash = 6,
+    /// No classification commitment exists for the given kind/index.
+    ClassificationNotFound = 7,
+    /// No provenance record exists for the given work/index.
+    ProvenanceNotFound = 8,
+    /// A monotonic counter overflowed; the operation failed deterministically
+    /// instead of silently wrapping.
+    Overflow = 9,
 }

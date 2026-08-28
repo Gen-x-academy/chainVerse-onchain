@@ -176,7 +176,9 @@ fn test_dispute_released_escrow_fails() {
 
     ctx.client.release_escrow(&ctx.buyer, &id);
     let result = ctx.client.try_dispute_escrow(&ctx.buyer, &id);
-    assert_eq!(result, Err(Ok(EscrowError::AlreadyReleased)));
+    // A released escrow is no longer Funded, so dispute is rejected with
+    // InvalidEscrowState (dispute is only openable on a Funded escrow).
+    assert_eq!(result, Err(Ok(EscrowError::InvalidEscrowState)));
 }
 
 #[test]
