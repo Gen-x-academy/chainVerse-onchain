@@ -156,3 +156,50 @@ mod reserve_tests {
         assert_eq!(res, Err(Ok(ContractError::NotEnrolled)));
     }
 }
+
+#[cfg(test)]
+mod race_condition_tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, IntoVal, symbol_short};
+
+    #[test]
+    #[should_panic]
+    fn test_last_seat_race_condition() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, LibraryRightsContract);
+        let client = LibraryRightsContractClient::new(&env, &contract_id);
+
+        let course_registry_id = env.register_contract(None, course_registry::CourseRegistryContract);
+        let course_registry_client = course_registry::CourseRegistryContractClient::new(&env, &course_registry_id);
+
+        let admin = Address::random(&env);
+        let treasury = Address::random(&env);
+        let policy_manager = Address::random(&env);
+        let emergency = Address::random(&env);
+        let librarian = Address::random(&env);
+        let student1 = Address::random(&env);
+        let student2 = Address::random(&env);
+
+        client.bootstrap(&admin, &treasury, &policy_manager, &emergency, &librarian);
+        course_registry_client.initialize(&admin);
+        client.set_course_registry(&admin, &course_registry_id);
+
+        let work_id: BytesN<32> = BytesN::from_array(&env, &[1; 32]);
+        let work_hash: BytesN<32> = BytesN::from_array(&env, &[2; 32]);
+        let custodian = Address::random(&env);
+
+        client.put_work(&policy_manager, &work_id, &work_hash, &custodian);
+
+        let course_id: BytesN<32> = BytesN::from_array(&env, &[3; 32]);
+        course_registry_client.upsert_course(&admin, &course_id, &100, &100, &true);
+
+        client.create_reserve(&policy_manager, &work_id, &course_id, &1, &0);
+
+        course_registry_client.enroll(&student1, &course_id, &student1);
+        course_registry_client.enroll(&student2, &course_id, &student2);
+
+        // Simulate a race condition where two users try to borrow the last seat
+        client.borrow_from_reserve(&student1, &work_id, &course_id, &student1);
+        client.borrow_from_reserve(&student2, &work_id, &course_id, &student2);
+    }
+}
