@@ -1,25 +1,28 @@
 use soroban_sdk::contracterror;
 
 /// Typed errors for the library-rights contract.
-///
-/// Kept local to this crate rather than re-using `shared::ContractError`:
-/// every existing workspace contract (`course_registry`, `staking`,
-/// `token`, `payout-automation`, `escrow-vault`, ...) defines its own
-/// local error enum despite `docs/contracts.md` describing a shared-enum
-/// convention, so this follows the convention actually in force across
-/// the codebase.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ContractError {
-    /// `bootstrap` was called after the contract was already bootstrapped.
     AlreadyInitialized = 1,
-    /// A role-gated call was made before `bootstrap` ever succeeded.
     NotInitialized = 2,
-    /// The caller does not hold the role required for this call.
     NotAdmin = 3,
-    /// Two or more of the four roles were given the same address.
     DuplicateRole = 4,
-    /// No work record exists for the given work id.
     WorkNotFound = 5,
+    InvalidPolicy = 6,
+    PolicyNotFound = 7,
+    PolicyVersionNotFound = 8,
+    LicenseNotFound = 9,
+    LicenseInactive = 10,
+    RenditionNotFound = 11,
+    RenditionInactive = 12,
+    SeatNotFound = 13,
+    SeatUnavailable = 14,
+    BorrowingLimitReached = 15,
+    NotEnrolled = 16,
+    CourseRegistryCallFailed = 17,
+    InvalidTimestamp = 18,
+    LoanNotFound = 19,
+    LoanIdOverflow = 20,
 }
