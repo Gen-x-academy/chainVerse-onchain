@@ -73,4 +73,6 @@ pub enum DataKey {
     Balance(Address),
     /// Tracks active loan counts per patron per policy: (patron, policy_id) -> count
     PatronPolicyActiveLoans(Address, Symbol),
+    /// Tracks allowlisted keepers that can trigger auto-renew evaluations
+    Keeper(Address),
 }
