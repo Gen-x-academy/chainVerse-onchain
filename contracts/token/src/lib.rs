@@ -3,8 +3,7 @@
 pub mod royalty;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec,
 };
 pub use royalty::RoyaltyConfig;
 
@@ -29,7 +28,6 @@ pub enum TokenError {
     ArithmeticOverflow    = 10,
     ContractPaused        = 11,
     NoPendingAdmin        = 12,
-    InvalidAmount        = 7,
     SupplyCapExceeded    = 8,
 }
 
@@ -39,7 +37,6 @@ enum DataKey {
     Balance(Address),
     TotalSupply,
     Initialized,
-    Admin,
     PendingAdmin,
     Paused,
     Royalty,
@@ -89,7 +86,7 @@ impl TokenContract {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(TokenError::AlreadyInitialized);
         }
-        if total_supply < 0 {
+        if total_supply <= 0 {
             return Err(TokenError::InvalidAmount);
         }
         if total_supply > MAX_SUPPLY {
@@ -98,7 +95,7 @@ impl TokenContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
-        env.storage().instance().set(&DataKey::Balance(admin.clone()), &total_supply);
+        Self::set_balance(&env, admin.clone(), total_supply);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::Initialized, &true);
@@ -121,10 +118,13 @@ impl TokenContract {
     }
 
     pub fn balance(env: Env, user: Address) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Balance(user))
-            .unwrap_or(0)
+        let key = DataKey::Balance(user);
+        if let Some(value) = env.storage().persistent().get(&key) {
+            env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
+            value
+        } else {
+            0
+        }
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
@@ -177,9 +177,17 @@ impl TokenContract {
         Self::require_admin(&env, &admin)?;
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
         env.events().publish((symbol_short!("UPGRADED"),), (new_wasm_hash,));
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &(from_balance - amount));
-        env.storage().instance().set(&DataKey::Balance(to.clone()), &(to_balance + amount));
-        emit_transfer(&env, &from, &to, amount);
+        Ok(())
+    }
+
+    pub fn migrate_balances(env: Env, admin: Address, holders: Vec<Address>) -> Result<(), TokenError> {
+        Self::require_admin(&env, &admin)?;
+        for holder in holders.iter() {
+            let key = DataKey::Balance(holder.clone());
+            if let Some(balance) = env.storage().instance().get::<DataKey, i128>(&key) {
+                Self::set_balance(&env, holder, balance);
+            }
+        }
         Ok(())
     }
 
@@ -196,13 +204,20 @@ impl TokenContract {
         royalty::get_royalty(&env)
     }
 
-    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128, expires_at: Option<u64>) {
+    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128, expires_at: Option<u64>) -> Result<(), TokenError> {
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+        if amount > MAX_SUPPLY {
+            return Err(TokenError::SupplyCapExceeded);
+        }
         owner.require_auth();
         let allowance = Allowance { amount, expires_at };
         let key = DataKey::Allowance(owner.clone(), spender.clone());
         env.storage().persistent().set(&key, &allowance);
         env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         emit_approval(&env, &owner, &spender, amount, expires_at);
+        Ok(())
     }
 
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
@@ -222,6 +237,7 @@ impl TokenContract {
         if Self::is_paused(env.clone()) {
             return Err(TokenError::ContractPaused);
         }
+        spender.require_auth();
         let mut allow = env.storage()
             .persistent()
             .get::<DataKey, Allowance>(&DataKey::Allowance(from.clone(), spender.clone()))
@@ -252,6 +268,12 @@ impl TokenContract {
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
+        if amount > MAX_SUPPLY {
+            return Err(TokenError::SupplyCapExceeded);
+        }
+        if from == to {
+            return Err(TokenError::InvalidAmount);
+        }
         let from_balance = Self::balance(env.clone(), from.clone());
         if from_balance < amount {
             return Err(TokenError::InsufficientBalance);
@@ -265,35 +287,21 @@ impl TokenContract {
         let proceeds = amount.checked_sub(royalty_amount).ok_or(TokenError::ArithmeticOverflow)?;
         let recipient = royalty.map(|config| config.recipient);
 
-        if from == to {
-            if let Some(recipient) = recipient {
-                if recipient != from && royalty_amount > 0 {
-                    let from_after = from_balance.checked_sub(royalty_amount)
-                        .ok_or(TokenError::ArithmeticOverflow)?;
-                    let recipient_balance = Self::balance(env.clone(), recipient.clone());
-                    let recipient_after = recipient_balance.checked_add(royalty_amount)
-                        .ok_or(TokenError::ArithmeticOverflow)?;
-                    env.storage().instance().set(&DataKey::Balance(from), &from_after);
-                    env.storage().instance().set(&DataKey::Balance(recipient), &recipient_after);
-                }
-            }
-            return Ok(());
-        }
-
         let from_after = from_balance.checked_sub(amount).ok_or(TokenError::ArithmeticOverflow)?;
         let to_balance = Self::balance(env.clone(), to.clone());
         let to_credit = if recipient.as_ref() == Some(&to) { amount } else { proceeds };
         let to_after = to_balance.checked_add(to_credit).ok_or(TokenError::ArithmeticOverflow)?;
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &from_after);
-        env.storage().instance().set(&DataKey::Balance(to.clone()), &to_after);
+        Self::set_balance(env, from.clone(), from_after);
+        Self::set_balance(env, to.clone(), to_after);
         if let Some(recipient) = recipient {
             if royalty_amount > 0 && recipient != to {
                 let recipient_balance = Self::balance(env.clone(), recipient.clone());
                 let recipient_after = recipient_balance.checked_add(royalty_amount)
                     .ok_or(TokenError::ArithmeticOverflow)?;
-                env.storage().instance().set(&DataKey::Balance(recipient), &recipient_after);
+                Self::set_balance(env, recipient, recipient_after);
             }
         }
+        emit_transfer(env, &from, &to, amount);
         Ok(())
     }
 
@@ -304,11 +312,13 @@ impl TokenContract {
             return Err(TokenError::Unauthorized);
         }
         admin.require_auth();
-        let to_bal = Self::balance(env.clone(), to.clone());
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &(from_bal - amount));
-        env.storage().instance().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
-        emit_allowance_consumed(&env, &from, &spender, &to, amount);
         Ok(())
+    }
+
+    fn set_balance(env: &Env, user: Address, balance: i128) {
+        let key = DataKey::Balance(user);
+        env.storage().persistent().set(&key, &balance);
+        env.storage().persistent().extend_ttl(&key, BALANCE_MIN_TTL, BALANCE_MAX_TTL);
     }
 
     pub fn revoke_allowance(env: Env, owner: Address, spender: Address) {
