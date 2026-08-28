@@ -6,6 +6,11 @@
 //! | `Role(role)` | governance bootstrap/rotation | GOVERNANCE | bounded (4 roles) |
 //! | `Work(work_id)` | policy manager | CATALOG | unbounded (1/work) |
 //! | `Policy(name)` | policy manager | CATALOG | unbounded (1/policy) |
+//! | `Entry(id)` | policy manager | CATALOG | unbounded (1/entry) |
+//! | `EntryVersion(id, v)` | contract logic | CATALOG | unbounded (1/version) |
+//! | `EntryVersionCount(id)` | contract logic | CATALOG | unbounded (1/entry) |
+//! | `ChildCount(parent)` | contract logic | CATALOG | unbounded (1/parent) |
+//! | `ChildIndex(parent, i)` | contract logic | CATALOG | unbounded (1/child) |
 //! | `License(work_id, holder)` | contract logic | ACTIVE | unbounded (1/work/holder) |
 //! | `Loan(work_id, holder)` | contract logic | ACTIVE | unbounded (1/work/holder) |
 //! | `Hold(work_id, holder)` | contract logic | ACTIVE | unbounded (1/work/holder) |
@@ -15,10 +20,10 @@
 //! migration path before trusting a decoded value; no variant here is
 //! removed or reshaped without bumping [`SCHEMA_VERSION`].
 //!
-//! Only `Role`, `Work`, and their supporting TTL tiers are wired up to
-//! actual contract logic so far (#926, #927). `Policy`, `License`, `Loan`,
-//! `Hold`, and `Balance` are reserved key shapes for the application-level
-//! issues that build on this foundation.
+//! `Role`, `Work`, and the `Entry*`/`Child*` catalog keys are wired up to
+//! actual contract logic (#926, #927, #928, #929, #932, #933). `Policy`,
+//! `License`, `Loan`, `Hold`, and `Balance` are reserved key shapes for
+//! the application-level issues that build on this foundation.
 
 use soroban_sdk::{contracttype, Address, BytesN, Symbol};
 
@@ -31,7 +36,8 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const GOVERNANCE_MIN_TTL: u32 = 518_400;
 pub const GOVERNANCE_MAX_TTL: u32 = 3_110_400;
 
-/// Catalog data (works, policies): long-lived, low write frequency.
+/// Catalog data (works, policies, registry entries, version snapshots,
+/// child indexes): long-lived, low write frequency.
 /// ~30 days min / ~365 days max.
 pub const CATALOG_MIN_TTL: u32 = 518_400;
 pub const CATALOG_MAX_TTL: u32 = 6_220_800;
@@ -67,6 +73,16 @@ pub enum DataKey {
     Role(Role),
     Work(BytesN<32>),
     Policy(Symbol),
+    /// Current (latest) catalog entry for a registry id (#928, #929).
+    Entry(BytesN<32>),
+    /// Immutable per-version snapshot of an entry (#932, #933).
+    EntryVersion(BytesN<32>, u32),
+    /// Number of versions recorded for an entry.
+    EntryVersionCount(BytesN<32>),
+    /// Number of children indexed under a parent entry (#929).
+    ChildCount(BytesN<32>),
+    /// 0-based child-id index under a parent entry (#929).
+    ChildIndex(BytesN<32>, u32),
     License(BytesN<32>, Address),
     Loan(BytesN<32>, Address),
     Hold(BytesN<32>, Address),

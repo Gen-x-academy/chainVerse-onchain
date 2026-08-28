@@ -21,6 +21,7 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 | `payout-automation` | `contracts/payout-automation` | Batches token payouts to multiple instructor recipients |
 | `reward` | `contracts/reward` | Issues one-time learner rewards via signed backend proofs |
 | `staking` | `contracts/staking` | Tiered CHV staking with lock periods and emergency unstake |
+| `library-rights` | `contracts/library-rights` | E-Library registry: four-role governance, canonical work/edition/rendition catalog with bounded metadata URI commitments, algorithm-tagged content hashes, and versioned immutable snapshots |
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive) and derived access grants |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying the above contracts together |
 
