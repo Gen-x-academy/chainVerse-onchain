@@ -1,8 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env,
-    String, Symbol,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Symbol,
 };
 
 const CONTRACT_VERSION: &str = "1.0.0";
@@ -22,6 +21,7 @@ pub enum ContractError {
     NotInitialized = 5,
     ContractPaused = 6,
     InvalidPrice = 7,
+    EnrollmentNotFound = 8,
 }
 
 // Storage Keys
@@ -31,6 +31,7 @@ pub enum DataKey {
     Admin,
     Course(Symbol),
     Paused,
+    Enrollment(Address, Symbol),
 }
 
 // Course Struct
@@ -41,6 +42,14 @@ pub struct Course {
     pub price_xlm: i128,
     pub price_chv: i128,
     pub is_active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnrollmentRecord {
+    pub student: Address,
+    pub course_id: Symbol,
+    pub enrolled: bool,
 }
 
 // Contract
@@ -104,10 +113,12 @@ impl CourseRegistryContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Course(course_id), &course);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Course(course_id.clone()), COURSE_MIN_TTL, COURSE_MAX_TTL);
+            .set(&DataKey::Course(course_id.clone()), &course);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Course(course_id.clone()),
+            COURSE_MIN_TTL,
+            COURSE_MAX_TTL,
+        );
         Ok(())
     }
 
@@ -130,7 +141,9 @@ impl CourseRegistryContract {
         course.is_active = is_active;
 
         env.storage().persistent().set(&key, &course);
-        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(())
     }
 
@@ -148,7 +161,9 @@ impl CourseRegistryContract {
         course.is_active = false;
 
         env.storage().persistent().set(&key, &course);
-        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(())
     }
 
@@ -162,7 +177,9 @@ impl CourseRegistryContract {
             .get(&key)
             .ok_or(ContractError::CourseNotFound)?;
         // Refresh TTL on read so active courses never silently expire (issue #735)
-        env.storage().persistent().extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
         Ok(course)
     }
 
@@ -175,6 +192,38 @@ impl CourseRegistryContract {
             return Err(ContractError::CourseInactive);
         }
         Ok(())
+    }
+
+    /// Admin-controlled enrollment attestation consumed by library-rights.
+    pub fn set_enrollment(
+        env: Env,
+        student: Address,
+        course_id: Symbol,
+        enrolled: bool,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        let key = DataKey::Enrollment(student.clone(), course_id.clone());
+        env.storage().persistent().set(
+            &key,
+            &EnrollmentRecord {
+                student,
+                course_id,
+                enrolled,
+            },
+        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, COURSE_MIN_TTL, COURSE_MAX_TTL);
+        Ok(())
+    }
+
+    /// Versioned typed read interface for authoritative enrollment checks.
+    pub fn is_enrolled(env: Env, student: Address, course_id: Symbol) -> bool {
+        env.storage()
+            .persistent()
+            .get::<DataKey, EnrollmentRecord>(&DataKey::Enrollment(student, course_id))
+            .map(|record| record.enrolled)
+            .unwrap_or(false)
     }
 
     pub fn version(env: Env) -> String {
@@ -245,3 +294,6 @@ impl CourseRegistryContract {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
