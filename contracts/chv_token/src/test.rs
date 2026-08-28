@@ -23,6 +23,16 @@ fn test_initialize_sets_admin() {
 }
 
 #[test]
+fn test_standard_token_metadata() {
+    let (env, contract_id, _admin, _treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+
+    assert_eq!(client.name(), soroban_sdk::String::from_str(&env, "ChainVerse"));
+    assert_eq!(client.symbol(), soroban_sdk::String::from_str(&env, "CHV"));
+    assert_eq!(client.decimals(), 7_u32);
+}
+
+#[test]
 fn test_mint_increases_supply() {
     let (env, contract_id, admin, treasury) = setup();
     let client = CHVTokenClient::new(&env, &contract_id);
@@ -129,7 +139,7 @@ fn test_allowance_state_changes_emit_events() {
     client.mint(&admin, &owner, &1_000_i128);
 
     let before_approval = env.events().all().len();
-    client.approve(&owner, &spender, &600_i128);
+    client.approve(&owner, &spender, &600_i128, &100_u32);
     assert_eq!(client.allowance(&owner, &spender), 600_i128);
     assert_eq!(env.events().all().len(), before_approval + 1);
 
@@ -154,11 +164,11 @@ fn test_failed_allowance_changes_emit_no_events() {
     let spender = Address::generate(&env);
     let recipient = Address::generate(&env);
     client.mint(&admin, &owner, &100_i128);
-    client.approve(&owner, &spender, &50_i128);
+    client.approve(&owner, &spender, &50_i128, &100_u32);
 
     let before_invalid_approval = env.events().all().len();
     assert_eq!(
-        client.try_approve(&owner, &spender, &-1_i128),
+        client.try_approve(&owner, &spender, &-1_i128, &100_u32),
         Err(Ok(TokenError::InvalidAmount))
     );
     assert_eq!(env.events().all().len(), before_invalid_approval);
@@ -211,6 +221,112 @@ fn test_freeze_blocks_transfer() {
 
     let result = client.try_transfer(&sender, &receiver, &0_i128);
     assert_eq!(result, Err(Ok(TokenError::InvalidAmount)));
+}
+
+#[test]
+fn test_frozen_sender_and_recipient_cannot_transfer() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.mint(&admin, &sender, &100_i128);
+
+    client.freeze_account(&sender);
+    assert_eq!(
+        client.try_transfer(&sender, &recipient, &1_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+
+    client.unfreeze_account(&sender);
+    client.freeze_account(&recipient);
+    assert_eq!(
+        client.try_transfer(&sender, &recipient, &1_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+}
+
+#[test]
+fn test_frozen_owner_and_spender_cannot_approve() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.freeze_account(&owner);
+    assert_eq!(
+        client.try_approve(&owner, &spender, &10_i128, &100_u32),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+
+    client.unfreeze_account(&owner);
+    client.freeze_account(&spender);
+    assert_eq!(
+        client.try_approve(&owner, &spender, &10_i128, &100_u32),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+}
+
+#[test]
+fn test_frozen_transfer_from_roles_are_rejected() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.mint(&admin, &owner, &100_i128);
+    client.approve(&owner, &spender, &10_i128, &100_u32);
+
+    client.freeze_account(&owner);
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &1_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+
+    client.unfreeze_account(&owner);
+    client.freeze_account(&spender);
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &1_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+
+    client.unfreeze_account(&spender);
+    client.freeze_account(&recipient);
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &1_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+}
+
+#[test]
+fn test_frozen_spender_leaves_allowance_and_balances_unchanged() {
+    let (env, contract_id, admin, treasury) = setup();
+    let client = CHVTokenClient::new(&env, &contract_id);
+    client.initialize(&admin, &treasury);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    client.mint(&admin, &owner, &100_i128);
+    client.approve(&owner, &spender, &40_i128, &100_u32);
+    client.freeze_account(&spender);
+
+    let owner_balance = client.balance(&owner);
+    let recipient_balance = client.balance(&recipient);
+    let allowance = client.allowance(&owner, &spender);
+
+    assert_eq!(
+        client.try_transfer_from(&spender, &owner, &recipient, &10_i128),
+        Err(Ok(TokenError::AccountFrozen))
+    );
+    assert_eq!(client.allowance(&owner, &spender), allowance);
+    assert_eq!(client.balance(&owner), owner_balance);
+    assert_eq!(client.balance(&recipient), recipient_balance);
 }
 
 #[test]
