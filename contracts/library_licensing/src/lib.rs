@@ -37,6 +37,16 @@ pub enum LicenseError {
     LicenseRevoked = 9,
     InvalidDuration = 10,
     InvalidRights = 11,
+    /// The source and successor rendition commitments must differ.
+    InvalidRenditionMigration = 12,
+    /// A migration already exists for the source rendition.
+    RenditionMigrationExists = 13,
+    /// The requested grant or rendition migration does not exist.
+    MigrationNotFound = 14,
+    /// The caller has not opted into an opt-in migration.
+    MigrationNotAccepted = 15,
+    /// A grant may only opt into a migration for its license's rendition.
+    InvalidMigrationTarget = 16,
 }
 
 #[contracttype]
@@ -69,6 +79,25 @@ pub struct AccessGrant {
     pub expires_at: u64,
 }
 
+/// A governed relationship between an old rendition commitment and its
+/// successor. `Forced` preserves access automatically; `OptIn` requires the
+/// grant holder to explicitly accept the successor.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RenditionMigrationPolicy {
+    OptIn,
+    Forced,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenditionMigration {
+    pub from_work_id: BytesN<32>,
+    pub to_work_id: BytesN<32>,
+    pub policy: RenditionMigrationPolicy,
+    pub created_at: u64,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -76,6 +105,8 @@ pub enum DataKey {
     License(BytesN<32>),
     GrantCount,
     AccessGrant(BytesN<32>),
+    RenditionMigration(BytesN<32>),
+    GrantMigrationOptIn(BytesN<32>, BytesN<32>),
 }
 
 /// Admin-gated authorization, mirroring the staking/vault `require_admin`
@@ -305,6 +336,143 @@ impl LibraryLicensing {
             (grant_id.clone(), license_id, grantee, now, grant_expires_at),
         );
         Ok(grant_id)
+    }
+
+    /// Creates a one-way migration from an old rendition commitment to its
+    /// successor. `Forced` follows active grants automatically; `OptIn`
+    /// preserves choice for each grant holder. The old record is never
+    /// overwritten, so both commitments remain auditable.
+    pub fn propose_rendition_migration(
+        env: Env,
+        caller: Address,
+        from_work_id: BytesN<32>,
+        to_work_id: BytesN<32>,
+        policy: RenditionMigrationPolicy,
+    ) -> Result<(), LicenseError> {
+        require_admin(&env, &caller)?;
+        if from_work_id == to_work_id {
+            return Err(LicenseError::InvalidRenditionMigration);
+        }
+        let key = DataKey::RenditionMigration(from_work_id.clone());
+        if env.storage().persistent().has(&key) {
+            return Err(LicenseError::RenditionMigrationExists);
+        }
+        let migration = RenditionMigration {
+            from_work_id,
+            to_work_id,
+            policy,
+            created_at: env.ledger().timestamp(),
+        };
+        env.storage().persistent().set(&key, &migration);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events()
+            .publish((symbol_short!("REND_MIG"),), migration);
+        Ok(())
+    }
+
+    /// Lets a grant holder explicitly follow an `OptIn` migration. The
+    /// caller must be the grant's grantee; no name, student record, or other
+    /// off-chain identity data is involved.
+    pub fn accept_rendition_migration(
+        env: Env,
+        caller: Address,
+        grant_id: BytesN<32>,
+        to_work_id: BytesN<32>,
+    ) -> Result<(), LicenseError> {
+        let grant: AccessGrant = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AccessGrant(grant_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        if caller != grant.grantee {
+            return Err(LicenseError::Unauthorized);
+        }
+        caller.require_auth();
+        let license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(grant.license_id))
+            .ok_or(LicenseError::NotFound)?;
+        let migration: RenditionMigration = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RenditionMigration(license.work_id.clone()))
+            .ok_or(LicenseError::MigrationNotFound)?;
+        if migration.to_work_id != to_work_id {
+            return Err(LicenseError::InvalidMigrationTarget);
+        }
+        if migration.policy != RenditionMigrationPolicy::OptIn {
+            return Err(LicenseError::InvalidMigrationTarget);
+        }
+        let key = DataKey::GrantMigrationOptIn(grant_id.clone(), to_work_id.clone());
+        env.storage().persistent().set(&key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events()
+            .publish((symbol_short!("MIG_ACCPT"),), (grant_id, to_work_id));
+        Ok(())
+    }
+
+    pub fn rendition_migration(
+        env: Env,
+        from_work_id: BytesN<32>,
+    ) -> Result<RenditionMigration, LicenseError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RenditionMigration(from_work_id))
+            .ok_or(LicenseError::MigrationNotFound)
+    }
+
+    /// Returns whether a grant is usable for the requested rendition. The
+    /// original work remains valid, while a successor requires a forced
+    /// migration or an explicit opt-in recorded for this grant.
+    pub fn is_grant_active_for_work(
+        env: Env,
+        grant_id: BytesN<32>,
+        work_id: BytesN<32>,
+    ) -> Result<bool, LicenseError> {
+        let grant: AccessGrant = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AccessGrant(grant_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        let license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(grant.license_id))
+            .ok_or(LicenseError::NotFound)?;
+        let now = env.ledger().timestamp();
+        let active = license.status == LicenseStatus::Active
+            && now >= license.not_before
+            && now < license.expires_at
+            && now >= grant.not_before
+            && now < grant.expires_at;
+        if !active {
+            return Ok(false);
+        }
+        if work_id == license.work_id {
+            return Ok(true);
+        }
+        let migration = match env
+            .storage()
+            .persistent()
+            .get::<_, RenditionMigration>(&DataKey::RenditionMigration(license.work_id))
+        {
+            Some(value) => value,
+            None => return Ok(false),
+        };
+        if migration.to_work_id != work_id {
+            return Ok(false);
+        }
+        Ok(migration.policy == RenditionMigrationPolicy::Forced
+            || env
+                .storage()
+                .persistent()
+                .get(&DataKey::GrantMigrationOptIn(grant_id, work_id))
+                .unwrap_or(false))
     }
 
     /// #940 — read-only check: is the license currently inside its validity

@@ -2,6 +2,7 @@ use crate::LibraryRightsContract;
 use soroban_sdk::{Address, Env, String};
 
 mod governance;
+mod integrity_membership;
 mod privacy;
 mod storage;
 
@@ -17,5 +18,5 @@ fn test_version_reports_current_abi() {
     let (env, contract_id) = setup();
     let client = crate::LibraryRightsContractClient::new(&env, &contract_id);
 
-    assert_eq!(client.version(), String::from_str(&env, "0.4.0"));
+    assert_eq!(client.version(), String::from_str(&env, "0.5.0"));
 }
