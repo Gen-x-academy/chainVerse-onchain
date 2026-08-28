@@ -36,4 +36,12 @@ pub enum ContractError {
     MaxRenewalsReached = 11,
     /// Renewal would exceed the license's maximum expiry date.
     ExceedsLicenseExpiry = 12,
+    /// Cannot cancel a hold that doesn't exist or is already inactive.
+    HoldNotFoundOrInactive = 13,
+    /// Caller is not authorized to cancel this hold.
+    HoldCancellationUnauthorized = 14,
+    /// A hold with this nonce has already been processed (idempotency check).
+    DuplicateRequestNonce = 15,
+    /// The work has active holds that need to be processed before checkout.
+    WorkHasActiveHolds = 16,
 }

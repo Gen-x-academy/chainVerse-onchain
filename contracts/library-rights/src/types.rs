@@ -87,3 +87,45 @@ pub struct LoanRecord {
     /// Maximum number of renewals allowed for this loan
     pub max_renewals: u32,
 }
+
+/// Active hold record for a work that's currently loaned out
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoldRecord {
+    /// Work ID being held
+    pub work_id: BytesN<32>,
+    /// Patron who placed the hold
+    pub holder: Address,
+    /// Timestamp when the hold was created
+    pub created_at: u64,
+    /// Timestamp when the hold expires if not fulfilled
+    pub expires_at: u64,
+    /// Whether the hold is still active
+    pub is_active: bool,
+    /// Policy ID that applies to this hold
+    pub policy_id: Symbol,
+    /// Position in the queue for this work
+    pub queue_position: u32,
+    /// Unique nonce for idempotent operations
+    pub request_nonce: BytesN<32>,
+}
+
+/// Reason codes for hold cancellation
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum HoldCancellationReason {
+    /// Patron voluntarily cancelled their hold
+    PatronInitiated,
+    /// Librarian administratively cancelled the hold
+    LibrarianInitiated,
+    /// Hold expired before being fulfilled
+    HoldExpired,
+}
+
+/// Tracks the number of active holds per patron per policy
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatronPolicyActiveHolds {
+    /// Count of active holds
+    pub count: u32,
+}
