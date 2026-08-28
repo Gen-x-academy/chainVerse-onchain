@@ -32,4 +32,8 @@ pub enum ContractError {
     WorkAlreadyLoaned = 9,
     /// Cannot return a loan that doesn't exist or is already inactive.
     LoanNotFoundOrInactive = 10,
+    /// Loan has reached maximum number of renewals.
+    MaxRenewalsReached = 11,
+    /// Renewal would exceed the license's maximum expiry date.
+    ExceedsLicenseExpiry = 12,
 }
