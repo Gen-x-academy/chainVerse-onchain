@@ -40,11 +40,17 @@ pub fn emit_unfreeze(env: &Env, account: &Address) {
     );
 }
 
-/// Emitted when an allowance is approved. CHV allowances do not expire, so expiry is None.
-pub fn emit_approval(env: &Env, owner: &Address, spender: &Address, amount: i128) {
+/// Emitted when an allowance is approved.
+pub fn emit_approval(
+    env: &Env,
+    owner: &Address,
+    spender: &Address,
+    amount: i128,
+    expiration_ledger: u32,
+) {
     env.events().publish(
         (symbol_short!("approval"), owner.clone(), spender.clone()),
-        (amount, Option::<u64>::None, amount),
+        (amount, expiration_ledger, amount),
     );
 }
 
@@ -54,11 +60,12 @@ pub fn emit_allowance_decrement(
     owner: &Address,
     spender: &Address,
     amount: i128,
+    expiration_ledger: u32,
     remaining: i128,
 ) {
     env.events().publish(
         (symbol_short!("allow_dec"), owner.clone(), spender.clone()),
-        (amount, Option::<u64>::None, remaining),
+        (amount, expiration_ledger, remaining),
     );
 }
 
@@ -68,9 +75,10 @@ pub fn emit_allowance_revocation(
     owner: &Address,
     spender: &Address,
     amount: i128,
+    expiration_ledger: u32,
 ) {
     env.events().publish(
         (symbol_short!("allow_rev"), owner.clone(), spender.clone()),
-        (amount, Option::<u64>::None, 0_i128),
+        (amount, expiration_ledger, 0_i128),
     );
 }
