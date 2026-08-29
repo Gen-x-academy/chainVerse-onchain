@@ -17,6 +17,7 @@ members = [
     "contracts/staking",
     "contracts/token",
     "contracts/library_licensing",
+    "contracts/library-fines",
     "contracts/library-rights",
 ]
 
