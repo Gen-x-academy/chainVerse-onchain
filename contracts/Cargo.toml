@@ -17,9 +17,7 @@ members = [
     "staking",
     "token",
     "library-rights",
-    "library-physical",
-    "library-deposits",
-    "library-fines",
+    "library_licensing",
 ]
 
 [workspace.dependencies]

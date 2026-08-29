@@ -37,6 +37,9 @@ pub enum LicenseError {
     LicenseRevoked = 9,
     InvalidDuration = 10,
     InvalidRights = 11,
+    NonTransferable = 12,
+    LoanReturned = 13,
+    InvalidRendition = 14,
 }
 
 #[contracttype]
@@ -63,10 +66,19 @@ pub struct License {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccessGrant {
+    /// The authoritative loan/license identifier. This is the only on-chain
+    /// reference needed to re-check the source of the grant.
     pub license_id: BytesN<32>,
+    /// Patron identity is immutable and is never transferable.
     pub grantee: Address,
+    /// Hash/identifier of the rendition; raw URLs and secrets remain off-chain.
+    pub rendition_id: BytesN<32>,
+    /// Explicit loan binding retained in the ABI for backend verification.
+    pub loan_id: BytesN<32>,
     pub not_before: u64,
     pub expires_at: u64,
+    /// Commitment over the authoritative loan, patron, rendition, and expiry.
+    pub commitment: BytesN<32>,
 }
 
 #[contracttype]
@@ -98,6 +110,21 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), LicenseError> {
 /// Collision-resistant id derivation (ADR-0001 I3): a monotonic instance
 /// nonce mixed with the ledger timestamp and caller-specific bytes, so two
 /// records born in the same ledger never collide.
+fn derive_commitment(
+    env: &Env,
+    loan_id: &BytesN<32>,
+    patron: &Address,
+    rendition_id: &BytesN<32>,
+    expires_at: u64,
+) -> BytesN<32> {
+    let mut input = Bytes::new(env);
+    input.append(&Bytes::from_slice(env, &loan_id.clone().to_array()));
+    input.append(&patron.clone().to_xdr(env));
+    input.append(&Bytes::from_slice(env, &rendition_id.clone().to_array()));
+    input.append(&Bytes::from_slice(env, &expires_at.to_be_bytes()));
+    env.crypto().sha256(&input).into()
+}
+
 fn derive_id(env: &Env, counter_key: DataKey, salt: Bytes) -> Result<BytesN<32>, LicenseError> {
     let nonce: u64 = env.storage().instance().get(&counter_key).unwrap_or(0);
     // #940 — checked arithmetic: the monotonic counter must not overflow
@@ -286,11 +313,17 @@ impl LibraryLicensing {
         salt.append(&Bytes::from_slice(&env, &license_id.clone().to_array()));
         salt.append(&grantee.clone().to_xdr(&env));
         let grant_id = derive_id(&env, DataKey::GrantCount, salt)?;
+        let rendition_id = license.work_id.clone();
+        let commitment =
+            derive_commitment(&env, &license_id, &grantee, &rendition_id, grant_expires_at);
         let grant = AccessGrant {
             license_id: license_id.clone(),
             grantee: grantee.clone(),
+            rendition_id: rendition_id.clone(),
+            loan_id: license_id.clone(),
             not_before: now,
             expires_at: grant_expires_at,
+            commitment: commitment.clone(),
         };
         env.storage()
             .persistent()
@@ -302,7 +335,15 @@ impl LibraryLicensing {
         );
         env.events().publish(
             (symbol_short!("GRANT_NEW"),),
-            (grant_id.clone(), license_id, grantee, now, grant_expires_at),
+            (
+                grant_id.clone(),
+                license_id,
+                grantee,
+                rendition_id,
+                now,
+                grant_expires_at,
+                commitment,
+            ),
         );
         Ok(grant_id)
     }
@@ -357,6 +398,68 @@ impl LibraryLicensing {
             .persistent()
             .get(&DataKey::AccessGrant(grant_id))
             .ok_or(LicenseError::NotFound)
+    }
+
+    /// Return the public commitment without exposing any off-chain access URL
+    /// or secret. A returned/revoked authoritative loan fails verification.
+    pub fn verify_access_grant(
+        env: Env,
+        grant_id: BytesN<32>,
+        patron: Address,
+        rendition_id: BytesN<32>,
+    ) -> Result<bool, LicenseError> {
+        let grant: AccessGrant = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AccessGrant(grant_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        let expected = derive_commitment(
+            &env,
+            &grant.loan_id,
+            &patron,
+            &rendition_id,
+            grant.expires_at,
+        );
+        Ok(grant.grantee == patron
+            && grant.rendition_id == rendition_id
+            && grant.commitment == expected
+            && Self::is_grant_active(env, grant_id).unwrap_or(false))
+    }
+
+    /// The event/query commitment is safe to expose to backend readers: it is
+    /// a hash and contains no secret, URL, or raw rendition data.
+    pub fn access_grant_commitment(
+        env: Env,
+        grant_id: BytesN<32>,
+    ) -> Result<BytesN<32>, LicenseError> {
+        Ok(Self::access_grant(env, grant_id)?.commitment)
+    }
+
+    /// Patron grants are soul-bound. This method is deliberately present in
+    /// the ABI so clients cannot mistake an omitted transfer API for a policy;
+    /// every attempted transfer fails before storage or events are mutated.
+    pub fn transfer_access_grant(
+        env: Env,
+        caller: Address,
+        grant_id: BytesN<32>,
+        _new_patron: Address,
+    ) -> Result<(), LicenseError> {
+        let grant: AccessGrant = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AccessGrant(grant_id))
+            .ok_or(LicenseError::NotFound)?;
+        if caller != grant.grantee {
+            return Err(LicenseError::Unauthorized);
+        }
+        caller.require_auth();
+        Err(LicenseError::NonTransferable)
+    }
+
+    /// Mark the authoritative loan as returned. This is the governed
+    /// institutional path: only the contract administrator can invalidate it.
+    pub fn return_loan(env: Env, caller: Address, loan_id: BytesN<32>) -> Result<(), LicenseError> {
+        Self::revoke_license(env, caller, loan_id)
     }
 }
 
