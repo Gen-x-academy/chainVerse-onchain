@@ -9,14 +9,15 @@ use soroban_sdk::{symbol_short, Address, Env};
 use crate::errors::ContractError;
 use crate::keys::{DataKey, Role, GOVERNANCE_MAX_TTL, GOVERNANCE_MIN_TTL, SCHEMA_VERSION};
 
-const ROLES: [Role; 4] = [
+const ROLES: [Role; 5] = [
     Role::Admin,
     Role::Treasury,
     Role::PolicyManager,
     Role::Emergency,
+    Role::Librarian,
 ];
 
-/// Assigns all four governance roles in a single, single-use call. Every
+/// Assigns all five governance roles in a single, single-use call. Every
 /// role address must independently authorize its own assignment; any two
 /// roles sharing the same address are rejected.
 pub fn bootstrap(
@@ -25,12 +26,19 @@ pub fn bootstrap(
     treasury: Address,
     policy_manager: Address,
     emergency: Address,
+    librarian: Address,
 ) -> Result<(), ContractError> {
     if env.storage().persistent().has(&DataKey::Role(Role::Admin)) {
         return Err(ContractError::AlreadyInitialized);
     }
 
-    let addrs = [&admin, &treasury, &policy_manager, &emergency];
+    let addrs = [
+        &admin,
+        &treasury,
+        &policy_manager,
+        &emergency,
+        &librarian,
+    ];
 
     // Reject any two roles sharing the same address *before* requiring
     // any signatures -- this also avoids calling `require_auth()` twice
@@ -65,7 +73,7 @@ pub fn bootstrap(
 
     env.events().publish(
         (symbol_short!("BOOTSTRP"),),
-        (admin, treasury, policy_manager, emergency),
+        (admin, treasury, policy_manager, emergency, librarian),
     );
 
     Ok(())

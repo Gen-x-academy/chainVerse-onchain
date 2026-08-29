@@ -27,6 +27,23 @@ pub enum ContractError {
     DuplicateRole = 4,
     /// No work record exists for the given work id.
     WorkNotFound = 5,
+    /// The requested loan was not found.
+    LoanNotFound = 7,
+    /// The requested hold was not found.
+    HoldNotFound = 8,
+    /// The requested hold has expired.
+    HoldExpired = 9,
+    /// A reserve for the given course already exists.
+    ReserveExists = 10,
+    /// The requested reserve was not found.
+    ReserveNotFound = 11,
+    /// The user is not enrolled in the course required for this loan.
+    NotEnrolled = 12,
+    /// There are no seats available for the requested reserve.
+    NoSeatsAvailable = 13,
+    /// The course registry contract address has not been set.
+    CourseRegistryNotSet = 14,
+}
     /// A commitment/attestation was supplied with a malformed (all-zero)
     /// hash; a valid content address is required.
     InvalidHash = 6,

@@ -76,6 +76,8 @@ pub enum Role {
     Treasury,
     PolicyManager,
     Emergency,
+    /// Authorized to return loans on behalf of borrowers.
+    Librarian,
 }
 
 /// Versioned storage keys for the library-rights contract.
@@ -109,9 +111,25 @@ pub enum DataKey {
     /// 0-based child-id index under a parent entry (#929).
     ChildIndex(BytesN<32>, u32),
     License(BytesN<32>, Address),
+    /// An active loan.
+    ///
+    /// `DataKey::Loan(work_id, borrower)`
     Loan(BytesN<32>, Address),
+    /// An active hold.
+    ///
+    /// `DataKey::Hold(work_id, holder)`
     Hold(BytesN<32>, Address),
+    /// A course reserve.
+    ///
+    /// `DataKey::Reserve(work_id, course_id)`
+    Reserve(BytesN<32>, BytesN<32>),
+    /// The address of the course registry contract.
+    ///
+    /// `DataKey::CourseRegistry`
+    CourseRegistry,
+}   Hold(BytesN<32>, Address),
     Balance(Address),
+}
     MembershipAttestation(BytesN<32>),
     MembershipCurrent(Address),
     MembershipCount,
