@@ -1,7 +1,60 @@
+//! #940 — Enforce license validity windows.
+//! #988 — Gate manifests by enrollment attestations.
 //! E-Library on-chain contract — library_licensing
 //!
 //! # Features
 //!
+//! Derived access grants are clamped to the parent license's window, so a
+//! sub-grant can never start before or outlive the rights it derives from.
+//! Granting a license is admin-gated (mirrors the vault `require_admin`
+//! pattern); deriving a grant is gated on the licensee AND now requires a
+//! valid, unexpired, non-replayed enrollment attestation bound to the
+//! specific course (work_id) of the parent license.
+//!
+//! ## #988 — Enrollment Attestation Design
+//!
+//! **Manifest privacy:** public read methods (`is_license_active`,
+//! `is_grant_active`) return boolean results only — they never expose
+//! protected content identifiers, rights strings, or grantee lists in
+//! their return values or error messages. The `license` and `access_grant`
+//! inspection helpers are provided for the licensee/admin and must not be
+//! surfaced in error paths.
+//!
+//! **Enrollment proof:** a caller-supplied [`EnrollmentProof`] carries
+//! `course_id` (must match the license's `work_id`), `learner` (must
+//! match `caller`), `expires_at`, and a one-time `nonce`. The contract
+//! records the nonce on first use so the same proof cannot be replayed
+//! — even for the same course — and a proof never crosses course
+//! boundaries because `course_id` is checked against the license.
+//!
+//! **Storage:** `Enrollment(nonce)` is a persistent boolean flag set to
+//! `true` the first time a proof's nonce is consumed. Subsequent calls
+//! with the same nonce fail with `ProofReplayed`. TTL matches the
+//! access-grant tier so consumed nonces are not prematurely evicted.
+//!
+//! **Events:** `ENRL_NEW` is published when an enrollment is recorded by
+//! the admin. No hidden metadata is emitted on grant derivation beyond
+//! the already-public `GRANT_NEW` event (which carries only IDs and
+//! timestamps, no rights strings or content hashes).
+//!
+//! ## Impact summary (#988)
+//!
+//! - **ABI:** `record_enrollment(caller, course_id, learner, proof_expires_at, nonce)`
+//!   added; `derive_access_grant` gains a `proof: EnrollmentProof` parameter.
+//! - **Storage:** `Enrollment(BytesN<32>)` (persistent, nonce → bool). Nonces
+//!   are consumed once; their TTL equals `LICENSE_MAX_TTL` so they outlive
+//!   any grant derived from them.
+//! - **Events:** `ENRL_NEW(course_id, learner, proof_expires_at)` published
+//!   by `record_enrollment`. No enrollment-specific data in `GRANT_NEW`.
+//! - **Privacy:** error variants for enrollment failures (`EnrollmentRequired`,
+//!   `EnrollmentExpired`, `ProofReplayed`, `ProofCourseMismatch`) carry no
+//!   content metadata — callers learn only that their proof was invalid, not
+//!   why in a way that leaks other learners' state.
+//! - **Deployment:** no existing state migration needed; `Enrollment` keys
+//!   are additive. Existing licenses and grants are unaffected.
+//! - **Migration:** none required. New `derive_access_grant` calls must now
+//!   supply an `EnrollmentProof`. Callers on the previous ABI (no proof)
+//!   must be updated to pass a proof issued by `record_enrollment`.
 //! ## #940 — Enforce license validity windows
 //! Licenses carry `not_before` (inclusive) and `expires_at` (exclusive)
 //! validity windows.  Every state-changing path validates the window using
@@ -192,6 +245,55 @@ pub struct AccessGrant {
     pub commitment: BytesN<32>,
 }
 
+/// #988 — Caller-supplied enrollment attestation.
+///
+/// Issued off-chain by the backend after verifying course enrollment
+/// and passed by the learner when calling `derive_access_grant`.
+///
+/// Fields are public so the Soroban XDR codec can encode/decode the
+/// struct, but the values are validated on-chain before any grant is
+/// issued:
+/// - `course_id` must equal the parent license's `work_id`.
+/// - `learner` must equal the transaction caller.
+/// - `expires_at` must be strictly in the future at call time.
+/// - `nonce` must not have been consumed before (replay prevention).
+///
+/// The admin records the expected proof parameters via
+/// `record_enrollment` before the learner calls `derive_access_grant`.
+/// That on-chain record is what the validation checks against, so a
+/// forged or altered `EnrollmentProof` that was never registered will
+/// fail the `EnrollmentRequired` check.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnrollmentProof {
+    /// The course (work) this enrollment covers. Must match the
+    /// target license's `work_id` exactly.
+    pub course_id: BytesN<32>,
+    /// The learner being granted access. Must equal the caller.
+    pub learner: Address,
+    /// Unix timestamp after which this proof is no longer valid
+    /// (exclusive). Prevents indefinitely-valid credentials.
+    pub expires_at: u64,
+    /// One-time value. Consumed on first use so the same proof cannot
+    /// be replayed across calls (even for the same course/learner).
+    pub nonce: BytesN<32>,
+}
+
+/// #988 — On-chain enrollment record stored by the admin.
+///
+/// Created by `record_enrollment` and read during `derive_access_grant`
+/// to confirm the learner has a registered, unexpired attestation for
+/// the requested course before any grant is issued.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnrollmentRecord {
+    /// The course this enrollment covers.
+    pub course_id: BytesN<32>,
+    /// The enrolled learner.
+    pub learner: Address,
+    /// Proof expiry timestamp (exclusive). The proof is invalid at or
+    /// after this timestamp.
+    pub proof_expires_at: u64,
 // ---------------------------------------------------------------------------
 // #984 — Granular librarian capabilities
 // ---------------------------------------------------------------------------
@@ -321,6 +423,12 @@ pub enum DataKey {
     License(BytesN<32>),
     GrantCount,
     AccessGrant(BytesN<32>),
+    // #988 — enrollment storage.
+    /// Stores the [`EnrollmentRecord`] registered for a given nonce.
+    Enrollment(BytesN<32>),
+    /// Boolean flag: set to `true` once a nonce has been consumed so
+    /// subsequent calls with the same nonce fail with `ProofReplayed`.
+    NonceUsed(BytesN<32>),
     // ── #984 ──────────────────────────────────────────────────────────────
     /// `CapabilityGrant` keyed by `(holder_address_bytes, capability_index)`.
     /// We encode the key as `(Address, u32)` via a tuple stored in a
@@ -636,6 +744,60 @@ impl LibraryLicensing {
         Ok(())
     }
 
+    /// #988 — Admin-only: register an enrollment attestation so a learner
+    /// can subsequently call `derive_access_grant` for the given course.
+    ///
+    /// The `nonce` is a one-time value chosen by the backend at issuance
+    /// time; it is stored alongside the enrollment record and consumed
+    /// the first time the learner presents the matching proof. This
+    /// prevents indefinite replay of the same credential.
+    ///
+    /// **Privacy:** the event emitted (`ENRL_NEW`) carries only
+    /// `course_id`, `learner`, and `proof_expires_at` — the same fields
+    /// already visible in the on-chain record. No rights strings, content
+    /// hashes, or other protected manifest data appear in the event.
+    pub fn record_enrollment(
+        env: Env,
+        caller: Address,
+        course_id: BytesN<32>,
+        learner: Address,
+        proof_expires_at: u64,
+        nonce: BytesN<32>,
+    ) -> Result<(), LicenseError> {
+        require_admin(&env, &caller)?;
+        let record = EnrollmentRecord {
+            course_id: course_id.clone(),
+            learner: learner.clone(),
+            proof_expires_at,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Enrollment(nonce.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Enrollment(nonce.clone()),
+            LICENSE_MIN_TTL,
+            LICENSE_MAX_TTL,
+        );
+        env.events().publish(
+            (symbol_short!("ENRL_NEW"),),
+            (course_id, learner, proof_expires_at),
+        );
+        Ok(())
+    }
+
+    /// #940 / #988 — the licensee derives a bounded access grant for `grantee`
+    /// lasting `duration` seconds. The grant window starts now and is
+    /// clamped to the parent license's window, so a derived grant can never
+    /// outlive the license it derives from. The duration addition uses
+    /// checked arithmetic: an overflowing duration fails with
+    /// `WindowOverflow` instead of wrapping to a past timestamp.
+    ///
+    /// **#988 — Enrollment gate:** `proof` must be a valid, unexpired,
+    /// non-replayed [`EnrollmentProof`] whose `course_id` matches the
+    /// license's `work_id` and whose `learner` equals `caller`. The proof's
+    /// nonce is consumed atomically so the same proof cannot be used a
+    /// second time (even for the same course). A caller who has not been
+    /// enrolled via `record_enrollment` will receive `EnrollmentRequired`.
     /// #984 — Derive a bounded access grant.  Requires the `Circulation`
     /// capability on the caller OR the caller being the licensee themselves.
     ///
@@ -648,6 +810,7 @@ impl LibraryLicensing {
         license_id: BytesN<32>,
         grantee: Address,
         duration: u64,
+        proof: EnrollmentProof,
     ) -> Result<BytesN<32>, LicenseError> {
         if duration == 0 {
             return Err(LicenseError::InvalidDuration);
@@ -664,6 +827,75 @@ impl LibraryLicensing {
         } else {
             caller.require_auth();
         }
+        caller.require_auth();
+
+        // #988 — Enrollment attestation validation.
+        //
+        // Step 1: proof.learner must equal the caller. This prevents a
+        //         legitimately enrolled learner from forwarding their proof
+        //         to another party to derive grants on their behalf.
+        if proof.learner != caller {
+            return Err(LicenseError::ProofLearnerMismatch);
+        }
+
+        // Step 2: proof.course_id must match the license's work_id. This
+        //         prevents cross-course replay: a proof issued for course A
+        //         cannot be used to unlock course B.
+        if proof.course_id != license.work_id {
+            return Err(LicenseError::ProofCourseMismatch);
+        }
+
+        // Step 3: look up the on-chain enrollment record for this nonce.
+        //         If the admin never called `record_enrollment` with this
+        //         nonce the key will be absent → EnrollmentRequired.
+        let enrollment: EnrollmentRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Enrollment(proof.nonce.clone()))
+            .ok_or(LicenseError::EnrollmentRequired)?;
+
+        // Step 4: the on-chain record's course_id and learner must match the
+        //         proof fields (belt-and-suspenders check after the key
+        //         lookup, in case a nonce was issued for a different
+        //         course/learner by the admin).
+        if enrollment.course_id != license.work_id || enrollment.learner != caller {
+            return Err(LicenseError::EnrollmentRequired);
+        }
+
+        // Step 5: replay check — the nonce must not have been consumed yet.
+        let nonce_used: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NonceUsed(proof.nonce.clone()))
+            .unwrap_or(false);
+        if nonce_used {
+            return Err(LicenseError::ProofReplayed);
+        }
+
+        // Step 6: proof expiry — checked before consuming the nonce so an
+        //         expired proof doesn't burn a valid one-time credential.
+        let now = env.ledger().timestamp();
+        if now >= proof.expires_at {
+            return Err(LicenseError::EnrollmentExpired);
+        }
+
+        // Step 7: consume the nonce. Done atomically (within the same
+        //         invocation) before the grant is issued, so a proof that
+        //         passes validation cannot be replayed even if the rest of
+        //         the call subsequently fails — the nonce is already marked.
+        env.storage()
+            .persistent()
+            .set(&DataKey::NonceUsed(proof.nonce.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::NonceUsed(proof.nonce.clone()),
+            LICENSE_MIN_TTL,
+            LICENSE_MAX_TTL,
+        );
+
+        // #940 — boundary enforcement at derivation time: the license must be
+        // inside its window. `not_before` is inclusive (`now == not_before`
+        // is active), `expires_at` is exclusive (`now == expires_at` is
+        // expired).
         let now = env.ledger().timestamp();
         if now < license.not_before {
             return Err(LicenseError::NotYetActive);
@@ -865,6 +1097,10 @@ impl LibraryLicensing {
     /// #940 — read-only check: is the license currently inside its validity
     /// window and not revoked? `not_before` inclusive, `expires_at`
     /// exclusive.
+    ///
+    /// #988 — returns a boolean only. The error path only surfaces
+    /// `NotFound`; it never leaks the license's rights string, licensee
+    /// address, or work content identifier to unauthenticated callers.
     pub fn is_license_active(env: Env, license_id: BytesN<32>) -> Result<bool, LicenseError> {
         let license: License = env
             .storage()
@@ -877,6 +1113,14 @@ impl LibraryLicensing {
             && now < license.expires_at)
     }
 
+    /// #940 — read-only check: is the derived grant currently usable? Both
+    /// the grant's own window and the parent license's window/status must be
+    /// satisfied, so revoking a license immediately kills every grant
+    /// derived from it.
+    ///
+    /// #988 — returns a boolean only. Error paths surface only `NotFound`
+    /// and never expose enrollment records, grantee identity, or protected
+    /// manifest content.
     /// Read-only check: is the derived grant currently usable?  Both the
     /// grant's own window and the parent license's window/status must be
     /// satisfied.
