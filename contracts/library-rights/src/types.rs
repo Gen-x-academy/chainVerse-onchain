@@ -44,6 +44,24 @@ pub struct Policy {
     pub max_total_concurrent_loans: u32,
 }
 
+/// Reason codes for renewal denials
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenewalDenialReason {
+    /// Loan is not active
+    LoanNotActive,
+    /// Loan has already reached maximum renewals
+    MaxRenewalsReached,
+    /// Work is on hold by another patron
+    WorkOnHold,
+    /// Policy loan limit would be exceeded
+    PolicyLimitExceeded,
+    /// Patron's loan limit would be exceeded
+    PatronLimitExceeded,
+    /// New expiry would exceed license maximum duration
+    ExceedsLicenseExpiry,
+}
+
 /// Active loan record
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -60,4 +78,12 @@ pub struct LoanRecord {
     pub is_active: bool,
     /// Policy ID that applies to this loan
     pub policy_id: Symbol,
+    /// Number of times this loan has been renewed
+    pub renewal_count: u32,
+    /// Whether auto-renewal is enabled for this loan
+    pub auto_renew: bool,
+    /// Maximum timestamp this loan can be extended to (license expiry)
+    pub max_license_expiry: u64,
+    /// Maximum number of renewals allowed for this loan
+    pub max_renewals: u32,
 }
