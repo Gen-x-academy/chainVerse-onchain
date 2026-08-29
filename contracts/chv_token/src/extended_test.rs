@@ -48,7 +48,7 @@ fn test_allowance_read_extends_ttl() {
     let owner = Address::generate(&env);
     let spender = Address::generate(&env);
 
-    client.approve(&owner, &spender, &100_i128);
+    client.approve(&owner, &spender, &100_i128, &300_000_u32);
     set_sequence(&env, 150_000);
     assert_eq!(client.allowance(&owner, &spender), 100_i128);
     set_sequence(&env, 250_000);
@@ -64,7 +64,7 @@ fn test_transfer_from_decrement_extends_ttl() {
     let recipient = Address::generate(&env);
 
     client.mint(&admin, &owner, &100_i128);
-    client.approve(&owner, &spender, &100_i128);
+    client.approve(&owner, &spender, &100_i128, &300_000_u32);
     set_sequence(&env, 150_000);
     client.transfer_from(&spender, &owner, &recipient, &40_i128);
     set_sequence(&env, 250_000);
@@ -80,7 +80,7 @@ fn test_expired_allowance_reads_as_zero_and_cannot_be_spent() {
     let recipient = Address::generate(&env);
 
     client.mint(&admin, &owner, &100_i128);
-    client.approve(&owner, &spender, &100_i128);
+    client.approve(&owner, &spender, &100_i128, &200_000_u32);
     set_sequence(&env, 200_001);
 
     assert_eq!(client.allowance(&owner, &spender), 0);
@@ -234,7 +234,7 @@ fn property_generated_operations_conserve_supply() {
                     let _ = client.try_transfer(from, to, &amount);
                 }
                 2 => {
-                    let _ = client.try_approve(from, to, &amount);
+                    let _ = client.try_approve(from, to, &amount, &u32::MAX);
                 }
                 3 => {
                     let allowance_before = client.allowance(from, to);
