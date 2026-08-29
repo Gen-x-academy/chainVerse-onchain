@@ -95,3 +95,11 @@ pub fn require_role(env: &Env, role: Role, caller: &Address) -> Result<(), Contr
     caller.require_auth();
     Ok(())
 }
+
+/// Checks if a caller holds a specific role without requiring auth.
+/// Used for authorization checks in functions that can be called by
+/// either the resource owner or an authorized role.
+pub fn has_role(env: &Env, role: Role, caller: &Address) -> Result<bool, ContractError> {
+    let holder = get_role(env, role)?;
+    Ok(holder == *caller)
+}
