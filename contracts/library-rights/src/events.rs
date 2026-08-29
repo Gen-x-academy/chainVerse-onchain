@@ -99,3 +99,22 @@ pub struct LoanRenewalDenied {
     /// Reason why renewal was denied
     pub reason: crate::types::RenewalDenialReason,
 }
+
+/// Emitted when a hold is successfully cancelled.
+#[contractevent]
+pub struct HoldCancelled {
+    /// Unique identifier of the hold that was cancelled
+    pub hold_id: BytesN<32>,
+    /// Work ID of the hold
+    pub work_id: BytesN<32>,
+    /// Patron who placed the hold
+    pub holder: Address,
+    /// Timestamp when the hold was cancelled
+    pub cancelled_at: u64,
+    /// Reason for cancellation
+    pub reason: crate::types::HoldCancellationReason,
+    /// Policy ID that applied to this hold
+    pub policy_id: Symbol,
+    /// Whether the next hold in queue was advanced to readiness
+    pub next_hold_advanced: bool,
+}
