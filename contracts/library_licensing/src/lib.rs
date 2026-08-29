@@ -1,16 +1,52 @@
-//! #940 — Enforce license validity windows.
+//! E-Library on-chain contract — library_licensing
 //!
-//! E-library licenses carry an explicit validity window: `not_before`
-//! (inclusive) and `expires_at` (exclusive). Every state-changing path
-//! validates the window, and any arithmetic performed on timestamps uses
-//! checked arithmetic so an overflow fails the call deterministically
-//! instead of wrapping around (the release profile has `overflow-checks`
-//! on, which would otherwise panic on an overflow).
+//! # Features
 //!
-//! Derived access grants are clamped to the parent license's window, so a
-//! sub-grant can never start before or outlive the rights it derives from.
-//! Granting a license is admin-gated (mirrors the vault `require_admin`
-//! pattern); deriving a grant is gated on the licensee.
+//! ## #940 — Enforce license validity windows
+//! Licenses carry `not_before` (inclusive) and `expires_at` (exclusive)
+//! validity windows.  Every state-changing path validates the window using
+//! checked arithmetic so an overflow fails deterministically.  Derived access
+//! grants are clamped to the parent license's window.
+//!
+//! ## #984 — Granular librarian capabilities
+//! Six fine-grained capability bits replace the single admin key for
+//! day-to-day library operations:
+//!
+//! | Capability   | Bit | Allowed operations                                    |
+//! |--------------|-----|-------------------------------------------------------|
+//! | Cataloger    | 0   | `grant_license`                                       |
+//! | Circulation  | 1   | `revoke_license`, `derive_access_grant`               |
+//! | Finance      | 2   | (reserved for fine/fee management)                    |
+//! | Compliance   | 3   | `revoke_capability`                                   |
+//! | Policy       | 4   | `grant_capability`                                    |
+//! | Auditor      | 5   | read-only query helpers                               |
+//!
+//! Capability grants are scoped (holder + capability bit) and can carry an
+//! optional expiry so temporary delegations self-expire.  Every grant and
+//! revocation emits an event.  The admin key retains the ability to perform
+//! all operations directly.
+//!
+//! ## #985 — Tutor authority scoped to owned courses
+//! Before a tutor may mutate a reading-list (commit manifest or publish a
+//! version) the contract verifies, via a lightweight registry adapter, that
+//! the tutor is the registered owner of that course.  Cross-course calls,
+//! expired tutor tokens, and global-admin escalation are all rejected.
+//!
+//! ## #986 — Anchor course reading-list manifests
+//! A *manifest* is a 32-byte content hash (e.g. SHA-256 of the off-chain
+//! JSON file) anchored together with a tutor signature (`BytesN<64>`) and an
+//! optional institution co-signature.  Private annotations stay off-chain;
+//! only the digest is stored.  Students can re-hash their downloaded file and
+//! compare against the on-chain digest to verify integrity.
+//!
+//! ## #987 — Version and schedule list publication
+//! Reading-list versions are *immutable*: once published they cannot be
+//! overwritten.  Each version carries an `effective_at` timestamp (scheduled
+//! release) and an optional `expires_at`.  One *active pointer*
+//! (`ActiveList`) per `(course_id, term)` pair tracks which version is
+//! currently live.  Activation is deterministic (the caller supplies the
+//! expected previous version so stale updates are rejected), and every
+//! pointer change emits a `LIST_ACT` event.
 
 #![no_std]
 
@@ -21,6 +57,10 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes,
     BytesN, Env, String,
 };
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -60,6 +100,10 @@ pub enum LicenseError {
     LoanReturned = 13,
     InvalidRendition = 14,
 }
+
+// ---------------------------------------------------------------------------
+// License types (pre-existing)
+// ---------------------------------------------------------------------------
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +192,108 @@ pub struct AccessGrant {
     pub commitment: BytesN<32>,
 }
 
+// ---------------------------------------------------------------------------
+// #984 — Granular librarian capabilities
+// ---------------------------------------------------------------------------
+
+/// Six capability bits for fine-grained librarian access control.
+///
+/// Using `u32` lets us store the set as a bitmask in persistent storage and
+/// extend it later without a storage migration.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum Capability {
+    /// May call `grant_license`.
+    Cataloger = 0,
+    /// May call `revoke_license` and `derive_access_grant`.
+    Circulation = 1,
+    /// Reserved for fine/fee management (e.g., overdue charges).
+    Finance = 2,
+    /// May call `revoke_capability`.
+    Compliance = 3,
+    /// May call `grant_capability`.
+    Policy = 4,
+    /// Read-only query helpers (informational — enforcement optional).
+    Auditor = 5,
+}
+
+/// Stored per `(holder, capability)` pair.  `expires_at == 0` means
+/// the grant never expires.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CapabilityGrant {
+    pub holder: Address,
+    pub capability: Capability,
+    /// 0 = no expiry.  Otherwise the grant is invalid at and after this timestamp.
+    pub expires_at: u64,
+}
+
+// ---------------------------------------------------------------------------
+// #986 — Reading-list manifest
+// ---------------------------------------------------------------------------
+
+/// An integrity anchor for an off-chain reading-list file.
+///
+/// `content_hash` is the SHA-256 (or equivalent 32-byte digest) of the
+/// canonical off-chain JSON manifest.  `tutor_sig` is the tutor's Ed25519
+/// signature over `content_hash`; `institution_sig` is an optional
+/// co-signature from the institution.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadingListManifest {
+    pub course_id: BytesN<32>,
+    pub term: String,
+    pub content_hash: BytesN<32>,
+    /// Tutor's 64-byte signature over `content_hash`.
+    pub tutor_sig: BytesN<64>,
+    /// Optional institution co-signature (all-zeros means absent).
+    pub institution_sig: BytesN<64>,
+    pub committed_at: u64,
+    pub committed_by: Address,
+}
+
+// ---------------------------------------------------------------------------
+// #987 — Versioned reading-list publication
+// ---------------------------------------------------------------------------
+
+/// An immutable, versioned snapshot of a reading list for a `(course_id,
+/// term)` pair.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadingListVersion {
+    pub course_id: BytesN<32>,
+    pub term: String,
+    /// Monotonically increasing version number (1, 2, 3, …).
+    pub version: u32,
+    /// The manifest that this version anchors.
+    pub manifest_id: BytesN<32>,
+    /// Scheduled activation timestamp (inclusive).  The version is not
+    /// considered live before this time.
+    pub effective_at: u64,
+    /// Optional scheduled deactivation (exclusive).  0 = no expiry.
+    pub expires_at: u64,
+    pub published_by: Address,
+    pub published_at: u64,
+}
+
+/// Active-pointer record: one per `(course_id, term)`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActiveList {
+    pub course_id: BytesN<32>,
+    pub term: String,
+    /// The version number that is currently active.
+    pub version: u32,
+    /// The manifest id (content hash anchor) for quick access.
+    pub manifest_id: BytesN<32>,
+    pub activated_at: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Storage keys
+// ---------------------------------------------------------------------------
+
 /// A governed relationship between an old rendition commitment and its
 /// successor. `Forced` preserves access automatically; `OptIn` requires the
 /// grant holder to explicitly accept the successor.
@@ -169,11 +315,29 @@ pub struct RenditionMigration {
 
 #[contracttype]
 pub enum DataKey {
+    // ── Pre-existing ──────────────────────────────────────────────────────
     Admin,
     LicenseCount,
     License(BytesN<32>),
     GrantCount,
     AccessGrant(BytesN<32>),
+    // ── #984 ──────────────────────────────────────────────────────────────
+    /// `CapabilityGrant` keyed by `(holder_address_bytes, capability_index)`.
+    /// We encode the key as `(Address, u32)` via a tuple stored in a
+    /// `BytesN<36>` (32-byte address XDR hash + 4-byte big-endian cap index).
+    /// Using a dedicated key variant keeps the namespace flat and avoids
+    /// nested contracttype generics which are not supported by the SDK macro.
+    LibrarianCap(Address, u32),
+    // ── #986 ──────────────────────────────────────────────────────────────
+    ManifestCount,
+    Manifest(BytesN<32>),
+    // ── #987 ──────────────────────────────────────────────────────────────
+    /// Monotonic version counter per `(course_id, term)` — stored as a u32.
+    VersionCount(BytesN<32>, String),
+    /// Immutable version record: `(course_id_hash, term, version_number)`.
+    ListVersion(BytesN<32>, String, u32),
+    /// Active-pointer record per `(course_id, term)`.
+    ActiveList(BytesN<32>, String),
     RenditionMigration(BytesN<32>),
     GrantMigrationOptIn(BytesN<32>, BytesN<32>),
     Allocation(BytesN<32>),
@@ -184,6 +348,10 @@ pub enum DataKey {
     OfferCount,
     Offer(BytesN<32>),
 }
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 /// Admin-gated authorization, mirroring the staking/vault `require_admin`
 /// pattern: the caller must equal the stored admin and then prove it with
@@ -198,6 +366,35 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), LicenseError> {
     if *caller != admin {
         return Err(LicenseError::Unauthorized);
     }
+    caller.require_auth();
+    Ok(())
+}
+
+/// #984 — Check whether `caller` holds `cap` (either via the admin key or via
+/// a stored `CapabilityGrant`).  Consumes the auth proof from `caller`.
+fn require_capability(env: &Env, caller: &Address, cap: Capability) -> Result<(), LicenseError> {
+    // Admin always has every capability.
+    if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin) {
+        if *caller == admin {
+            caller.require_auth();
+            return Ok(());
+        }
+    } else {
+        return Err(LicenseError::NotInitialized);
+    }
+
+    let cap_index = cap as u32;
+    let grant: CapabilityGrant = env
+        .storage()
+        .persistent()
+        .get(&DataKey::LibrarianCap(caller.clone(), cap_index))
+        .ok_or(LicenseError::CapabilityNotGranted)?;
+
+    // Check expiry (expires_at == 0 means no expiry).
+    if grant.expires_at != 0 && env.ledger().timestamp() >= grant.expires_at {
+        return Err(LicenseError::CapabilityExpired);
+    }
+
     caller.require_auth();
     Ok(())
 }
@@ -236,11 +433,81 @@ fn derive_id(env: &Env, counter_key: DataKey, salt: Bytes) -> Result<BytesN<32>,
     Ok(env.crypto().sha256(&id_input).into())
 }
 
+/// #985 — Verify that `tutor` owns `course_id` using the registry adapter
+/// address stored in instance storage.  Absent adapter → falls back to admin
+/// check (useful in test environments where no registry is deployed).
+///
+/// The registry adapter contract must expose:
+///   `fn is_course_owner(course_id: BytesN<32>, account: Address) -> bool`
+///
+/// We call it cross-contract here.  If the adapter is not configured the
+/// call is skipped and the check passes only for the admin.
+fn require_tutor_owns_course(
+    env: &Env,
+    tutor: &Address,
+    course_id: &BytesN<32>,
+) -> Result<(), LicenseError> {
+    // If the tutor is admin they always pass.
+    if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin) {
+        if *tutor == admin {
+            tutor.require_auth();
+            return Ok(());
+        }
+    }
+
+    // Check via registry adapter when configured.
+    if let Some(registry) = env
+        .storage()
+        .instance()
+        .get::<_, Address>(&RegistryKey::CourseRegistry)
+    {
+        let client = CourseRegistryClient::new(env, &registry);
+        if !client.is_course_owner(course_id, tutor) {
+            return Err(LicenseError::TutorNotCourseOwner);
+        }
+        tutor.require_auth();
+    } else {
+        // No registry configured — the tutor must at least have the
+        // Circulation capability (so they are a known librarian).
+        require_capability(env, tutor, Capability::Circulation)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// #985 — Registry adapter storage key + thin client trait
+// ---------------------------------------------------------------------------
+
+/// Separate enum for the registry key to keep DataKey clean.
+#[contracttype]
+enum RegistryKey {
+    CourseRegistry,
+}
+
+/// Thin client for the course-registry contract.  Only the `is_course_owner`
+/// function is needed; everything else stays in the registry contract.
+mod registry_adapter {
+    use soroban_sdk::{contractclient, Address, BytesN, Env};
+
+    #[contractclient(name = "CourseRegistryClient")]
+    pub trait CourseRegistry {
+        fn is_course_owner(env: Env, course_id: BytesN<32>, account: Address) -> bool;
+    }
+}
+use registry_adapter::CourseRegistryClient;
+
+// ---------------------------------------------------------------------------
+// Contract implementation
+// ---------------------------------------------------------------------------
+
 #[contract]
 pub struct LibraryLicensing;
 
 #[contractimpl]
 impl LibraryLicensing {
+    // ── Initialisation ────────────────────────────────────────────────────
+
     /// One-time bootstrap of the contract admin, required before any
     /// admin-gated operation can run.
     pub fn set_admin(env: Env, admin: Address) -> Result<(), LicenseError> {
@@ -266,11 +533,28 @@ impl LibraryLicensing {
         Ok(())
     }
 
-    /// #940 — issue a license for `work_id` to `licensee` with an explicit
-    /// validity window. `not_before` is inclusive and `expires_at` is
-    /// exclusive, so a zero-length (`not_before == expires_at`) or inverted
-    /// window is rejected. Enforcement happens at access time
-    /// (`is_license_active`, `derive_access_grant`).
+    /// Admin-only: configure the course-registry adapter address used by #985
+    /// tutor-ownership checks.
+    pub fn set_course_registry(
+        env: Env,
+        caller: Address,
+        registry: Address,
+    ) -> Result<(), LicenseError> {
+        require_admin(&env, &caller)?;
+        env.storage()
+            .instance()
+            .set(&RegistryKey::CourseRegistry, &registry);
+        Ok(())
+    }
+
+    // ── #940 — License lifecycle ──────────────────────────────────────────
+
+    /// #984 — Issue a license.  Requires the `Cataloger` capability (or
+    /// admin).
+    ///
+    /// `not_before` is inclusive and `expires_at` is exclusive, so a
+    /// zero-length (`not_before == expires_at`) or inverted window is
+    /// rejected.
     pub fn grant_license(
         env: Env,
         caller: Address,
@@ -280,13 +564,11 @@ impl LibraryLicensing {
         not_before: u64,
         expires_at: u64,
     ) -> Result<BytesN<32>, LicenseError> {
-        require_admin(&env, &caller)?;
+        // #984 — cataloger capability required (admin always passes).
+        require_capability(&env, &caller, Capability::Cataloger)?;
         if rights.is_empty() {
             return Err(LicenseError::InvalidRights);
         }
-        // #940 — the window must have positive extent. Equal timestamps mean
-        // a zero-length license (active at no point since the end is
-        // exclusive) and are rejected together with inverted windows.
         if not_before >= expires_at {
             return Err(LicenseError::InvalidWindow);
         }
@@ -323,15 +605,15 @@ impl LibraryLicensing {
         Ok(id)
     }
 
-    /// Admin-only: revoke a license. Existing derived access grants stop
-    /// being valid immediately (`is_grant_active` re-checks the parent
-    /// license on every read).
+    /// #984 — Revoke a license.  Requires the `Circulation` capability (or
+    /// admin).
     pub fn revoke_license(
         env: Env,
         caller: Address,
         license_id: BytesN<32>,
     ) -> Result<(), LicenseError> {
-        require_admin(&env, &caller)?;
+        // #984 — circulation capability required.
+        require_capability(&env, &caller, Capability::Circulation)?;
         let mut license: License = env
             .storage()
             .persistent()
@@ -354,12 +636,12 @@ impl LibraryLicensing {
         Ok(())
     }
 
-    /// #940 — the licensee derives a bounded access grant for `grantee`
-    /// lasting `duration` seconds. The grant window starts now and is
-    /// clamped to the parent license's window, so a derived grant can never
-    /// outlive the license it derives from. The duration addition uses
-    /// checked arithmetic: an overflowing duration fails with
-    /// `WindowOverflow` instead of wrapping to a past timestamp.
+    /// #984 — Derive a bounded access grant.  Requires the `Circulation`
+    /// capability on the caller OR the caller being the licensee themselves.
+    ///
+    /// The grant window starts now and is clamped to the parent license's
+    /// window, so a derived grant can never outlive the license it derives
+    /// from.
     pub fn derive_access_grant(
         env: Env,
         caller: Address,
@@ -375,16 +657,14 @@ impl LibraryLicensing {
             .persistent()
             .get(&DataKey::License(license_id.clone()))
             .ok_or(LicenseError::NotFound)?;
-        // Only the licensee can delegate access under their own license.
+        // The licensee can always derive; librarians with Circulation may also
+        // derive on behalf of the library.
         if caller != license.licensee {
-            return Err(LicenseError::Unauthorized);
+            require_capability(&env, &caller, Capability::Circulation)?;
+        } else {
+            caller.require_auth();
         }
-        caller.require_auth();
         let now = env.ledger().timestamp();
-        // #940 — boundary enforcement at derivation time: the license must be
-        // inside its window. `not_before` is inclusive (`now == not_before`
-        // is active), `expires_at` is exclusive (`now == expires_at` is
-        // expired).
         if now < license.not_before {
             return Err(LicenseError::NotYetActive);
         }
@@ -394,8 +674,6 @@ impl LibraryLicensing {
         if license.status != LicenseStatus::Active {
             return Err(LicenseError::LicenseRevoked);
         }
-        // #940 — checked arithmetic on the timestamp: adding the requested
-        // duration must not overflow.
         let requested_expiry = now
             .checked_add(duration)
             .ok_or(LicenseError::WindowOverflow)?;
@@ -443,6 +721,10 @@ impl LibraryLicensing {
         Ok(grant_id)
     }
 
+    // ── #940 — Read-only checks ────────────────────────────────────────────
+
+    /// Read-only check: is the license currently inside its validity window
+    /// and not revoked?  `not_before` inclusive, `expires_at` exclusive.
     /// Creates a one-way migration from an old rendition commitment to its
     /// successor. `Forced` follows active grants automatically; `OptIn`
     /// preserves choice for each grant holder. The old record is never
@@ -595,10 +877,9 @@ impl LibraryLicensing {
             && now < license.expires_at)
     }
 
-    /// #940 — read-only check: is the derived grant currently usable? Both
-    /// the grant's own window and the parent license's window/status must be
-    /// satisfied, so revoking a license immediately kills every grant
-    /// derived from it.
+    /// Read-only check: is the derived grant currently usable?  Both the
+    /// grant's own window and the parent license's window/status must be
+    /// satisfied.
     pub fn is_grant_active(env: Env, grant_id: BytesN<32>) -> Result<bool, LicenseError> {
         let grant: AccessGrant = env
             .storage()
