@@ -7,6 +7,27 @@
 //! Derived access grants are clamped to the parent license's window, so a
 //! sub-grant can never start before or outlive the rights it derives from.
 //! Granting a license is admin-gated (mirrors the vault `require_admin`
+//! pattern); deriving a grant is gated on the licensee.
+//!
+//! #942 — Per-format entitlements.
+//!
+//! Each license can carry entitlements bound to an explicit rendition id
+//! (e.g. `EPUB`, `PDF`, `AUDIO`) and an allowed access mode
+//! ([`AccessMode::Borrow`] or [`AccessMode::AccessibleAlternative`]).
+//! Entitlements are queried by exact `(rendition_id, access_mode)` pair,
+//! so borrowing one format can never unlock another, while accessible
+//! alternatives can be granted intentionally. The entitlement mapping is
+//! queryable within bounds via [`LibraryLicensing::entitlements`].
+//!
+//! #943 — Concurrent digital seats.
+//!
+//! Licenses also track a `total_seats` budget with an `allocated_seats`
+//! counter. Allocation uses checked arithmetic and can never exceed the
+//! supply (competing calls fail with `NoSeatsAvailable`); release
+//! restores exactly one seat. The `allocated <= total` invariant holds on
+//! every lifecycle path: issuance starts at zero, allocation is rejected
+//! once the budget is exhausted or the license is not active, and release
+//! is rejected when nothing is allocated.
 //! pattern); deriving a grant is gated on the licensee AND now requires a
 //! valid, unexpired, non-replayed enrollment attestation bound to the
 //! specific course (work_id) of the parent license.
@@ -107,8 +128,8 @@ const LICENSE_MIN_TTL: u32 = 100_000;
 const LICENSE_MAX_TTL: u32 = 500_000;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, xdr::ToXdr, Address, Bytes,
-    BytesN, Env, String,
+    contract, contracterror, contractimpl, contracttype, symbol_short, vec, xdr::ToXdr, Address,
+    Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -130,6 +151,17 @@ pub enum LicenseError {
     LicenseRevoked = 9,
     InvalidDuration = 10,
     InvalidRights = 11,
+    /// #943 — a license must reserve at least one concurrent seat.
+    InvalidSeats = 12,
+    /// #943 — every seat of the license is currently allocated.
+    NoSeatsAvailable = 13,
+    /// #943 — release was attempted while no seat was allocated.
+    NoSeatsAllocated = 14,
+    /// #942 — no entitlement exists for the given (license, rendition).
+    EntitlementNotFound = 15,
+    /// A monotonic counter overflowed; the call failed deterministically
+    /// instead of silently wrapping.
+    Overflow = 16,
     /// The source and successor rendition commitments must differ.
     InvalidRenditionMigration = 12,
     /// A migration already exists for the source rendition.
@@ -165,6 +197,18 @@ pub enum LicenseStatus {
     Revoked,
 }
 
+/// #942 — the access modes an entitlement may allow.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccessMode {
+    /// The rendition may be borrowed/read in its primary form.
+    Borrow,
+    /// The rendition may be accessed through an accessible alternative
+    /// (e.g. alt-text EPUB). Granted intentionally, never implied by a
+    /// `Borrow` entitlement on another rendition.
+    AccessibleAlternative,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct License {
@@ -177,6 +221,11 @@ pub struct License {
     /// Validity window end, exclusive: the license is inactive at and after this timestamp.
     pub expires_at: u64,
     pub status: LicenseStatus,
+    /// #943 — maximum number of concurrent digital seats the license may
+    /// allocate. Fixed at issuance (must be > 0).
+    pub total_seats: u32,
+    /// #943 — seats currently allocated. Always `<= total_seats`.
+    pub allocated_seats: u32,
 }
 
 #[contracttype]
@@ -415,6 +464,19 @@ pub struct RenditionMigration {
     pub created_at: u64,
 }
 
+/// #942 — an entitlement binds one rendition id of the licensed work to
+/// one allowed access mode. Stored under
+/// `DataKey::Entitlement(license_id, rendition_id)`; rendition ids are
+/// also kept in an ordered `Vec` per license for bounded queries.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Entitlement {
+    pub license_id: BytesN<32>,
+    pub rendition_id: Symbol,
+    pub access_mode: AccessMode,
+    pub granted_at: u64,
+}
+
 #[contracttype]
 pub enum DataKey {
     // ── Pre-existing ──────────────────────────────────────────────────────
@@ -423,6 +485,12 @@ pub enum DataKey {
     License(BytesN<32>),
     GrantCount,
     AccessGrant(BytesN<32>),
+    /// #942 — `Entitlement(license_id, rendition_id, access_mode)` ->
+    /// `Entitlement`. One entry per (rendition, access mode) pair.
+    Entitlement(BytesN<32>, Symbol, AccessMode),
+    /// #942 — ordered (rendition, access mode) pairs per license, for
+    /// bounded queries.
+    EntitlementKeys(BytesN<32>),
     // #988 — enrollment storage.
     /// Stores the [`EnrollmentRecord`] registered for a given nonce.
     Enrollment(BytesN<32>),
@@ -641,6 +709,17 @@ impl LibraryLicensing {
         Ok(())
     }
 
+    /// #940 — issue a license for `work_id` to `licensee` with an explicit
+    /// validity window. `not_before` is inclusive and `expires_at` is
+    /// exclusive, so a zero-length (`not_before == expires_at`) or inverted
+    /// window is rejected. Enforcement happens at access time
+    /// (`is_license_active`, `derive_access_grant`).
+    ///
+    /// #943 — `total_seats` reserves the license's concurrent-seat budget
+    /// (must be > 0; `InvalidSeats` otherwise). Issuance always starts with
+    /// zero allocated seats, so the `allocated <= total` invariant holds
+    /// from the first lifecycle path.
+    #[allow(clippy::too_many_arguments)]
     /// Admin-only: configure the course-registry adapter address used by #985
     /// tutor-ownership checks.
     pub fn set_course_registry(
@@ -671,6 +750,7 @@ impl LibraryLicensing {
         rights: String,
         not_before: u64,
         expires_at: u64,
+        total_seats: u32,
     ) -> Result<BytesN<32>, LicenseError> {
         // #984 — cataloger capability required (admin always passes).
         require_capability(&env, &caller, Capability::Cataloger)?;
@@ -679,6 +759,10 @@ impl LibraryLicensing {
         }
         if not_before >= expires_at {
             return Err(LicenseError::InvalidWindow);
+        }
+        // #943 — a license with no seats can never be used; reject up front.
+        if total_seats == 0 {
+            return Err(LicenseError::InvalidSeats);
         }
         let admin: Address = env
             .storage()
@@ -697,6 +781,8 @@ impl LibraryLicensing {
             not_before,
             expires_at,
             status: LicenseStatus::Active,
+            total_seats,
+            allocated_seats: 0,
         };
         env.storage()
             .persistent()
@@ -708,11 +794,16 @@ impl LibraryLicensing {
         );
         env.events().publish(
             (symbol_short!("LIC_NEW"),),
-            (id.clone(), licensee, not_before, expires_at),
+            (id.clone(), licensee, not_before, expires_at, total_seats),
         );
         Ok(id)
     }
 
+    /// Admin-only: revoke a license. Existing derived access grants stop
+    /// being valid immediately (`is_grant_active` re-checks the parent
+    /// license on every read). Seat allocation is also rejected on a
+    /// revoked license, while release remains available so allocated seats
+    /// can be cleaned up.
     /// #984 — Revoke a license.  Requires the `Circulation` capability (or
     /// admin).
     pub fn revoke_license(
@@ -1143,6 +1234,320 @@ impl LibraryLicensing {
         Ok(license_ok && grant_ok)
     }
 
+    // ===== #942 — per-format entitlements =====
+
+    /// #942 — admin-only: bind `rendition_id` on `license_id` to
+    /// `access_mode`. Entitlements are keyed by the exact
+    /// `(rendition_id, access_mode)` pair, so granting `Borrow` on one
+    /// rendition never unlocks another rendition or mode, while an
+    /// `AccessibleAlternative` can be granted intentionally without
+    /// disturbing the primary entitlement. Granting an already-granted
+    /// pair is idempotent (refreshes the TTL). Rejected when the license
+    /// does not exist or is revoked.
+    pub fn grant_entitlement(
+        env: Env,
+        caller: Address,
+        license_id: BytesN<32>,
+        rendition_id: Symbol,
+        access_mode: AccessMode,
+    ) -> Result<(), LicenseError> {
+        require_admin(&env, &caller)?;
+        let license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(license_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        if license.status != LicenseStatus::Active {
+            return Err(LicenseError::LicenseRevoked);
+        }
+
+        let key = DataKey::Entitlement(license_id.clone(), rendition_id.clone(), access_mode);
+        if let Some(ent) = env.storage().persistent().get::<DataKey, Entitlement>(&key) {
+            // Idempotent re-grant: refresh the TTL and leave the record
+            // (and the key list) untouched.
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+            env.events().publish(
+                (symbol_short!("ENT_UPD"),),
+                (license_id, rendition_id, ent.access_mode),
+            );
+            return Ok(());
+        }
+
+        // Append the (rendition, mode) pair to the ordered key list for
+        // bounded queries.
+        let keys_key = DataKey::EntitlementKeys(license_id.clone());
+        let mut keys: Vec<(Symbol, AccessMode)> = env
+            .storage()
+            .persistent()
+            .get(&keys_key)
+            .unwrap_or_else(|| vec![&env]);
+        let len = keys.len();
+        let next = len.checked_add(1).ok_or(LicenseError::Overflow)?;
+        keys.push_back((rendition_id.clone(), access_mode));
+        env.storage().persistent().set(&keys_key, &keys);
+        env.storage()
+            .persistent()
+            .extend_ttl(&keys_key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+
+        let ent = Entitlement {
+            license_id: license_id.clone(),
+            rendition_id: rendition_id.clone(),
+            access_mode,
+            granted_at: env.ledger().timestamp(),
+        };
+        env.storage().persistent().set(&key, &ent);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+
+        env.events().publish(
+            (symbol_short!("ENT_GRANT"),),
+            (license_id, rendition_id, ent.access_mode, next),
+        );
+        Ok(())
+    }
+
+    /// #942 — admin-only: remove the `(rendition_id, access_mode)`
+    /// entitlement from `license_id`. Fails with `EntitlementNotFound`
+    /// when no such pair exists.
+    pub fn revoke_entitlement(
+        env: Env,
+        caller: Address,
+        license_id: BytesN<32>,
+        rendition_id: Symbol,
+        access_mode: AccessMode,
+    ) -> Result<(), LicenseError> {
+        require_admin(&env, &caller)?;
+        let key = DataKey::Entitlement(license_id.clone(), rendition_id.clone(), access_mode);
+        let ent: Entitlement = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(LicenseError::EntitlementNotFound)?;
+
+        // Remove the pair from the ordered key list so queries stay bounded.
+        let keys_key = DataKey::EntitlementKeys(license_id.clone());
+        let mut keys: Vec<(Symbol, AccessMode)> = env
+            .storage()
+            .persistent()
+            .get(&keys_key)
+            .unwrap_or_else(|| vec![&env]);
+        if let Some(pos) = keys
+            .iter()
+            .position(|(rid, mode)| rid == rendition_id && mode == access_mode)
+        {
+            keys.remove(pos as u32);
+        }
+        env.storage().persistent().set(&keys_key, &keys);
+        env.storage()
+            .persistent()
+            .extend_ttl(&keys_key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+
+        env.storage().persistent().remove(&key);
+        env.events().publish(
+            (symbol_short!("ENT_REVK"),),
+            (license_id, rendition_id, ent.access_mode),
+        );
+        Ok(())
+    }
+
+    /// #942 — read-only: is `rendition_id` usable under `license_id` with
+    /// exactly `access_mode`? Returns `Ok(false)` when the license is not
+    /// currently active (outside its window or revoked) or when the exact
+    /// `(rendition_id, access_mode)` pair is not granted -- so borrowing
+    /// one format never unlocks another format or mode.
+    pub fn is_entitled(
+        env: Env,
+        license_id: BytesN<32>,
+        rendition_id: Symbol,
+        access_mode: AccessMode,
+    ) -> Result<bool, LicenseError> {
+        let license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(license_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        let now = env.ledger().timestamp();
+        if license.status != LicenseStatus::Active
+            || now < license.not_before
+            || now >= license.expires_at
+        {
+            return Ok(false);
+        }
+        let key = DataKey::Entitlement(license_id, rendition_id, access_mode);
+        Ok(env.storage().persistent().has(&key))
+    }
+
+    /// #942 — read-only: returns the stored entitlement for the exact
+    /// `(license_id, rendition_id, access_mode)` triple, or
+    /// `EntitlementNotFound`.
+    pub fn entitlement(
+        env: Env,
+        license_id: BytesN<32>,
+        rendition_id: Symbol,
+        access_mode: AccessMode,
+    ) -> Result<Entitlement, LicenseError> {
+        let key = DataKey::Entitlement(license_id, rendition_id, access_mode);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .ok_or(LicenseError::EntitlementNotFound)
+    }
+
+    /// #942 — read-only: returns how many entitlements `license_id` has.
+    pub fn entitlements_len(env: Env, license_id: BytesN<32>) -> u32 {
+        let keys_key = DataKey::EntitlementKeys(license_id);
+        env.storage()
+            .persistent()
+            .get::<DataKey, Vec<(Symbol, AccessMode)>>(&keys_key)
+            .map(|keys| keys.len())
+            .unwrap_or(0)
+    }
+
+    /// #942 — read-only: returns up to `limit` entitlements of
+    /// `license_id` starting at `from` (0-based). Out-of-range windows
+    /// clamp to the stored length, so the mapping is always queryable
+    /// within bounds.
+    pub fn entitlements(
+        env: Env,
+        license_id: BytesN<32>,
+        from: u32,
+        limit: u32,
+    ) -> Vec<Entitlement> {
+        let keys_key = DataKey::EntitlementKeys(license_id.clone());
+        let keys: Vec<(Symbol, AccessMode)> = env
+            .storage()
+            .persistent()
+            .get(&keys_key)
+            .unwrap_or_else(|| vec![&env]);
+        let len = keys.len();
+        if from >= len || limit == 0 {
+            return vec![&env];
+        }
+        let end = from.saturating_add(limit).min(len);
+        let mut out: Vec<Entitlement> = vec![&env];
+        for i in from..end {
+            let (rendition_id, access_mode) = keys.get(i).unwrap();
+            let key = DataKey::Entitlement(license_id.clone(), rendition_id.clone(), access_mode);
+            if let Some(ent) = env.storage().persistent().get::<DataKey, Entitlement>(&key) {
+                out.push_back(ent);
+            }
+        }
+        out
+    }
+
+    // ===== #943 — concurrent digital seats =====
+
+    /// #943 — the licensee allocates one concurrent digital seat on
+    /// `license_id`. Uses checked arithmetic and can never exceed the
+    /// license's `total_seats` supply: once the budget is exhausted,
+    /// competing calls fail with `NoSeatsAvailable`. Allocation is only
+    /// allowed while the license is inside its validity window and not
+    /// revoked.
+    pub fn allocate_seat(
+        env: Env,
+        caller: Address,
+        license_id: BytesN<32>,
+    ) -> Result<(), LicenseError> {
+        let mut license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(license_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        if caller != license.licensee {
+            return Err(LicenseError::Unauthorized);
+        }
+        caller.require_auth();
+        let now = env.ledger().timestamp();
+        if now < license.not_before {
+            return Err(LicenseError::NotYetActive);
+        }
+        if now >= license.expires_at {
+            return Err(LicenseError::Expired);
+        }
+        if license.status != LicenseStatus::Active {
+            return Err(LicenseError::LicenseRevoked);
+        }
+        if license.allocated_seats >= license.total_seats {
+            return Err(LicenseError::NoSeatsAvailable);
+        }
+        // Checked arithmetic: the invariant `allocated <= total` means this
+        // cannot overflow, but the increment is explicit per the issue's
+        // checked-arithmetic requirement.
+        let allocated = license
+            .allocated_seats
+            .checked_add(1)
+            .ok_or(LicenseError::NoSeatsAvailable)?;
+        license.allocated_seats = allocated;
+        env.storage()
+            .persistent()
+            .set(&DataKey::License(license_id.clone()), &license);
+        env.storage().persistent().extend_ttl(
+            &DataKey::License(license_id.clone()),
+            LICENSE_MIN_TTL,
+            LICENSE_MAX_TTL,
+        );
+        env.events().publish(
+            (symbol_short!("SEAT_NEW"),),
+            (license_id, license.allocated_seats, license.total_seats),
+        );
+        Ok(())
+    }
+
+    /// #943 — the licensee releases one concurrent digital seat, restoring
+    /// exactly one unit of supply. Rejected with `NoSeatsAllocated` when
+    /// nothing is allocated (underflow guard). Release stays available on
+    /// expired/revoked licenses so seats can always be cleaned up; the
+    /// decrement is checked so it can never wrap.
+    pub fn release_seat(
+        env: Env,
+        caller: Address,
+        license_id: BytesN<32>,
+    ) -> Result<(), LicenseError> {
+        let mut license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(license_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        if caller != license.licensee {
+            return Err(LicenseError::Unauthorized);
+        }
+        caller.require_auth();
+        if license.allocated_seats == 0 {
+            return Err(LicenseError::NoSeatsAllocated);
+        }
+        let allocated = license
+            .allocated_seats
+            .checked_sub(1)
+            .ok_or(LicenseError::NoSeatsAllocated)?;
+        license.allocated_seats = allocated;
+        env.storage()
+            .persistent()
+            .set(&DataKey::License(license_id.clone()), &license);
+        env.storage().persistent().extend_ttl(
+            &DataKey::License(license_id.clone()),
+            LICENSE_MIN_TTL,
+            LICENSE_MAX_TTL,
+        );
+        env.events().publish(
+            (symbol_short!("SEAT_RELS"),),
+            (license_id, license.allocated_seats, license.total_seats),
+        );
+        Ok(())
+    }
+
+    /// #943 — read-only: how many seats of `license_id` remain available
+    /// (`total - allocated`). Always non-negative: `allocated <= total` is
+    /// maintained on every lifecycle path.
+    pub fn available_seats(env: Env, license_id: BytesN<32>) -> Result<u32, LicenseError> {
+        let license: License = env
+            .storage()
+            .persistent()
+            .get(&DataKey::License(license_id))
+            .ok_or(LicenseError::NotFound)?;
+        Ok(license.total_seats - license.allocated_seats)
     /// Set the seat capacity available for allocations under a parent license.
     /// Only the licensee (the institution receiving the parent license) may set
     /// this limit, and lowering it below already allocated seats is rejected.

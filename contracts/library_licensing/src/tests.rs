@@ -23,6 +23,9 @@ use crate::{
     RenditionMigrationPolicy,
 };
 
+mod entitlements;
+mod seats;
+
 fn setup() -> (Env, Address) {
     let env = Env::default();
     env.mock_all_auths();
@@ -30,6 +33,9 @@ fn setup() -> (Env, Address) {
     (env, contract_id)
 }
 
+/// Grant a "read" license for `work_id` to `licensee` with the given window
+/// and a default seat budget of 5 (#943).
+fn grant(
 /// Initialise admin and return a client.
 fn setup_with_admin() -> (Env, Address, Address) {
     let (env, contract_id) = setup();
@@ -50,7 +56,15 @@ fn grant_license(
     expires_at: u64,
 ) -> BytesN<32> {
     let rights = String::from_str(env, "read");
-    client.grant_license(admin, work_id, licensee, &rights, &not_before, &expires_at)
+    client.grant_license(
+        admin,
+        work_id,
+        licensee,
+        &rights,
+        &not_before,
+        &expires_at,
+        &5u32,
+    )
 }
 
 /// Register an enrollment and return the nonce used, so tests can build
@@ -145,7 +159,9 @@ fn test_grant_license_not_initialized() {
     let work_id = BytesN::from_array(&env, &[1u8; 32]);
     let licensee = Address::generate(&env);
     let rights = String::from_str(&env, "read");
-    let res = client.try_grant_license(&admin, &work_id, &licensee, &rights, &1000u64, &2000u64);
+    let res = client.try_grant_license(
+        &admin, &work_id, &licensee, &rights, &1000u64, &2000u64, &5u32,
+    );
     assert_eq!(res, Err(Ok(LicenseError::NotInitialized)));
 }
 
@@ -157,6 +173,10 @@ fn test_grant_license_unauthorized() {
     let work_id = BytesN::from_array(&env, &[1u8; 32]);
     let licensee = Address::generate(&env);
     let rights = String::from_str(&env, "read");
+    let res = client.try_grant_license(
+        &attacker, &work_id, &licensee, &rights, &1000u64, &2000u64, &5u32,
+    );
+    assert_eq!(res, Err(Ok(LicenseError::Unauthorized)));
     // attacker has neither admin nor Cataloger capability
     let res = client.try_grant_license(&attacker, &work_id, &licensee, &rights, &1000u64, &2000u64);
     assert_eq!(res, Err(Ok(LicenseError::CapabilityNotGranted)));
@@ -216,7 +236,9 @@ fn test_grant_license_empty_rights_rejected() {
     let work_id = BytesN::from_array(&env, &[1u8; 32]);
     let licensee = Address::generate(&env);
     let rights = String::from_str(&env, "");
-    let res = client.try_grant_license(&admin, &work_id, &licensee, &rights, &1000u64, &2000u64);
+    let res = client.try_grant_license(
+        &admin, &work_id, &licensee, &rights, &1000u64, &2000u64, &5u32,
+    );
     assert_eq!(res, Err(Ok(LicenseError::InvalidRights)));
 }
 
@@ -227,6 +249,11 @@ fn test_grant_license_zero_length_window_rejected() {
     let work_id = BytesN::from_array(&env, &[1u8; 32]);
     let licensee = Address::generate(&env);
     let rights = String::from_str(&env, "read");
+    // not_before == expires_at: a zero-length window is never active because
+    // the end is exclusive.
+    let res = client.try_grant_license(
+        &admin, &work_id, &licensee, &rights, &1000u64, &1000u64, &5u32,
+    );
     let res = client.try_grant_license(&admin, &work_id, &licensee, &rights, &1000u64, &1000u64);
     assert_eq!(res, Err(Ok(LicenseError::InvalidWindow)));
 }
@@ -238,7 +265,9 @@ fn test_grant_license_inverted_window_rejected() {
     let work_id = BytesN::from_array(&env, &[1u8; 32]);
     let licensee = Address::generate(&env);
     let rights = String::from_str(&env, "read");
-    let res = client.try_grant_license(&admin, &work_id, &licensee, &rights, &2000u64, &1000u64);
+    let res = client.try_grant_license(
+        &admin, &work_id, &licensee, &rights, &2000u64, &1000u64, &5u32,
+    );
     assert_eq!(res, Err(Ok(LicenseError::InvalidWindow)));
 }
 
@@ -290,6 +319,9 @@ fn test_grant_license_success_and_storage() {
     assert_eq!(license.not_before, 1000);
     assert_eq!(license.expires_at, 2000);
     assert_eq!(license.status, LicenseStatus::Active);
+    // #943 — the seat budget is stored at issuance and starts empty.
+    assert_eq!(license.total_seats, 5);
+    assert_eq!(license.allocated_seats, 0);
 }
 
 #[test]

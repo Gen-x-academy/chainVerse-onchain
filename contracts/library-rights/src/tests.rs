@@ -1,11 +1,13 @@
 use crate::LibraryRightsContract;
 use soroban_sdk::{Address, Env, String};
 
+mod classifications;
 mod content;
 mod governance;
 mod metadata;
 mod integrity_membership;
 mod privacy;
+mod provenance;
 mod registry;
 mod storage;
 

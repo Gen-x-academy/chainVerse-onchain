@@ -85,10 +85,8 @@ fn test_resolve_dispute_allocates_funds_between_buyer_and_seller() {
     let ctx = setup(1_000);
     let id = create_and_fund_disputed(&ctx, 1_000);
 
-    let res = ctx
-        .client
+    ctx.client
         .resolve_dispute(&ctx.arbiter, &id, &600, &400, &0, &reason(&ctx.env));
-    assert!(res.is_ok());
 
     let escrow = ctx.client.get_escrow(&id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Completed);
@@ -104,10 +102,8 @@ fn test_resolve_dispute_accepts_zero_allocations() {
     let ctx = setup(1_000);
     let id = create_and_fund_disputed(&ctx, 1_000);
 
-    let res = ctx
-        .client
+    ctx.client
         .resolve_dispute(&ctx.arbiter, &id, &1_000, &0, &0, &reason(&ctx.env));
-    assert!(res.is_ok());
 
     let escrow = ctx.client.get_escrow(&id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Completed);
@@ -205,10 +201,8 @@ fn test_resolve_dispute_accumulates_fee_into_protocol_fees() {
     let id = create_and_fund_disputed(&ctx, 1_000);
 
     // 400 to buyer, 500 to seller, 100 resolution fee = 1_000 total.
-    let res = ctx
-        .client
+    ctx.client
         .resolve_dispute(&ctx.arbiter, &id, &400, &500, &100, &reason(&ctx.env));
-    assert!(res.is_ok());
 
     let escrow = ctx.client.get_escrow(&id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Completed);

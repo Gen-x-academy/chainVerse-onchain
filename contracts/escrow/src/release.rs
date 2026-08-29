@@ -39,8 +39,8 @@ fn authorize_releaser(env: &Env, caller: &Address, buyer: &Address) -> Result<()
 }
 
 /// Releases the full remaining balance of a funded escrow to the seller.
-/// Requires the escrow to be in `Funded` state (#859).
-/// Requires the escrow to be in `Funded` or `Disputed` state (#708).
+/// Requires the escrow to be in `Funded` state (#859). Disputed escrows are
+/// blocked until the dispute is resolved (`InvalidEscrowState`).
 /// Guard order: authorization, expiry, state guard, fee, transfer, accounting.
 pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), EscrowError> {
     let mut escrow = load_escrow(env, escrow_id).ok_or(EscrowError::NotFound)?;
@@ -53,28 +53,17 @@ pub fn release_escrow(env: &Env, caller: Address, escrow_id: u64) -> Result<(), 
         return Err(EscrowError::Expired);
     }
 
-    // 3. State guard — only Funded or Disputed escrows may be released.
+    // 3. State guard — only Funded escrows may be released. Disputed escrows
+    //    are blocked until the dispute is resolved (release requires a Funded
+    //    state, #859).
     if escrow.status == EscrowStatus::Completed {
         return Err(EscrowError::AlreadyReleased);
     }
-
-    // #859: guard — only Funded escrows may be released. Disputed escrows are
-    // blocked until the dispute is resolved (release requires a Funded state).
     if escrow.status != EscrowStatus::Funded {
-    if escrow.status != EscrowStatus::Funded && escrow.status != EscrowStatus::Disputed {
         return Err(EscrowError::InvalidEscrowState);
     }
 
-    // 4. Fee calculation.
-    let fee_bps = get_protocol_fee_bps(env) as i128;
-    let fee_amount = escrow.amount * fee_bps / 10_000;
-    let seller_amount = escrow.amount - fee_amount;
-    authorize_releaser(env, &caller, &escrow.buyer)?;
-
-    if env.ledger().timestamp() >= escrow.expiration {
-        return Err(EscrowError::Expired);
-    }
-
+    // 4. Fee calculation (checked arithmetic, #861).
     let fee_bps = get_protocol_fee_bps(env);
     let (fee_amount, seller_amount) = compute_fee_and_payout(escrow.amount, fee_bps)?;
 
