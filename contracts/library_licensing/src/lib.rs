@@ -163,27 +163,33 @@ pub enum LicenseError {
     /// instead of silently wrapping.
     Overflow = 16,
     /// The source and successor rendition commitments must differ.
-    InvalidRenditionMigration = 12,
+    InvalidRenditionMigration = 28,
     /// A migration already exists for the source rendition.
-    RenditionMigrationExists = 13,
+    RenditionMigrationExists = 29,
     /// The requested grant or rendition migration does not exist.
-    MigrationNotFound = 14,
+    MigrationNotFound = 30,
     /// The caller has not opted into an opt-in migration.
-    MigrationNotAccepted = 15,
+    MigrationNotAccepted = 31,
     /// A grant may only opt into a migration for its license's rendition.
-    InvalidMigrationTarget = 16,
-    InvalidSeats = 12,
-    AllocationExceeded = 13,
-    InvalidRole = 14,
-    AttestationExpired = 15,
-    AttestationRevoked = 16,
-    OfferExpired = 17,
-    OfferAlreadyAccepted = 18,
-    OfferBindingMismatch = 19,
-    InvalidPrice = 20,
-    NonTransferable = 12,
-    LoanReturned = 13,
-    InvalidRendition = 14,
+    InvalidMigrationTarget = 32,
+    AllocationExceeded = 33,
+    InvalidRole = 34,
+    AttestationExpired = 35,
+    AttestationRevoked = 36,
+    OfferExpired = 37,
+    OfferAlreadyAccepted = 38,
+    OfferBindingMismatch = 39,
+    InvalidPrice = 40,
+    NonTransferable = 41,
+    LoanReturned = 42,
+    InvalidRendition = 43,
+    RevocationNotFound = 21,
+    RevocationNotEffective = 22,
+    InvalidCommitment = 23,
+    SessionNotFound = 24,
+    OfflineGrantNotFound = 25,
+    OfflineGrantExpired = 26,
+    OfflineGrantExhausted = 27,
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +448,55 @@ pub struct ActiveList {
 }
 
 // ---------------------------------------------------------------------------
+// #944/#945/#950/#951 — institutional and delegated access records
+// ---------------------------------------------------------------------------
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstitutionalMint {
+    pub license_id: BytesN<32>,
+    pub institution: Address,
+    pub treasury: Address,
+    pub issuer: Address,
+    pub seats: u32,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub authorization_commitment: BytesN<32>,
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LicenseRevocation {
+    pub license_id: BytesN<32>,
+    pub effective_at: u64,
+    pub reason_commitment: BytesN<32>,
+    pub active_loans_preserved_until: u64,
+    pub applied: bool,
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReaderSession {
+    pub session_id: BytesN<32>,
+    pub grant_id: BytesN<32>,
+    pub grantee: Address,
+    pub reader_public_key: BytesN<32>,
+    pub expires_at: u64,
+    pub active: bool,
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineGrant {
+    pub offline_id: BytesN<32>,
+    pub grant_id: BytesN<32>,
+    pub loan_id: BytesN<32>,
+    pub grantee: Address,
+    pub commitment: BytesN<32>,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub max_uses: u32,
+    pub uses: u32,
+    pub active: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Storage keys
 // ---------------------------------------------------------------------------
 
@@ -523,6 +578,10 @@ pub enum DataKey {
     Attestation(BytesN<32>),
     OfferCount,
     Offer(BytesN<32>),
+    InstitutionalMint(BytesN<32>),
+    LicenseRevocation(BytesN<32>),
+    ReaderSession(BytesN<32>),
+    OfflineGrant(BytesN<32>),
 }
 
 // ---------------------------------------------------------------------------
@@ -1795,6 +1854,156 @@ impl LibraryLicensing {
         }
         caller.require_auth();
         Err(LicenseError::NonTransferable)
+    }
+
+    /// #944 — Mint an institutional license to a treasury/library account.
+    /// The issuer is authenticated by the capability system and the opaque
+    /// authorization commitment lets an auditor bind the mint to an off-chain
+    /// authorization without storing documents or seat-holder identities.
+    pub fn mint_institutional_license(
+        env: Env,
+        caller: Address,
+        institution: Address,
+        treasury: Address,
+        work_id: BytesN<32>,
+        rights: String,
+        not_before: u64,
+        expires_at: u64,
+        seats: u32,
+        authorization_commitment: BytesN<32>,
+    ) -> Result<BytesN<32>, LicenseError> {
+        if authorization_commitment == BytesN::from_array(&env, &[0u8; 32]) {
+            return Err(LicenseError::InvalidCommitment);
+        }
+        let license_id = Self::grant_license(
+            env.clone(), caller.clone(), work_id, institution.clone(), rights,
+            not_before, expires_at, seats,
+        )?;
+        let mint = InstitutionalMint {
+            license_id: license_id.clone(), institution, treasury, issuer: caller,
+            seats, issued_at: env.ledger().timestamp(), expires_at,
+            authorization_commitment,
+        };
+        let key = DataKey::InstitutionalMint(license_id.clone());
+        env.storage().persistent().set(&key, &mint);
+        env.storage().persistent().extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events().publish((symbol_short!("INST_MINT"),), (license_id.clone(), seats, expires_at));
+        Ok(license_id)
+    }
+
+    /// #945 — Schedule governed revocation. Existing active loans remain
+    /// valid until `active_loans_until`; no device, content, or private reason
+    /// is stored, only the reason commitment and effective boundary.
+    pub fn schedule_license_revocation(
+        env: Env,
+        caller: Address,
+        license_id: BytesN<32>,
+        effective_at: u64,
+        active_loans_until: u64,
+        reason_commitment: BytesN<32>,
+    ) -> Result<(), LicenseError> {
+        require_capability(&env, &caller, Capability::Circulation)?;
+        if reason_commitment == BytesN::from_array(&env, &[0u8; 32]) || effective_at > active_loans_until {
+            return Err(LicenseError::InvalidCommitment);
+        }
+        if env.storage().persistent().get::<_, License>(&DataKey::License(license_id.clone())).is_none() {
+            return Err(LicenseError::NotFound);
+        }
+        let record = LicenseRevocation { license_id: license_id.clone(), effective_at,
+            reason_commitment, active_loans_preserved_until: active_loans_until, applied: false };
+        let key = DataKey::LicenseRevocation(license_id.clone());
+        env.storage().persistent().set(&key, &record);
+        env.storage().persistent().extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events().publish((symbol_short!("LIC_REVOK"),), (license_id, effective_at, active_loans_until));
+        Ok(())
+    }
+
+    /// #945 — Apply a scheduled revocation once its effective time has passed.
+    /// The status transition is explicit and idempotency-safe; active loan
+    /// cleanup remains possible through the existing release paths.
+    pub fn apply_license_revocation(env: Env, caller: Address, license_id: BytesN<32>) -> Result<(), LicenseError> {
+        require_capability(&env, &caller, Capability::Circulation)?;
+        let mut record: LicenseRevocation = env.storage().persistent()
+            .get(&DataKey::LicenseRevocation(license_id.clone())).ok_or(LicenseError::RevocationNotFound)?;
+        if env.ledger().timestamp() < record.effective_at { return Err(LicenseError::RevocationNotEffective); }
+        if record.applied { return Err(LicenseError::LicenseRevoked); }
+        let mut license: License = env.storage().persistent().get(&DataKey::License(license_id.clone())).ok_or(LicenseError::NotFound)?;
+        license.status = LicenseStatus::Revoked;
+        env.storage().persistent().set(&DataKey::License(license_id.clone()), &license);
+        record.applied = true;
+        env.storage().persistent().set(&DataKey::LicenseRevocation(license_id.clone()), &record);
+        env.events().publish((symbol_short!("LIC_APPLY"),), (license_id, record.active_loans_preserved_until));
+        Ok(())
+    }
+
+    /// #950 — Create a short-lived delegated reader session scoped to exactly
+    /// one active grant. Only the grantee may authorize its public key.
+    pub fn create_reader_session(
+        env: Env, caller: Address, grant_id: BytesN<32>, reader_public_key: BytesN<32>,
+        duration: u64,
+    ) -> Result<BytesN<32>, LicenseError> {
+        caller.require_auth();
+        if duration == 0 { return Err(LicenseError::InvalidDuration); }
+        let grant: AccessGrant = Self::access_grant(env.clone(), grant_id.clone())?;
+        if caller != grant.grantee || !Self::is_grant_active(env.clone(), grant_id.clone()).unwrap_or(false) {
+            return Err(LicenseError::Expired);
+        }
+        let expires_at = env.ledger().timestamp().checked_add(duration).ok_or(LicenseError::WindowOverflow)?;
+        if expires_at > grant.expires_at { return Err(LicenseError::InvalidWindow); }
+        let mut salt = Bytes::new(&env);
+        salt.append(&Bytes::from_slice(&env, &grant_id.to_array()));
+        salt.append(&Bytes::from_slice(&env, &reader_public_key.to_array()));
+        let session_id = derive_id(&env, DataKey::GrantCount, salt)?;
+        let session = ReaderSession { session_id: session_id.clone(), grant_id, grantee: caller, reader_public_key, expires_at, active: true };
+        let key = DataKey::ReaderSession(session_id.clone());
+        env.storage().persistent().set(&key, &session);
+        env.storage().persistent().extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events().publish((symbol_short!("READ_SES"),), (session_id.clone(), expires_at));
+        Ok(session_id)
+    }
+
+    /// #951 — Commit a bounded offline entitlement to an active loan/grant.
+    /// Only hashes, timestamps, and a use bound are stored; device identifiers
+    /// and content never enter contract storage.
+    pub fn create_offline_grant(
+        env: Env, caller: Address, grant_id: BytesN<32>, expires_at: u64, max_uses: u32,
+    ) -> Result<BytesN<32>, LicenseError> {
+        caller.require_auth();
+        if max_uses == 0 { return Err(LicenseError::InvalidDuration); }
+        let grant: AccessGrant = Self::access_grant(env.clone(), grant_id.clone())?;
+        if caller != grant.grantee || expires_at <= env.ledger().timestamp() || expires_at > grant.expires_at {
+            return Err(LicenseError::InvalidWindow);
+        }
+        if !Self::is_grant_active(env.clone(), grant_id.clone()).unwrap_or(false) { return Err(LicenseError::Expired); }
+        let mut commitment_input = Bytes::new(&env);
+        commitment_input.append(&Bytes::from_slice(&env, &grant_id.to_array()));
+        commitment_input.append(&Bytes::from_slice(&env, &grant.loan_id.to_array()));
+        commitment_input.append(&caller.to_xdr(&env));
+        commitment_input.append(&Bytes::from_slice(&env, &expires_at.to_be_bytes()));
+        commitment_input.append(&Bytes::from_slice(&env, &max_uses.to_be_bytes()));
+        let commitment: BytesN<32> = env.crypto().sha256(&commitment_input).into();
+        let offline_id = derive_id(&env, DataKey::GrantCount, commitment_input)?;
+        let record = OfflineGrant { offline_id: offline_id.clone(), grant_id, loan_id: grant.loan_id,
+            grantee: caller, commitment, issued_at: env.ledger().timestamp(), expires_at, max_uses, uses: 0, active: true };
+        let key = DataKey::OfflineGrant(offline_id.clone());
+        env.storage().persistent().set(&key, &record);
+        env.storage().persistent().extend_ttl(&key, LICENSE_MIN_TTL, LICENSE_MAX_TTL);
+        env.events().publish((symbol_short!("OFFL_GR"),), (offline_id.clone(), expires_at, max_uses));
+        Ok(offline_id)
+    }
+
+    /// Consume one bounded offline entitlement use after verifying its public commitment.
+    pub fn consume_offline_grant(env: Env, caller: Address, offline_id: BytesN<32>, commitment: BytesN<32>) -> Result<bool, LicenseError> {
+        caller.require_auth();
+        let mut record: OfflineGrant = env.storage().persistent().get(&DataKey::OfflineGrant(offline_id.clone())).ok_or(LicenseError::OfflineGrantNotFound)?;
+        if record.grantee != caller || !record.active || commitment != record.commitment { return Err(LicenseError::Unauthorized); }
+        if env.ledger().timestamp() >= record.expires_at { return Err(LicenseError::OfflineGrantExpired); }
+        if record.uses >= record.max_uses { return Err(LicenseError::OfflineGrantExhausted); }
+        if !Self::is_grant_active(env.clone(), record.grant_id.clone()).unwrap_or(false) { return Err(LicenseError::Expired); }
+        record.uses += 1;
+        if record.uses == record.max_uses { record.active = false; }
+        env.storage().persistent().set(&DataKey::OfflineGrant(offline_id), &record);
+        Ok(true)
     }
 
     /// Mark the authoritative loan as returned. This is the governed
