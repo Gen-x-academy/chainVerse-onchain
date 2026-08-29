@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String,
 };
 mod error;
 mod events;
@@ -29,11 +29,33 @@ pub enum DataKey {
     Frozen(Address),
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct Allowance {
+    pub amount: i128,
+    pub expiration_ledger: u32,
+}
+
 #[contract]
 pub struct CHVToken;
 
 #[contractimpl]
 impl CHVToken {
+    /// Returns the human-readable token name used by standard Soroban clients.
+    pub fn name(env: Env) -> String {
+        String::from_str(&env, "ChainVerse")
+    }
+
+    /// Returns the token ticker used by standard Soroban clients.
+    pub fn symbol(env: Env) -> String {
+        String::from_str(&env, "CHV")
+    }
+
+    /// Returns the number of decimal places used by CHV amounts.
+    pub fn decimals(_env: Env) -> u32 {
+        DECIMALS
+    }
+
     pub fn initialize(env: Env, admin: Address, treasury: Address) -> Result<(), TokenError> {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(TokenError::AlreadyInitialized);
@@ -84,6 +106,9 @@ impl CHVToken {
         if Self::is_frozen(env.clone(), from.clone()) {
             return Err(TokenError::AccountFrozen);
         }
+        if Self::is_frozen(env.clone(), to.clone()) {
+            return Err(TokenError::AccountFrozen);
+        }
         from.require_auth();
         let from_bal: i128 = env.storage().persistent()
             .get(&DataKey::Balance(from.clone())).unwrap_or(0);
@@ -100,28 +125,47 @@ impl CHVToken {
         Ok(())
     }
 
-    /// Approve `spender` to spend up to `amount` of `owner`'s tokens.
-    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128) -> Result<(), TokenError> {
+    /// Approve `spender` to spend up to `amount` until `expiration_ledger`.
+    /// An expiration ledger of zero means the allowance does not expire.
+    pub fn approve(
+        env: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) -> Result<(), TokenError> {
         if amount < 0 {
             return Err(TokenError::InvalidAmount);
         }
+        if Self::is_frozen(env.clone(), owner.clone())
+            || Self::is_frozen(env.clone(), spender.clone())
+        {
+            return Err(TokenError::AccountFrozen);
+        }
         owner.require_auth();
         let key = DataKey::Allowance(owner, spender);
-        env.storage().persistent().set(&key, &amount);
+        let allowance = Allowance { amount, expiration_ledger };
+        env.storage().persistent().set(&key, &allowance);
         env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
-        env.storage().persistent().set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
-        events::emit_approval(&env, &owner, &spender, amount);
+        events::emit_approval(&env, &owner, &spender, amount, expiration_ledger);
         Ok(())
     }
 
     /// Returns remaining allowance for `spender` on `owner`.
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
         let key = DataKey::Allowance(owner, spender);
-        let allowance = env.storage().persistent().get(&key);
-        if allowance.is_some() {
+        let allowance: Option<Allowance> = env.storage().persistent().get(&key);
+        if let Some(allowance) = allowance {
+            if allowance.expiration_ledger != 0
+                && env.ledger().sequence() > allowance.expiration_ledger
+            {
+                return 0;
+            }
             env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
+            allowance.amount
+        } else {
+            0
         }
-        allowance.unwrap_or(0)
     }
 
     /// Transfer tokens using allowance. `spender` does not need auth; allowance is checked and decremented.
@@ -135,17 +179,27 @@ impl CHVToken {
         if Self::is_frozen(env.clone(), from.clone()) {
             return Err(TokenError::AccountFrozen);
         }
+        if Self::is_frozen(env.clone(), to.clone())
+            || Self::is_frozen(env.clone(), spender.clone())
+        {
+            return Err(TokenError::AccountFrozen);
+        }
         spender.require_auth();
-        let mut allow = env.storage().persistent().get(&DataKey::Allowance(from.clone(), spender.clone()))
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        let mut allow: Allowance = env.storage().persistent().get(&key)
             .ok_or(TokenError::InsufficientAllowance)?;
-        if allow < amount {
+        if allow.expiration_ledger != 0
+            && env.ledger().sequence() > allow.expiration_ledger
+        {
             return Err(TokenError::InsufficientAllowance);
         }
-        allow -= amount;
-        if allow == 0 {
-            env.storage().persistent().remove(&DataKey::Allowance(from.clone(), spender.clone()));
+        if allow.amount < amount {
+            return Err(TokenError::InsufficientAllowance);
+        }
+        allow.amount -= amount;
+        if allow.amount == 0 {
+            env.storage().persistent().remove(&key);
         } else {
-            let key = DataKey::Allowance(from.clone(), spender.clone());
             env.storage().persistent().set(&key, &allow);
             env.storage().persistent().extend_ttl(&key, ALLOWANCE_MIN_TTL, ALLOWANCE_MAX_TTL);
         }
@@ -158,7 +212,14 @@ impl CHVToken {
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_bal + amount));
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), BALANCE_MIN_TTL, BALANCE_MAX_TTL);
-        events::emit_allowance_decrement(&env, &from, &spender, amount, allow);
+        events::emit_allowance_decrement(
+            &env,
+            &from,
+            &spender,
+            amount,
+            allow.expiration_ledger,
+            allow.amount,
+        );
         events::emit_transfer(&env, &from, &to, amount);
         Ok(())
     }
@@ -166,10 +227,16 @@ impl CHVToken {
     /// Revoke a previously set allowance.
     pub fn revoke_allowance(env: Env, owner: Address, spender: Address) -> Result<(), TokenError> {
         owner.require_auth();
-        let amount: i128 = env.storage().persistent()
-            .get(&DataKey::Allowance(owner.clone(), spender.clone())).unwrap_or(0);
+        let allowance: Option<Allowance> = env.storage().persistent()
+            .get(&DataKey::Allowance(owner.clone(), spender.clone()));
         env.storage().persistent().remove(&DataKey::Allowance(owner.clone(), spender.clone()));
-        events::emit_allowance_revocation(&env, &owner, &spender, amount);
+        events::emit_allowance_revocation(
+            &env,
+            &owner,
+            &spender,
+            allowance.as_ref().map(|value| value.amount).unwrap_or(0),
+            allowance.map(|value| value.expiration_ledger).unwrap_or(0),
+        );
         Ok(())
     }
 
