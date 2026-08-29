@@ -4,6 +4,7 @@ use soroban_sdk::{Address, Env, String};
 mod content;
 mod governance;
 mod metadata;
+mod integrity_membership;
 mod privacy;
 mod registry;
 mod storage;
@@ -21,4 +22,5 @@ fn test_version_reports_current_abi() {
     let client = crate::LibraryRightsContractClient::new(&env, &contract_id);
 
     assert_eq!(client.version(), String::from_str(&env, "0.6.0"));
+    assert_eq!(client.version(), String::from_str(&env, "0.5.0"));
 }
