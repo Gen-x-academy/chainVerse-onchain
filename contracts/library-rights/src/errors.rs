@@ -22,4 +22,26 @@ pub enum ContractError {
     DuplicateRole = 4,
     /// No work record exists for the given work id.
     WorkNotFound = 5,
+    /// No policy record exists for the given policy id.
+    PolicyNotFound = 6,
+    /// Patron has exceeded their maximum concurrent loans for this policy.
+    PatronLoanLimitExceeded = 7,
+    /// Total policy-wide concurrent loan limit has been reached.
+    PolicyLoanLimitExceeded = 8,
+    /// Cannot check out a work that is already loaned out.
+    WorkAlreadyLoaned = 9,
+    /// Cannot return a loan that doesn't exist or is already inactive.
+    LoanNotFoundOrInactive = 10,
+    /// Loan has reached maximum number of renewals.
+    MaxRenewalsReached = 11,
+    /// Renewal would exceed the license's maximum expiry date.
+    ExceedsLicenseExpiry = 12,
+    /// Cannot cancel a hold that doesn't exist or is already inactive.
+    HoldNotFoundOrInactive = 13,
+    /// Caller is not authorized to cancel this hold.
+    HoldCancellationUnauthorized = 14,
+    /// A hold with this nonce has already been processed (idempotency check).
+    DuplicateRequestNonce = 15,
+    /// The work has active holds that need to be processed before checkout.
+    WorkHasActiveHolds = 16,
 }

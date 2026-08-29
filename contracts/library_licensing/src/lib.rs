@@ -77,17 +77,9 @@ pub enum LicenseError {
     LicenseRevoked = 9,
     InvalidDuration = 10,
     InvalidRights = 11,
-    // #984
-    CapabilityExpired = 12,
-    CapabilityNotGranted = 13,
-    // #985
-    TutorNotCourseOwner = 14,
-    // #986
-    InvalidManifest = 15,
-    // #987
-    VersionAlreadyExists = 16,
-    StaleActivePointer = 17,
-    ListNotScheduled = 18,
+    NonTransferable = 12,
+    LoanReturned = 13,
+    InvalidRendition = 14,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,10 +110,19 @@ pub struct License {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccessGrant {
+    /// The authoritative loan/license identifier. This is the only on-chain
+    /// reference needed to re-check the source of the grant.
     pub license_id: BytesN<32>,
+    /// Patron identity is immutable and is never transferable.
     pub grantee: Address,
+    /// Hash/identifier of the rendition; raw URLs and secrets remain off-chain.
+    pub rendition_id: BytesN<32>,
+    /// Explicit loan binding retained in the ABI for backend verification.
+    pub loan_id: BytesN<32>,
     pub not_before: u64,
     pub expires_at: u64,
+    /// Commitment over the authoritative loan, patron, rendition, and expiry.
+    pub commitment: BytesN<32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +307,21 @@ fn require_capability(env: &Env, caller: &Address, cap: Capability) -> Result<()
 /// Collision-resistant id derivation (ADR-0001 I3): a monotonic instance
 /// nonce mixed with the ledger timestamp and caller-specific bytes, so two
 /// records born in the same ledger never collide.
+fn derive_commitment(
+    env: &Env,
+    loan_id: &BytesN<32>,
+    patron: &Address,
+    rendition_id: &BytesN<32>,
+    expires_at: u64,
+) -> BytesN<32> {
+    let mut input = Bytes::new(env);
+    input.append(&Bytes::from_slice(env, &loan_id.clone().to_array()));
+    input.append(&patron.clone().to_xdr(env));
+    input.append(&Bytes::from_slice(env, &rendition_id.clone().to_array()));
+    input.append(&Bytes::from_slice(env, &expires_at.to_be_bytes()));
+    env.crypto().sha256(&input).into()
+}
+
 fn derive_id(env: &Env, counter_key: DataKey, salt: Bytes) -> Result<BytesN<32>, LicenseError> {
     let nonce: u64 = env.storage().instance().get(&counter_key).unwrap_or(0);
     // #940 — checked arithmetic: the monotonic counter must not overflow
@@ -575,11 +591,17 @@ impl LibraryLicensing {
         salt.append(&Bytes::from_slice(&env, &license_id.clone().to_array()));
         salt.append(&grantee.clone().to_xdr(&env));
         let grant_id = derive_id(&env, DataKey::GrantCount, salt)?;
+        let rendition_id = license.work_id.clone();
+        let commitment =
+            derive_commitment(&env, &license_id, &grantee, &rendition_id, grant_expires_at);
         let grant = AccessGrant {
             license_id: license_id.clone(),
             grantee: grantee.clone(),
+            rendition_id: rendition_id.clone(),
+            loan_id: license_id.clone(),
             not_before: now,
             expires_at: grant_expires_at,
+            commitment: commitment.clone(),
         };
         env.storage()
             .persistent()
@@ -591,7 +613,15 @@ impl LibraryLicensing {
         );
         env.events().publish(
             (symbol_short!("GRANT_NEW"),),
-            (grant_id.clone(), license_id, grantee, now, grant_expires_at),
+            (
+                grant_id.clone(),
+                license_id,
+                grantee,
+                rendition_id,
+                now,
+                grant_expires_at,
+                commitment,
+            ),
         );
         Ok(grant_id)
     }
@@ -648,346 +678,66 @@ impl LibraryLicensing {
             .ok_or(LicenseError::NotFound)
     }
 
-    // ── #984 — Capability management ─────────────────────────────────────
-
-    /// Grant a capability to `holder`.  Requires the `Policy` capability or
-    /// admin.  `expires_at = 0` means the grant never expires.
-    pub fn grant_capability(
+    /// Return the public commitment without exposing any off-chain access URL
+    /// or secret. A returned/revoked authoritative loan fails verification.
+    pub fn verify_access_grant(
         env: Env,
-        caller: Address,
-        holder: Address,
-        capability: Capability,
-        expires_at: u64,
-    ) -> Result<(), LicenseError> {
-        require_capability(&env, &caller, Capability::Policy)?;
-        let cap_index = capability as u32;
-        let record = CapabilityGrant {
-            holder: holder.clone(),
-            capability,
-            expires_at,
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::LibrarianCap(holder.clone(), cap_index), &record);
-        env.storage().persistent().extend_ttl(
-            &DataKey::LibrarianCap(holder.clone(), cap_index),
-            LICENSE_MIN_TTL,
-            LICENSE_MAX_TTL,
-        );
-        env.events().publish(
-            (symbol_short!("CAP_GRT"),),
-            (holder, cap_index, expires_at),
-        );
-        Ok(())
-    }
-
-    /// Revoke a capability from `holder`.  Requires the `Compliance`
-    /// capability or admin.
-    pub fn revoke_capability(
-        env: Env,
-        caller: Address,
-        holder: Address,
-        capability: Capability,
-    ) -> Result<(), LicenseError> {
-        require_capability(&env, &caller, Capability::Compliance)?;
-        let cap_index = capability as u32;
-        if !env
-            .storage()
-            .persistent()
-            .has(&DataKey::LibrarianCap(holder.clone(), cap_index))
-        {
-            return Err(LicenseError::NotFound);
-        }
-        env.storage()
-            .persistent()
-            .remove(&DataKey::LibrarianCap(holder.clone(), cap_index));
-        env.events()
-            .publish((symbol_short!("CAP_REV"),), (holder, cap_index));
-        Ok(())
-    }
-
-    /// Read-only: check whether `holder` currently holds `capability`.
-    pub fn has_capability(
-        env: Env,
-        holder: Address,
-        capability: Capability,
+        grant_id: BytesN<32>,
+        patron: Address,
+        rendition_id: BytesN<32>,
     ) -> Result<bool, LicenseError> {
-        let cap_index = capability as u32;
-        let grant: Option<CapabilityGrant> = env
+        let grant: AccessGrant = env
             .storage()
             .persistent()
-            .get(&DataKey::LibrarianCap(holder, cap_index));
-        match grant {
-            None => Ok(false),
-            Some(g) => {
-                if g.expires_at != 0 && env.ledger().timestamp() >= g.expires_at {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-        }
+            .get(&DataKey::AccessGrant(grant_id.clone()))
+            .ok_or(LicenseError::NotFound)?;
+        let expected = derive_commitment(
+            &env,
+            &grant.loan_id,
+            &patron,
+            &rendition_id,
+            grant.expires_at,
+        );
+        Ok(grant.grantee == patron
+            && grant.rendition_id == rendition_id
+            && grant.commitment == expected
+            && Self::is_grant_active(env, grant_id).unwrap_or(false))
     }
 
-    // ── #986 — Reading-list manifest anchoring ────────────────────────────
-
-    /// Commit a reading-list manifest for `(course_id, term)`.  The caller
-    /// must be the tutor who owns the course (#985).
-    ///
-    /// `content_hash` is the 32-byte digest of the canonical off-chain JSON
-    /// file.  `tutor_sig` is the tutor's 64-byte signature over that hash.
-    /// `institution_sig` is an optional co-signature (all-zeros = absent).
-    ///
-    /// Private annotations stay off-chain; only the digest is stored
-    /// on-chain so students can verify integrity by re-hashing their
-    /// downloaded copy.
-    pub fn commit_manifest(
+    /// The event/query commitment is safe to expose to backend readers: it is
+    /// a hash and contains no secret, URL, or raw rendition data.
+    pub fn access_grant_commitment(
         env: Env,
-        tutor: Address,
-        course_id: BytesN<32>,
-        term: String,
-        content_hash: BytesN<32>,
-        tutor_sig: BytesN<64>,
-        institution_sig: BytesN<64>,
+        grant_id: BytesN<32>,
     ) -> Result<BytesN<32>, LicenseError> {
-        // #985 — the caller must own the course.
-        require_tutor_owns_course(&env, &tutor, &course_id)?;
-
-        // Reject zero content hash (indicates uninitialised caller data).
-        let zero_hash: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
-        if content_hash == zero_hash {
-            return Err(LicenseError::InvalidManifest);
-        }
-
-        let now = env.ledger().timestamp();
-        let mut salt: Bytes = Bytes::new(&env);
-        salt.append(&Bytes::from_slice(&env, &course_id.clone().to_array()));
-        salt.append(&tutor.clone().to_xdr(&env));
-        let manifest_id = derive_id(&env, DataKey::ManifestCount, salt)?;
-
-        let manifest = ReadingListManifest {
-            course_id,
-            term,
-            content_hash,
-            tutor_sig,
-            institution_sig,
-            committed_at: now,
-            committed_by: tutor.clone(),
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Manifest(manifest_id.clone()), &manifest);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Manifest(manifest_id.clone()),
-            LICENSE_MIN_TTL,
-            LICENSE_MAX_TTL,
-        );
-        env.events().publish(
-            (symbol_short!("MAN_NEW"),),
-            (manifest_id.clone(), tutor, now),
-        );
-        Ok(manifest_id)
+        Ok(Self::access_grant(env, grant_id)?.commitment)
     }
 
-    /// Read-only: fetch a manifest by id.
-    pub fn manifest(
+    /// Patron grants are soul-bound. This method is deliberately present in
+    /// the ABI so clients cannot mistake an omitted transfer API for a policy;
+    /// every attempted transfer fails before storage or events are mutated.
+    pub fn transfer_access_grant(
         env: Env,
-        manifest_id: BytesN<32>,
-    ) -> Result<ReadingListManifest, LicenseError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Manifest(manifest_id))
-            .ok_or(LicenseError::NotFound)
-    }
-
-    // ── #987 — Versioned reading-list publication ─────────────────────────
-
-    /// Publish an immutable version of a reading list.  The caller must own
-    /// the course (#985).
-    ///
-    /// `manifest_id` must refer to a manifest already committed for the same
-    /// `(course_id, term)`.  `effective_at` is the scheduled activation
-    /// timestamp; `version_expires_at = 0` means the version never expires
-    /// by itself.
-    ///
-    /// Versions are numbered 1, 2, 3, … and are immutable once stored.
-    pub fn publish_list_version(
-        env: Env,
-        tutor: Address,
-        course_id: BytesN<32>,
-        term: String,
-        manifest_id: BytesN<32>,
-        effective_at: u64,
-        version_expires_at: u64,
-    ) -> Result<u32, LicenseError> {
-        // #985 — ownership check.
-        require_tutor_owns_course(&env, &tutor, &course_id)?;
-
-        // Validate the manifest belongs to the same (course_id, term).
-        let manifest: ReadingListManifest = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Manifest(manifest_id.clone()))
-            .ok_or(LicenseError::NotFound)?;
-        if manifest.course_id != course_id || manifest.term != term {
-            return Err(LicenseError::InvalidManifest);
-        }
-
-        // effective_at must be valid (non-zero and, if expires_at set,
-        // effective_at < expires_at).
-        if version_expires_at != 0 && effective_at >= version_expires_at {
-            return Err(LicenseError::InvalidWindow);
-        }
-
-        // Increment version counter for this (course, term).
-        let prev_count: u32 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::VersionCount(course_id.clone(), term.clone()))
-            .unwrap_or(0u32);
-        let version = prev_count
-            .checked_add(1)
-            .ok_or(LicenseError::WindowOverflow)?;
-
-        // Immutability guard — version key must not already exist.
-        if env
-            .storage()
-            .persistent()
-            .has(&DataKey::ListVersion(course_id.clone(), term.clone(), version))
-        {
-            return Err(LicenseError::VersionAlreadyExists);
-        }
-
-        let now = env.ledger().timestamp();
-        let record = ReadingListVersion {
-            course_id: course_id.clone(),
-            term: term.clone(),
-            version,
-            manifest_id: manifest_id.clone(),
-            effective_at,
-            expires_at: version_expires_at,
-            published_by: tutor.clone(),
-            published_at: now,
-        };
-        env.storage().persistent().set(
-            &DataKey::ListVersion(course_id.clone(), term.clone(), version),
-            &record,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::ListVersion(course_id.clone(), term.clone(), version),
-            LICENSE_MIN_TTL,
-            LICENSE_MAX_TTL,
-        );
-        env.storage()
-            .persistent()
-            .set(&DataKey::VersionCount(course_id.clone(), term.clone()), &version);
-        env.storage().persistent().extend_ttl(
-            &DataKey::VersionCount(course_id.clone(), term.clone()),
-            LICENSE_MIN_TTL,
-            LICENSE_MAX_TTL,
-        );
-        env.events().publish(
-            (symbol_short!("LIST_PUB"),),
-            (course_id, term, version, manifest_id, effective_at),
-        );
-        Ok(version)
-    }
-
-    /// Activate a published version as the live pointer for `(course_id,
-    /// term)`.  The caller must own the course (#985).
-    ///
-    /// `expected_prev_version` is an optimistic-concurrency guard: it must
-    /// equal the current active version (or 0 if none has been activated
-    /// yet).  This prevents stale writers from silently overwriting a newer
-    /// activation.
-    ///
-    /// Activation also verifies that `effective_at <= now` (the version is
-    /// scheduled to be live already) and that the version has not expired.
-    pub fn activate_list_version(
-        env: Env,
-        tutor: Address,
-        course_id: BytesN<32>,
-        term: String,
-        version: u32,
-        expected_prev_version: u32,
+        caller: Address,
+        grant_id: BytesN<32>,
+        _new_patron: Address,
     ) -> Result<(), LicenseError> {
-        // #985 — ownership check.
-        require_tutor_owns_course(&env, &tutor, &course_id)?;
-
-        // Load the version record.
-        let record: ReadingListVersion = env
+        let grant: AccessGrant = env
             .storage()
             .persistent()
-            .get(&DataKey::ListVersion(course_id.clone(), term.clone(), version))
+            .get(&DataKey::AccessGrant(grant_id))
             .ok_or(LicenseError::NotFound)?;
-
-        let now = env.ledger().timestamp();
-
-        // The version must be scheduled to be active.
-        if now < record.effective_at {
-            return Err(LicenseError::ListNotScheduled);
+        if caller != grant.grantee {
+            return Err(LicenseError::Unauthorized);
         }
-        // The version must not have expired.
-        if record.expires_at != 0 && now >= record.expires_at {
-            return Err(LicenseError::Expired);
-        }
-
-        // Optimistic-concurrency: verify the expected previous pointer.
-        let current_active: u32 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveList(course_id.clone(), term.clone()))
-            .map(|a: ActiveList| a.version)
-            .unwrap_or(0u32);
-        if current_active != expected_prev_version {
-            return Err(LicenseError::StaleActivePointer);
-        }
-
-        let pointer = ActiveList {
-            course_id: course_id.clone(),
-            term: term.clone(),
-            version,
-            manifest_id: record.manifest_id.clone(),
-            activated_at: now,
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::ActiveList(course_id.clone(), term.clone()), &pointer);
-        env.storage().persistent().extend_ttl(
-            &DataKey::ActiveList(course_id.clone(), term.clone()),
-            LICENSE_MIN_TTL,
-            LICENSE_MAX_TTL,
-        );
-        env.events().publish(
-            (symbol_short!("LIST_ACT"),),
-            (course_id, term, version, expected_prev_version, now),
-        );
-        Ok(())
+        caller.require_auth();
+        Err(LicenseError::NonTransferable)
     }
 
-    /// Read-only: fetch a specific version record.
-    pub fn list_version(
-        env: Env,
-        course_id: BytesN<32>,
-        term: String,
-        version: u32,
-    ) -> Result<ReadingListVersion, LicenseError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ListVersion(course_id, term, version))
-            .ok_or(LicenseError::NotFound)
-    }
-
-    /// Read-only: fetch the active-pointer for `(course_id, term)`.
-    pub fn active_list(
-        env: Env,
-        course_id: BytesN<32>,
-        term: String,
-    ) -> Result<ActiveList, LicenseError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ActiveList(course_id, term))
-            .ok_or(LicenseError::NotFound)
+    /// Mark the authoritative loan as returned. This is the governed
+    /// institutional path: only the contract administrator can invalidate it.
+    pub fn return_loan(env: Env, caller: Address, loan_id: BytesN<32>) -> Result<(), LicenseError> {
+        Self::revoke_license(env, caller, loan_id)
     }
 }
 
