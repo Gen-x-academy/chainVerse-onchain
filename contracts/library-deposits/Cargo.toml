@@ -1,5 +1,5 @@
 [package]
-name = "library-fines"
+name = "library-deposits"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,12 +9,6 @@ crate-type = ["cdylib"]
 [features]
 testutils = ["soroban-sdk/testutils"]
 
-[dependencies]
-ed25519-dalek = { version = "=2.1.1", default-features = false }
-soroban-sdk = { workspace = true }
-
-[dev-dependencies]
-ed25519-dalek = "=2.1.1"
 [dependencies]
 soroban-sdk = { workspace = true }
 
