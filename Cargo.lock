@@ -236,6 +236,7 @@ dependencies = [
 name = "certificates"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "ed25519-dalek 2.1.1",
  "soroban-sdk",
 ]
@@ -405,6 +406,8 @@ dependencies = [
  "curve25519-dalek-derive",
  "digest 0.11.3",
  "fiat-crypto 0.3.0",
+ "rustc_version",
+ "subtle",
  "rand_core 0.10.1",
  "rustc_version",
  "subtle",
@@ -543,6 +546,7 @@ dependencies = [
  "digest 0.10.7",
  "elliptic-curve",
  "rfc6979",
+ "signature",
  "signature 2.2.0",
 ]
 
@@ -572,6 +576,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a3daa8e81a3963a60642bcc1f90a670680bd4a77535faa384e9d1c79d620871"
 dependencies = [
  "curve25519-dalek 4.1.2",
+ "ed25519",
+ "rand_core",
+ "serde",
+ "sha2",
  "ed25519 2.2.3",
  "rand_core 0.6.4",
  "serde",
@@ -613,6 +621,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "rand_core",
  "rand_core 0.6.4",
  "sec1",
  "subtle",
@@ -891,6 +900,7 @@ dependencies = [
  "cfg-if",
  "ecdsa",
  "elliptic-curve",
+ "sha2",
  "sha2 0.10.8",
 ]
 
@@ -917,6 +927,13 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "library-licensing"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "library-rights"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
@@ -990,6 +1007,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
+ "sha2",
  "sha2 0.10.8",
 ]
 
@@ -1293,6 +1311,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
+ "rand_core",
  "rand_core 0.6.4",
 ]
 
@@ -1370,6 +1389,7 @@ dependencies = [
  "ark-serialize",
  "curve25519-dalek 5.0.0",
  "ecdsa",
+ "ed25519-dalek",
  "ed25519-dalek 3.0.0",
  "elliptic-curve",
  "generic-array",
@@ -1384,6 +1404,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "sec1",
+ "sha2",
  "sha2 0.10.8",
  "sha3",
  "soroban-builtin-sdk-macros",
@@ -1433,6 +1454,7 @@ dependencies = [
  "bytes-lit",
  "ctor",
  "derive_arbitrary",
+ "ed25519-dalek",
  "ed25519-dalek 2.1.1",
  "rand",
  "rustc_version",
