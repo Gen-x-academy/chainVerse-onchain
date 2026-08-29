@@ -14,10 +14,16 @@ pub enum ContractError {
     CertificateNotFound = 8,
     ProofExpired = 9,
     NonceAlreadyConsumed = 10,
-    // Fix #841: no pending admin transfer has been proposed.
-    NoPendingTransfer = 9,
-    // Fix #841: the pending admin transfer has expired and can no longer be accepted.
-    PendingAdminExpired = 10,
-    // Fix #841: caller is not the nominated pending admin.
-    NotPendingAdmin = 11,
+    // Fix #841: admin transfer errors
+    NoPendingTransfer = 11,
+    PendingAdminExpired = 12,
+    NotPendingAdmin = 13,
+    // Fix #834: backend public key must be exactly 32 bytes (Ed25519)
+    InvalidPublicKey = 14,
+    // Fix #835: signing key rotation errors
+    NoPendingKeyRotation = 15,
+    PendingKeyRotationExpired = 16,
+    // Fix #836: minter rotation errors
+    NoPendingMinterRotation = 17,
+    PendingMinterRotationExpired = 18,
 }
