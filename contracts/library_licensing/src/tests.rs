@@ -18,6 +18,9 @@ use crate::{
 // ============================================================================
 // Shared helpers
 // ============================================================================
+    AccessGrant, LibraryLicensingClient, License, LicenseError, LicenseStatus,
+    RenditionMigrationPolicy,
+};
 
 fn setup() -> (Env, Address) {
     let env = Env::default();
@@ -1040,4 +1043,114 @@ fn test_independent_terms_have_independent_version_counters() {
     // Each term starts at version 1 independently.
     assert_eq!(v_s1, 1);
     assert_eq!(v_s2, 1);
+// ===== Rendition migration (#952) =====
+
+#[test]
+fn test_forced_rendition_migration_follows_active_grant() {
+    let (env, contract_id) = setup();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let licensee = Address::generate(&env);
+    let grantee = Address::generate(&env);
+    client.set_admin(&admin);
+    env.ledger().set_timestamp(100);
+    let from = BytesN::from_array(&env, &[40u8; 32]);
+    let to = BytesN::from_array(&env, &[41u8; 32]);
+    let license_id = grant(&env, &client, &admin, &from, &licensee, 0, 500);
+    let grant_id = client.derive_access_grant(&licensee, &license_id, &grantee, &100u64);
+
+    client.propose_rendition_migration(&admin, &from, &to, &RenditionMigrationPolicy::Forced);
+
+    assert!(client.is_grant_active_for_work(&grant_id, &from));
+    assert!(client.is_grant_active_for_work(&grant_id, &to));
+}
+
+#[test]
+fn test_opt_in_rendition_migration_requires_grantee_acceptance() {
+    let (env, contract_id) = setup();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let licensee = Address::generate(&env);
+    let grantee = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.set_admin(&admin);
+    env.ledger().set_timestamp(100);
+    let from = BytesN::from_array(&env, &[42u8; 32]);
+    let to = BytesN::from_array(&env, &[43u8; 32]);
+    let license_id = grant(&env, &client, &admin, &from, &licensee, 0, 500);
+    let grant_id = client.derive_access_grant(&licensee, &license_id, &grantee, &100u64);
+    client.propose_rendition_migration(&admin, &from, &to, &RenditionMigrationPolicy::OptIn);
+
+    assert!(!client.is_grant_active_for_work(&grant_id, &to));
+    assert_eq!(
+        client.try_accept_rendition_migration(&stranger, &grant_id, &to),
+        Err(Ok(LicenseError::Unauthorized))
+    );
+    assert_eq!(
+        client.try_accept_rendition_migration(&grantee, &grant_id, &from),
+        Err(Ok(LicenseError::InvalidMigrationTarget))
+    );
+    client.accept_rendition_migration(&grantee, &grant_id, &to);
+    assert!(client.is_grant_active_for_work(&grant_id, &to));
+}
+
+#[test]
+fn test_rendition_migration_rejects_invalid_and_duplicate_proposals() {
+    let (env, contract_id) = setup();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    client.set_admin(&admin);
+    let from = BytesN::from_array(&env, &[44u8; 32]);
+    let to = BytesN::from_array(&env, &[45u8; 32]);
+    assert_eq!(
+        client.try_propose_rendition_migration(
+            &attacker,
+            &from,
+            &to,
+            &RenditionMigrationPolicy::Forced
+        ),
+        Err(Ok(LicenseError::Unauthorized))
+    );
+    assert_eq!(
+        client.try_propose_rendition_migration(
+            &admin,
+            &from,
+            &from,
+            &RenditionMigrationPolicy::Forced
+        ),
+        Err(Ok(LicenseError::InvalidRenditionMigration))
+    );
+    client.propose_rendition_migration(&admin, &from, &to, &RenditionMigrationPolicy::Forced);
+    assert_eq!(
+        client.try_propose_rendition_migration(
+            &admin,
+            &from,
+            &to,
+            &RenditionMigrationPolicy::OptIn
+        ),
+        Err(Ok(LicenseError::RenditionMigrationExists))
+    );
+}
+
+#[test]
+fn test_rendition_migration_does_not_resurrect_expired_grant() {
+    let (env, contract_id) = setup();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let licensee = Address::generate(&env);
+    let grantee = Address::generate(&env);
+    client.set_admin(&admin);
+    let from = BytesN::from_array(&env, &[46u8; 32]);
+    let to = BytesN::from_array(&env, &[47u8; 32]);
+    let license_id = grant(&env, &client, &admin, &from, &licensee, 100, 200);
+    env.ledger().set_timestamp(100);
+    let grant_id = client.derive_access_grant(&licensee, &license_id, &grantee, &50u64);
+    client.propose_rendition_migration(&admin, &from, &to, &RenditionMigrationPolicy::Forced);
+    env.ledger().set_timestamp(149);
+    assert!(client.is_grant_active_for_work(&grant_id, &to));
+    env.ledger().set_timestamp(150);
+    assert!(!client.is_grant_active_for_work(&grant_id, &to));
+    env.ledger().set_timestamp(200);
+    assert!(!client.is_grant_active_for_work(&grant_id, &to));
 }

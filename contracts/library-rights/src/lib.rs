@@ -20,29 +20,99 @@
 //! - **#927 (privacy):** [`WorkRecord`] holds only a content hash and a
 //!   pseudonymous custodian address -- no names, emails, raw content,
 //!   reading position, or staff notes ever land on-chain.
+//! - **#928 (canonical works):** [`registry::register_work`] maps a
+//!   canonical work id to a bounded metadata commitment and custodian,
+//!   with identifier validation, PolicyManager authentication, overwrite
+//!   prevention, TTL renewal, and a versioned `WRK_NEW` event.
+//! - **#929 (works/editions/renditions):** [`registry`] fixes parent
+//!   edges to `Work -> Edition -> Rendition` (no cycles, no invalid
+//!   parents) and exposes cursor/limit-bounded `children` queries.
+//! - **#932 (content hashes):** [`content`] anchors algorithm-tagged
+//!   digests per rendition (allowlisted [`HashAlgorithm`] enum, non-zero
+//!   digests) that are immutable per version, with a read-only
+//!   `verify_content` check.
+//! - **#933 (metadata URIs):** [`metadata`] validates scheme + length on
+//!   every metadata commitment and `registry::update_metadata` creates
+//!   versions instead of mutating.
 //!
 //! ## Impact summary
 //! - **ABI:** `bootstrap(admin, treasury, policy_manager, emergency)`,
 //!   `get_role(role)`, `put_work(caller, work_id, work_hash, custodian)`,
-//!   `get_work(work_id)`, `version()`.
+//!   `get_work(work_id)`, `register_work(caller, work_id, metadata,
+//!   custodian)`, `register_edition(caller, parent_work_id, edition_id,
+//!   metadata, custodian)`, `register_rendition(caller, parent_edition_id,
+//!   rendition_id, content, metadata, custodian)`, `update_metadata(caller,
+//!   entry_id, metadata)`, `update_content_hash(caller, rendition_id,
+//!   content)`, `entry(entry_id)`, `entry_version(entry_id, version)`,
+//!   `entry_version_count(entry_id)`, `children(parent_id, cursor,
+//!   limit)`, `verify_content(rendition_id, algorithm, digest)`,
+//!   `version()`.
+//! - **#952–#954:** governed rendition migration, integrity quarantine, and
+//!   scoped pseudonymous membership attestations.
+//!
+//! ## Impact summary
+//! - **ABI:** governance, work-state, quarantine, and membership-attestation
+//!   entrypoints are exposed alongside the original work APIs.
 //! - **Storage:** persistent, versioned keys per [`keys::DataKey`], each
 //!   TTL-tiered by domain and renewed on every read/write that touches
-//!   it. `SchemaVersion` lives in instance storage.
-//! - **Events:** `BOOTSTRP` published once, on successful bootstrap.
-//! - **Privacy:** see [`types`] -- hash + pseudonymous address only.
-//! - **Deployment:** new, independently deployable contract; no existing
-//!   contract is replaced.
-//! - **Migration:** none yet -- no prior on-chain state exists. Future
+//!   it. `SchemaVersion` lives in instance storage. Entry version
+//!   snapshots are append-only (never overwritten) so each version's
+//!   commitments stay immutable.
+//! - **Events:** `BOOTSTRP` on bootstrap; `WRK_NEW` (work_id, version,
+//!   metadata_hash), `EDN_NEW` (edition_id, parent, version,
+//!   metadata_hash), `RND_NEW` (rendition_id, parent, version,
+//!   algorithm, digest), `MET_UPD` (entry_id, old_version, new_version,
+//!   metadata_hash), `HASH_UPD` (rendition_id, old_version, new_version,
+//!   algorithm, digest).
+//! - **Privacy:** see [`types`] -- hash + pseudonymous address only;
+//!   metadata manifests, content files, and access URLs never land
+//!   on-chain, only their content-addressed commitments.
+//! - **Deployment:** additive evolution of the existing library-rights
+//!   contract; no existing entry point or storage layout is replaced.
+//! - **Migration:** none required -- new keys are additive. Future
 //!   schema changes bump [`keys::SCHEMA_VERSION`].
 
+mod content;
 mod errors;
 mod events;
 mod governance;
 mod keys;
+mod metadata;
+mod registry;
 mod types;
 
 pub use errors::ContractError;
 pub use keys::{DataKey, Role};
+pub use types::{
+    CatalogEntry, ChildrenPage, ContentCommitment, ContentState, EntryKind, HashAlgorithm,
+    MetadataCommitment, VersionSnapshot, WorkRecord,
+    ContentStatus, MembershipAttestation, MembershipStatus, QuarantineRecord, WorkRecord,
+};
+
+use keys::{DataKey as DK, CATALOG_MAX_TTL, CATALOG_MIN_TTL};
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String,
+};
+
+const CONTRACT_VERSION: &str = "0.6.0";
+const CONTRACT_VERSION: &str = "0.5.0";
+
+fn membership_id(
+    env: &Env,
+    wallet: &Address,
+    claim_commitment: &BytesN<32>,
+    institution_domain_hash: &BytesN<32>,
+    network_id: &BytesN<32>,
+    nonce: u64,
+) -> BytesN<32> {
+    let mut input = Bytes::new(env);
+    input.append(&wallet.to_xdr(env));
+    input.append(&Bytes::from_slice(env, &claim_commitment.to_array()));
+    input.append(&Bytes::from_slice(env, &institution_domain_hash.to_array()));
+    input.append(&Bytes::from_slice(env, &network_id.to_array()));
+    input.append(&Bytes::from_slice(env, &nonce.to_be_bytes()));
+    env.crypto().sha256(&input).into()
+}
 pub use types::{Policy, WorkRecord, LoanRecord};
 
 use keys::{DataKey as DK, CATALOG_MAX_TTL, CATALOG_MIN_TTL, ACTIVE_MIN_TTL, ACTIVE_MAX_TTL};
@@ -158,6 +228,150 @@ impl LibraryRightsContract {
         Ok(())
     }
 
+    /// Marks a work unavailable through ordinary catalog deactivation.
+    pub fn deactivate_work(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        governance::require_role(&env, Role::PolicyManager, &caller)?;
+        Self::set_content_status(&env, work_id, ContentStatus::Deactivated)
+    }
+
+    /// Records a legal takedown as a distinct state from technical quarantine.
+    pub fn legal_takedown_work(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        governance::require_role(&env, Role::PolicyManager, &caller)?;
+        Self::set_content_status(&env, work_id, ContentStatus::LegalTakedown)
+    }
+
+    /// Emergency path for a failed content-integrity commitment. Only the
+    /// Emergency role may invoke it; the original work hash and record remain
+    /// intact, while access becomes unavailable immediately.
+    pub fn quarantine_work(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+        reason_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        governance::require_role(&env, Role::Emergency, &caller)?;
+        let work_key = DK::Work(work_id.clone());
+        if !env.storage().persistent().has(&work_key) {
+            return Err(ContractError::WorkNotFound);
+        }
+        let status_key = DK::ContentStatus(work_id.clone());
+        if env.storage().persistent().get(&status_key) == Some(ContentStatus::Quarantined) {
+            return Err(ContractError::AlreadyQuarantined);
+        }
+        if env.storage().persistent().get(&status_key) == Some(ContentStatus::LegalTakedown) {
+            return Err(ContractError::InvalidStateTransition);
+        }
+        env.storage()
+            .persistent()
+            .set(&status_key, &ContentStatus::Quarantined);
+        let quarantine = QuarantineRecord {
+            reason_hash,
+            quarantined_at: env.ledger().timestamp(),
+            quarantined_by: caller,
+            restored_at: None,
+            restoration_review_hash: None,
+        };
+        let quarantine_key = DK::Quarantine(work_id.clone());
+        env.storage().persistent().set(&quarantine_key, &quarantine);
+        env.storage()
+            .persistent()
+            .extend_ttl(&status_key, CATALOG_MIN_TTL, CATALOG_MAX_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&quarantine_key, CATALOG_MIN_TTL, CATALOG_MAX_TTL);
+        env.events().publish(
+            (symbol_short!("QUARANTIN"),),
+            (work_id, quarantine.reason_hash, quarantine.quarantined_at),
+        );
+        Ok(())
+    }
+
+    /// Restores a quarantined work only after a PolicyManager supplies an
+    /// opaque review record hash. Restoration cannot erase the quarantine
+    /// evidence; it updates the same record with the review outcome.
+    pub fn restore_quarantined_work(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+        review_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        governance::require_role(&env, Role::PolicyManager, &caller)?;
+        let status_key = DK::ContentStatus(work_id.clone());
+        if env.storage().persistent().get(&status_key) != Some(ContentStatus::Quarantined) {
+            return Err(ContractError::InvalidStateTransition);
+        }
+        let quarantine_key = DK::Quarantine(work_id.clone());
+        let mut record: QuarantineRecord = env
+            .storage()
+            .persistent()
+            .get(&quarantine_key)
+            .ok_or(ContractError::InvalidStateTransition)?;
+        record.restored_at = Some(env.ledger().timestamp());
+        record.restoration_review_hash = Some(review_hash);
+        env.storage().persistent().set(&quarantine_key, &record);
+        env.storage()
+            .persistent()
+            .set(&status_key, &ContentStatus::Active);
+        env.events()
+            .publish((symbol_short!("QUAR_REST"),), (work_id, record.restored_at));
+        Ok(())
+    }
+
+    pub fn content_status(env: Env, work_id: BytesN<32>) -> Result<ContentStatus, ContractError> {
+        if !env.storage().persistent().has(&DK::Work(work_id.clone())) {
+            return Err(ContractError::WorkNotFound);
+        }
+        Ok(env
+            .storage()
+            .persistent()
+            .get(&DK::ContentStatus(work_id))
+            .unwrap_or(ContentStatus::Active))
+    }
+
+    pub fn quarantine_record(
+        env: Env,
+        work_id: BytesN<32>,
+    ) -> Result<QuarantineRecord, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DK::Quarantine(work_id))
+            .ok_or(ContractError::InvalidStateTransition)
+    }
+
+    pub fn is_work_accessible(env: Env, work_id: BytesN<32>) -> Result<bool, ContractError> {
+        Ok(Self::content_status(env, work_id)? == ContentStatus::Active)
+    }
+
+    fn set_content_status(
+        env: &Env,
+        work_id: BytesN<32>,
+        status: ContentStatus,
+    ) -> Result<(), ContractError> {
+        let work_key = DK::Work(work_id.clone());
+        if !env.storage().persistent().has(&work_key) {
+            return Err(ContractError::WorkNotFound);
+        }
+        let status_key = DK::ContentStatus(work_id.clone());
+        if env.storage().persistent().get(&status_key) == Some(ContentStatus::Quarantined) {
+            return Err(ContractError::InvalidStateTransition);
+        }
+        env.storage().persistent().set(&status_key, &status);
+        env.storage()
+            .persistent()
+            .extend_ttl(&status_key, CATALOG_MIN_TTL, CATALOG_MAX_TTL);
+        env.events()
+            .publish((symbol_short!("WRK_STATE"),), (work_id, status));
+        Ok(())
+    }
+
     /// Returns the stored record for `work_id`, renewing its TTL.
     pub fn get_work(env: Env, work_id: BytesN<32>) -> Result<WorkRecord, ContractError> {
         let key = DK::Work(work_id);
@@ -172,6 +386,295 @@ impl LibraryRightsContract {
         Ok(record)
     }
 
+    /// #928 — registers a canonical work: id -> bounded metadata
+    /// commitment + pseudonymous custodian. PolicyManager-only; rejects
+    /// all-zero ids/hashes, rejects duplicate ids, renews TTL, and
+    /// publishes a versioned `WRK_NEW` event.
+    pub fn register_work(
+        env: Env,
+        caller: Address,
+        work_id: BytesN<32>,
+        metadata: MetadataCommitment,
+        custodian: Address,
+    ) -> Result<u32, ContractError> {
+        registry::register_work(&env, &caller, &work_id, &metadata, &custodian)
+    }
+
+    /// #929 — registers an edition under an existing work.
+    /// PolicyManager-only; the parent must be a work and the id unused.
+    pub fn register_edition(
+        env: Env,
+        caller: Address,
+        parent_work_id: BytesN<32>,
+        edition_id: BytesN<32>,
+        metadata: MetadataCommitment,
+        custodian: Address,
+    ) -> Result<u32, ContractError> {
+        registry::register_edition(
+            &env,
+            &caller,
+            &parent_work_id,
+            &edition_id,
+            &metadata,
+            &custodian,
+        )
+    }
+
+    /// #929 + #932 — registers a rendition under an existing edition with
+    /// its algorithm-tagged content hash. PolicyManager-only; the parent
+    /// must be an edition and the id unused.
+    pub fn register_rendition(
+        env: Env,
+        caller: Address,
+        parent_edition_id: BytesN<32>,
+        rendition_id: BytesN<32>,
+        content: ContentCommitment,
+        metadata: MetadataCommitment,
+        custodian: Address,
+    ) -> Result<u32, ContractError> {
+        registry::register_rendition(
+            &env,
+            &caller,
+            &parent_edition_id,
+            &rendition_id,
+            &content,
+            &metadata,
+            &custodian,
+        )
+    }
+
+    /// #933 — updates the metadata commitment of any entry, creating a
+    /// new version. The previous version stays immutable in the history.
+    pub fn update_metadata(
+        env: Env,
+        caller: Address,
+        entry_id: BytesN<32>,
+        metadata: MetadataCommitment,
+    ) -> Result<u32, ContractError> {
+        registry::update_metadata(&env, &caller, &entry_id, &metadata)
+    }
+
+    /// #932 — replaces the content commitment of a rendition, creating a
+    /// new version. Rejected for non-rendition entries.
+    pub fn update_content_hash(
+        env: Env,
+        caller: Address,
+        rendition_id: BytesN<32>,
+        content: ContentCommitment,
+    ) -> Result<u32, ContractError> {
+        registry::update_content_hash(&env, &caller, &rendition_id, &content)
+    }
+
+    /// Returns the current catalog entry for `entry_id`, renewing its
+    /// TTL.
+    pub fn entry(env: Env, entry_id: BytesN<32>) -> Result<CatalogEntry, ContractError> {
+        registry::entry(&env, &entry_id)
+    }
+
+    /// Returns the immutable snapshot for `version` (1-based) of
+    /// `entry_id`, queryable only within bounds.
+    pub fn entry_version(
+        env: Env,
+        entry_id: BytesN<32>,
+        version: u32,
+    ) -> Result<VersionSnapshot, ContractError> {
+        registry::get_version(&env, &entry_id, version)
+    }
+
+    /// Returns how many versions have been recorded for `entry_id`.
+    pub fn entry_version_count(env: Env, entry_id: BytesN<32>) -> u32 {
+        registry::version_count(&env, &entry_id)
+    }
+
+    /// #929 — cursor/limit-bounded children query for `parent_id`.
+    pub fn children(
+        env: Env,
+        parent_id: BytesN<32>,
+        cursor: u32,
+        limit: u32,
+    ) -> Result<ChildrenPage, ContractError> {
+        registry::children(&env, &parent_id, cursor, limit)
+    }
+
+    /// #932 — read-only verification of a rendition's current content
+    /// commitment against `(algorithm, digest)`.
+    pub fn verify_content(
+        env: Env,
+        rendition_id: BytesN<32>,
+        algorithm: HashAlgorithm,
+        digest: BytesN<32>,
+    ) -> Result<bool, ContractError> {
+        content::verify_content(&env, &rendition_id, algorithm, &digest)
+    /// Issues a pseudonymous membership attestation. The caller supplies only
+    /// commitments: a claim digest, an institution-domain digest, and a
+    /// network identifier digest. The plaintext claim must never be sent to
+    /// this contract. Issuing a new attestation rotates the wallet's current
+    /// pointer and revokes the prior record without deleting its history.
+    pub fn attest_membership(
+        env: Env,
+        caller: Address,
+        wallet: Address,
+        claim_commitment: BytesN<32>,
+        institution_domain_hash: BytesN<32>,
+        network_id: BytesN<32>,
+        expires_at: u64,
+    ) -> Result<BytesN<32>, ContractError> {
+        governance::require_role(&env, Role::PolicyManager, &caller)?;
+        let issued_at = env.ledger().timestamp();
+        if expires_at <= issued_at {
+            return Err(ContractError::InvalidStateTransition);
+        }
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DK::MembershipCount)
+            .unwrap_or(0);
+        let next = count
+            .checked_add(1)
+            .ok_or(ContractError::InvalidStateTransition)?;
+        env.storage().instance().set(&DK::MembershipCount, &next);
+        let id = membership_id(
+            &env,
+            &wallet,
+            &claim_commitment,
+            &institution_domain_hash,
+            &network_id,
+            next,
+        );
+        if let Some(previous_id) = env
+            .storage()
+            .persistent()
+            .get::<_, BytesN<32>>(&DK::MembershipCurrent(wallet.clone()))
+        {
+            if let Some(mut previous) = env
+                .storage()
+                .persistent()
+                .get::<_, MembershipAttestation>(&DK::MembershipAttestation(previous_id.clone()))
+            {
+                previous.status = MembershipStatus::Revoked;
+                env.storage()
+                    .persistent()
+                    .set(&DK::MembershipAttestation(previous_id.clone()), &previous);
+                env.events()
+                    .publish((symbol_short!("MEM_REVOK"),), previous_id);
+            }
+        }
+        let attestation = MembershipAttestation {
+            wallet: wallet.clone(),
+            claim_commitment,
+            institution_domain_hash,
+            network_id,
+            nonce: next,
+            issued_at,
+            expires_at,
+            status: MembershipStatus::Active,
+        };
+        env.storage()
+            .persistent()
+            .set(&DK::MembershipAttestation(id.clone()), &attestation);
+        env.storage()
+            .persistent()
+            .set(&DK::MembershipCurrent(wallet.clone()), &id);
+        env.storage().persistent().extend_ttl(
+            &DK::MembershipAttestation(id.clone()),
+            CATALOG_MIN_TTL,
+            CATALOG_MAX_TTL,
+        );
+        env.storage().persistent().extend_ttl(
+            &DK::MembershipCurrent(wallet),
+            CATALOG_MIN_TTL,
+            CATALOG_MAX_TTL,
+        );
+        env.events().publish(
+            (symbol_short!("MEM_ISSUE"),),
+            (id.clone(), issued_at, expires_at),
+        );
+        Ok(id)
+    }
+
+    /// Revokes a membership without exposing the institution's underlying
+    /// claim. The prior record remains available for an audit trail.
+    pub fn revoke_membership(
+        env: Env,
+        caller: Address,
+        attestation_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        governance::require_role(&env, Role::PolicyManager, &caller)?;
+        let key = DK::MembershipAttestation(attestation_id.clone());
+        let mut attestation: MembershipAttestation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::MembershipNotFound)?;
+        if attestation.status == MembershipStatus::Revoked {
+            return Err(ContractError::AlreadyRevoked);
+        }
+        attestation.status = MembershipStatus::Revoked;
+        env.storage().persistent().set(&key, &attestation);
+        if env
+            .storage()
+            .persistent()
+            .get(&DK::MembershipCurrent(attestation.wallet.clone()))
+            == Some(attestation_id.clone())
+        {
+            env.storage()
+                .persistent()
+                .remove(&DK::MembershipCurrent(attestation.wallet.clone()));
+        }
+        env.events()
+            .publish((symbol_short!("MEM_REVOK"),), attestation_id);
+        Ok(())
+    }
+
+    /// Proves borrowing eligibility without revealing a name or student
+    /// number. The caller must present the same institution and network
+    /// domain commitments used at issuance, preventing cross-scope replay.
+    pub fn is_membership_active(
+        env: Env,
+        wallet: Address,
+        claim_commitment: BytesN<32>,
+        institution_domain_hash: BytesN<32>,
+        network_id: BytesN<32>,
+    ) -> bool {
+        let current_id: BytesN<32> = match env
+            .storage()
+            .persistent()
+            .get::<_, BytesN<32>>(&DK::MembershipCurrent(wallet.clone()))
+        {
+            Some(id) => id,
+            None => return false,
+        };
+        let attestation: MembershipAttestation = match env
+            .storage()
+            .persistent()
+            .get(&DK::MembershipAttestation(current_id.clone()))
+        {
+            Some(value) => value,
+            None => return false,
+        };
+        let expected_id = membership_id(
+            &env,
+            &wallet,
+            &claim_commitment,
+            &institution_domain_hash,
+            &network_id,
+            attestation.nonce,
+        );
+        let now = env.ledger().timestamp();
+        attestation.status == MembershipStatus::Active
+            && current_id == expected_id
+            && now >= attestation.issued_at
+            && now < attestation.expires_at
+    }
+
+    pub fn membership_attestation(
+        env: Env,
+        attestation_id: BytesN<32>,
+    ) -> Result<MembershipAttestation, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DK::MembershipAttestation(attestation_id))
+            .ok_or(ContractError::MembershipNotFound)
     /// Checks out a work to a patron, creating an active loan. Enforces concurrent loan limits.
     pub fn checkout_work(
         env: Env,
