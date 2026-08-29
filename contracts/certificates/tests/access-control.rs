@@ -1,16 +1,2 @@
-use soroban_sdk::{testutils::Address as _, Env};
-use token::TokenContract;
-
-#[test]
-#[should_panic(expected = "Unauthorized")]
-fn non_admin_cannot_mint() {
-    let env = Env::default();
-
-    let admin = Address::random(&env);
-    let attacker = Address::random(&env);
-
-    TokenContract::initialize(env.clone(), admin);
-
-    // attacker tries mint
-    TokenContract::mint(env, attacker, 100);
-}
+// Placeholder — this file previously referenced an unrelated `token` crate.
+// Access-control tests are covered in security_tests.rs.
