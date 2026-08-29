@@ -277,6 +277,10 @@ fn test_derive_access_grant_within_window() {
     assert_eq!(grant.grantee, grantee);
     assert_eq!(grant.not_before, 1500);
     assert_eq!(grant.expires_at, 1600);
+    assert_eq!(grant.loan_id, id);
+    assert_eq!(grant.rendition_id, work_id);
+    assert_eq!(client.access_grant_commitment(&grant_id), grant.commitment);
+    assert!(client.verify_access_grant(&grant_id, &grantee, &work_id));
 }
 
 #[test]
