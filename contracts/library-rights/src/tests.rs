@@ -39,6 +39,24 @@ mod return_tests {
         let res = client.try_return_work(&borrower, &work_id, &borrower);
         assert_eq!(res, Err(Ok(ContractError::LoanNotFound)));
     }
+use crate::LibraryRightsContract;
+use soroban_sdk::{Address, Env, String};
+
+mod classifications;
+mod content;
+mod governance;
+mod metadata;
+mod integrity_membership;
+mod privacy;
+mod provenance;
+mod registry;
+mod storage;
+
+/// Shared test setup: a fresh env with a freshly registered contract.
+fn setup() -> (Env, Address) {
+    let env = Env::default();
+    let contract_id = env.register(LibraryRightsContract, ());
+    (env, contract_id)
 }
 
 #[cfg(test)]
@@ -155,6 +173,8 @@ mod reserve_tests {
         let res = client.try_borrow_from_reserve(&other_user, &work_id, &course_id, &other_user);
         assert_eq!(res, Err(Ok(ContractError::NotEnrolled)));
     }
+    assert_eq!(client.version(), String::from_str(&env, "0.6.0"));
+    assert_eq!(client.version(), String::from_str(&env, "0.5.0"));
 }
 
 #[cfg(test)]

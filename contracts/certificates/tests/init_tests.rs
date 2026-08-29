@@ -18,14 +18,15 @@ fn init_sets_admin_and_backend_pubkey() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, CertificateContract);
+    let contract_id = env.register(CertificateContract, ());
     let client = CertificateContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let pubkey = backend_pubkey(&env);
 
     // Should succeed without error
-    client.init(&admin, &pubkey, &admin);
+    client.init(&admin, &pubkey, &minter);
 
     // Contract must not be paused after init
     assert!(!client.is_paused());
@@ -37,16 +38,51 @@ fn init_rejects_double_initialization() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, CertificateContract);
+    let contract_id = env.register(CertificateContract, ());
     let client = CertificateContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let pubkey = backend_pubkey(&env);
 
-    client.init(&admin, &pubkey, &admin);
+    client.init(&admin, &pubkey, &minter);
 
-    let result = client.try_init(&admin, &pubkey, &admin);
+    let result = client.try_init(&admin, &pubkey, &minter);
     assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
+}
+
+/// init with a key shorter than 32 bytes must return InvalidPublicKey (Fix #834).
+#[test]
+fn init_rejects_short_pubkey() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(CertificateContract, ());
+    let client = CertificateContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let short_key = Bytes::from_slice(&env, &[0xAAu8; 16]);
+
+    let result = client.try_init(&admin, &short_key, &minter);
+    assert_eq!(result, Err(Ok(ContractError::InvalidPublicKey)));
+}
+
+/// init with a key longer than 32 bytes must return InvalidPublicKey (Fix #834).
+#[test]
+fn init_rejects_long_pubkey() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(CertificateContract, ());
+    let client = CertificateContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let long_key = Bytes::from_slice(&env, &[0xBBu8; 64]);
+
+    let result = client.try_init(&admin, &long_key, &minter);
+    assert_eq!(result, Err(Ok(ContractError::InvalidPublicKey)));
 }
 
 /// init without admin authorization must be rejected.
@@ -56,16 +92,14 @@ fn init_rejects_without_admin_auth() {
     // Do NOT mock all auths — require real auth checking
     env.mock_all_auths_allowing_non_root_auth();
 
-    let contract_id = env.register_contract(None, CertificateContract);
+    let contract_id = env.register(CertificateContract, ());
     let client = CertificateContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let pubkey = backend_pubkey(&env);
 
-    // With mock_all_auths_allowing_non_root_auth the call itself succeeds —
-    // the important thing is that the admin address must have been authorized.
-    // We verify by checking the auth tree recorded by the environment.
-    client.init(&admin, &pubkey, &admin);
+    client.init(&admin, &pubkey, &minter);
 
     // Confirm the admin's authorization was required (auths must be non-empty)
     let auths = env.auths();

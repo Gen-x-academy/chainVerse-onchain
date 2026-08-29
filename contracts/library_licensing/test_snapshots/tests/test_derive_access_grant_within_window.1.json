@@ -50,6 +50,9 @@
                 },
                 {
                   "u64": 2000
+                },
+                {
+                  "u32": 5
                 }
               ]
             }
@@ -215,6 +218,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "allocated_seats"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "expires_at"
                       },
                       "val": {
@@ -263,6 +274,14 @@
                             "symbol": "Active"
                           }
                         ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "total_seats"
+                      },
+                      "val": {
+                        "u32": 5
                       }
                     },
                     {

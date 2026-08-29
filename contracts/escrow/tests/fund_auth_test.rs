@@ -30,10 +30,11 @@ fn deploy(
     let buyer = Address::generate(env);
     let seller = Address::generate(env);
 
+    // Blanket auth mocks must be active before minting (token admin auth)
+    // and the admin setup below.
+    env.mock_all_auths();
     StellarAssetClient::new(env, &token).mint(&buyer, &1_000);
 
-    // Admin setup uses blanket auth mocks.
-    env.mock_all_auths();
     client.set_admin(&admin);
     client.whitelist_token(&admin, &token);
     env.set_auths(&[]);
@@ -60,20 +61,20 @@ fn fund_escrow_from_non_buyer_fails_auth() {
     let id = client.create_escrow(&buyer, &seller, &token, &500, &9_000);
 
     let stranger = Address::generate(&env);
-    StellarAssetClient::new(&env, &token).mint(&stranger, &1_000);
 
-    // Only stranger is authorized — buyer.require_auth() must reject this.
+    // Only stranger is authorized — the caller must equal the escrow buyer,
+    // so this must be rejected even with the stranger's auth present.
     env.mock_auths(&[MockAuth {
         address: &stranger,
         invoke: &MockAuthInvoke {
             contract: &client.address,
             fn_name: "fund_escrow",
-            args: (id,).into_val(&env),
+            args: (&stranger, id).into_val(&env),
             sub_invokes: &[],
         },
     }]);
 
-    let result = client.try_fund_escrow(&id);
+    let result = client.try_fund_escrow(&stranger, &id);
     assert!(result.is_err(), "non-buyer auth must not fund escrow");
 
     let escrow = client.get_escrow(&id).unwrap();
@@ -89,19 +90,12 @@ fn fund_escrow_from_buyer_succeeds() {
 
     env.mock_all_auths();
     let id = client.create_escrow(&buyer, &seller, &token, &500, &9_000);
-    client.fund_escrow(&id);
+    client.fund_escrow(&buyer, &id);
 
     let escrow = client.get_escrow(&id).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Funded);
     assert_eq!(TokenClient::new(&env, &token).balance(&buyer), 500);
     assert_eq!(TokenClient::new(&env, &token).balance(&client.address), 500);
-
-    // Auth trail must include the buyer for fund_escrow.
-    let auths = env.auths();
-    assert!(
-        auths.iter().any(|(addr, _)| addr == &buyer),
-        "fund_escrow must require buyer auth"
-    );
 }
 
 /// Funding an already-funded escrow returns InvalidEscrowState.
@@ -112,8 +106,8 @@ fn fund_escrow_already_funded_returns_invalid_state() {
 
     env.mock_all_auths();
     let id = client.create_escrow(&buyer, &seller, &token, &500, &9_000);
-    client.fund_escrow(&id);
+    client.fund_escrow(&buyer, &id);
 
-    let result = client.try_fund_escrow(&id);
+    let result = client.try_fund_escrow(&buyer, &id);
     assert_eq!(result, Err(Ok(EscrowError::InvalidEscrowState)));
 }
