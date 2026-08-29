@@ -77,3 +77,12 @@ pub enum DataKey {
     MembershipCurrent(Address),
     MembershipCount,
 }
+    /// Tracks active loan counts per patron per policy: (patron, policy_id) -> count
+    PatronPolicyActiveLoans(Address, Symbol),
+    /// Tracks allowlisted keepers that can trigger auto-renew evaluations
+    Keeper(Address),
+    /// Tracks processed request nonces to ensure idempotency: (caller, nonce) -> processed
+    ProcessedNonce(Address, BytesN<32>),
+    /// Tracks the total number of holds for a work (to maintain queue positions)
+    WorkHoldCount(BytesN<32>),
+}
