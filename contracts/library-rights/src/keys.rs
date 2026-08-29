@@ -1,3 +1,8 @@
+use soroban_sdk::{contracttype, Address, BytesN};
+
+pub const SCHEMA_VERSION: u32 = 2;
+pub const GOVERNANCE_MIN_TTL: u32 = 518_400;
+pub const GOVERNANCE_MAX_TTL: u32 = 3_110_400;
 //! Versioned storage keys and TTL policy for the library-rights domain (#925).
 //!
 //! | Variant | Ownership | Lifetime tier | Growth |
@@ -54,21 +59,9 @@ pub const GOVERNANCE_MAX_TTL: u32 = 3_110_400;
 /// ~30 days min / ~365 days max.
 pub const CATALOG_MIN_TTL: u32 = 518_400;
 pub const CATALOG_MAX_TTL: u32 = 6_220_800;
-
-/// Active-state data (licenses, loans, holds, balances): shorter-lived,
-/// expected to be renewed on every interaction.
-/// ~1 day min / ~30 days max.
-///
-/// Not yet consumed by any contract function -- `License`, `Loan`,
-/// `Hold`, and `Balance` are reserved key shapes (see the table above)
-/// wired up by later application-level issues, so these constants are
-/// unused for now.
-#[allow(dead_code)]
 pub const ACTIVE_MIN_TTL: u32 = 17_280;
-#[allow(dead_code)]
 pub const ACTIVE_MAX_TTL: u32 = 518_400;
 
-/// The four governance roles bootstrapped in #926.
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -80,13 +73,22 @@ pub enum Role {
     Librarian,
 }
 
-/// Versioned storage keys for the library-rights contract.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     SchemaVersion,
     Role(Role),
     Work(BytesN<32>),
+    /// Kept as the stable policy-scope index for compatibility.
+    Policy(BytesN<32>),
+    PolicyVersion(BytesN<32>, u32),
+    PolicyCounter,
+    License(BytesN<32>),
+    Rendition(BytesN<32>),
+    Seat(BytesN<32>),
+    Loan(BytesN<32>),
+    BorrowerLoanCount(Address, Address),
+    LoanCounter,
     ContentStatus(BytesN<32>),
     Quarantine(BytesN<32>),
     Policy(Symbol),
