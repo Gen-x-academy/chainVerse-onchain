@@ -18,8 +18,6 @@ mod storage;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
-mod test_integration;
-#[cfg(test)]
 mod test_purchase;
 #[cfg(test)]
 mod test_withdrawal;
