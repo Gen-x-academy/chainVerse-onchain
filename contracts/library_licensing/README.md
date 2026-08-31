@@ -54,3 +54,13 @@ Institutional transfer policy is intentionally not conflated with patron transfe
 ## ABI regeneration
 
 After building the contract, regenerate the Soroban specification using the project’s normal release/deployment workflow. The generated ABI must include the new methods and `AccessGrant` fields; do not manually edit generated artifacts.
+
+## Issues #944, #945, #950, and #951
+
+Institutional license inventory is minted through `mint_institutional_license`, which requires an authenticated cataloging authority and stores only the institution, treasury, seat count, validity window, and an opaque authorization commitment. No roster, document, device identifier, or content is written on-chain.
+
+License recall is governed through `schedule_license_revocation` and `apply_license_revocation`. A revocation records an effective timestamp and reason commitment. The caller must have circulation authority, revocation cannot be applied before its effective time, and active-loan preservation is explicit through `active_loans_until`; ordinary seat cleanup remains possible after revocation.
+
+A borrower may create a `ReaderSession` with `create_reader_session`. The session is scoped to one active access grant, binds one public key, requires borrower authorization, and cannot expire after the parent grant. The contract stores no private key or device identity.
+
+Offline access is represented by `OfflineGrant`. `create_offline_grant` hashes the grant, authoritative loan, grantee, expiry, and use bound into a commitment. `consume_offline_grant` verifies the commitment, parent grant, expiry, and bounded use count before consuming one use. Content, URLs, and device identifiers remain off-chain.

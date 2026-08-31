@@ -11,16 +11,8 @@ use soroban_sdk::{
 };
 
 use crate::{
-    AccessGrant, EnrollmentProof, LibraryLicensingClient, License, LicenseError, LicenseStatus,
-    AccessGrant, Capability, LibraryLicensingClient, License, LicenseError, LicenseStatus,
-    ReadingListManifest, ReadingListVersion,
-};
-
-// ============================================================================
-// Shared helpers
-// ============================================================================
-    AccessGrant, LibraryLicensingClient, License, LicenseError, LicenseStatus,
-    RenditionMigrationPolicy,
+    AccessGrant, Capability, EnrollmentProof, LibraryLicensingClient, License, LicenseError,
+    LicenseStatus, ReadingListManifest, ReadingListVersion, RenditionMigrationPolicy,
 };
 
 mod entitlements;
@@ -33,9 +25,6 @@ fn setup() -> (Env, Address) {
     (env, contract_id)
 }
 
-/// Grant a "read" license for `work_id` to `licensee` with the given window
-/// and a default seat budget of 5 (#943).
-fn grant(
 /// Initialise admin and return a client.
 fn setup_with_admin() -> (Env, Address, Address) {
     let (env, contract_id) = setup();
@@ -1546,4 +1535,80 @@ fn test_rendition_migration_does_not_resurrect_expired_grant() {
     assert!(!client.is_grant_active_for_work(&grant_id, &to));
     env.ledger().set_timestamp(200);
     assert!(!client.is_grant_active_for_work(&grant_id, &to));
+}
+
+
+#[test]
+fn test_institutional_license_mint_records_authenticated_inventory() {
+    let (env, contract_id, admin) = setup_with_admin();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let institution = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let work_id = BytesN::from_array(&env, &[0x11; 32]);
+    let rights = String::from_str(&env, "institutional-read");
+    let auth_commitment = BytesN::from_array(&env, &[0x22; 32]);
+
+    let license_id = client.mint_institutional_license(
+        &admin,
+        &institution,
+        &treasury,
+        &work_id,
+        &rights,
+        &10u64,
+        &1_000u64,
+        &25u32,
+        &auth_commitment,
+    );
+    let license = client.license(&license_id);
+    assert_eq!(license.licensee, institution);
+    assert_eq!(license.total_seats, 25);
+    assert_eq!(license.status, LicenseStatus::Active);
+}
+
+#[test]
+fn test_scheduled_revocation_respects_effective_time_and_preserves_active_loans_boundary() {
+    let (env, contract_id, admin) = setup_with_admin();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let work_id = BytesN::from_array(&env, &[0x33; 32]);
+    let licensee = Address::generate(&env);
+    let license_id = grant_license(&env, &client, &admin, &work_id, &licensee, 0, 10_000);
+    let reason = BytesN::from_array(&env, &[0x44; 32]);
+
+    client.schedule_license_revocation(&admin, &license_id, &200u64, &500u64, &reason);
+    env.ledger().set_timestamp(199);
+    assert_eq!(client.try_apply_license_revocation(&admin, &license_id), Err(Ok(LicenseError::RevocationNotEffective)));
+    env.ledger().set_timestamp(200);
+    client.apply_license_revocation(&admin, &license_id);
+    assert_eq!(client.license(&license_id).status, LicenseStatus::Revoked);
+}
+
+#[test]
+fn test_scheduled_revocation_rejects_empty_reason_commitment() {
+    let (env, contract_id, admin) = setup_with_admin();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let work_id = BytesN::from_array(&env, &[0x55; 32]);
+    let licensee = Address::generate(&env);
+    let license_id = grant_license(&env, &client, &admin, &work_id, &licensee, 0, 10_000);
+    let empty = BytesN::from_array(&env, &[0u8; 32]);
+    assert_eq!(
+        client.try_schedule_license_revocation(&admin, &license_id, &100u64, &100u64, &empty),
+        Err(Ok(LicenseError::InvalidCommitment))
+    );
+}
+
+#[test]
+fn test_offline_grant_rejects_zero_use_bound() {
+    let (env, contract_id, admin) = setup_with_admin();
+    let client = LibraryLicensingClient::new(&env, &contract_id);
+    let work_id = BytesN::from_array(&env, &[0x66; 32]);
+    let licensee = Address::generate(&env);
+    let license_id = grant_license(&env, &client, &admin, &work_id, &licensee, 0, 10_000);
+    // No grant is needed to exercise the bounded-input invariant: zero uses
+    // must be rejected before any offline commitment is persisted.
+    let grant_id = BytesN::from_array(&env, &[0x77; 32]);
+    assert_eq!(
+        client.try_create_offline_grant(&licensee, &grant_id, &500u64, &0u32),
+        Err(Ok(LicenseError::InvalidDuration))
+    );
+    let _ = license_id;
 }
