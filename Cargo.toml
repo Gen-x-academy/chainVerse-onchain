@@ -19,6 +19,7 @@ members = [
     "contracts/library_licensing",
     "contracts/library-fines",
     "contracts/library-rights",
+    "contracts/scholarship-core",
     "contracts/scholarship-programs",
     "contracts/scholarship-eligibility",
     "contracts/scholarship-applications",
