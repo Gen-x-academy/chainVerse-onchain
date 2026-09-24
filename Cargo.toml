@@ -19,6 +19,7 @@ members = [
     "contracts/library_licensing",
     "contracts/library-fines",
     "contracts/library-rights",
+    "contracts/royalty-splits",
 ]
 
 [workspace.dependencies]
