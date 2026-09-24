@@ -38,6 +38,18 @@ jobs:
         working-directory: contracts
         run: cargo test --workspace
 
+      # #1009: property tests proving seats, deposits, charges, payments,
+      # waivers, and withdrawals never create a negative liability.
+      - name: Checked arithmetic properties (shared::math)
+        working-directory: contracts
+        run: cargo test -p shared math
+
+      # #1007: canonical signing envelope — layout, version gating, and
+      # cross-network / cross-contract / cross-message-type replay.
+      - name: Signing envelope domain separation (shared::signing)
+        working-directory: contracts
+        run: cargo test -p shared signing
+
       - name: Clippy (deny warnings)
         working-directory: contracts
         run: cargo clippy --workspace --all-targets -- -D warnings
