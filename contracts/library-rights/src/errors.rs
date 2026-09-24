@@ -122,6 +122,16 @@ pub enum ContractError {
     DuplicateRequestNonce = 15,
     /// The work has active holds that need to be processed before checkout.
     WorkHasActiveHolds = 16,
+    /// A schema migration is currently in progress; writes are gated.
+    MigrationInProgress = 212,
+    /// No migration has been started for the requested operation.
+    MigrationNotStarted = 213,
+    /// The migration has already completed (or no migration needed).
+    MigrationAlreadyComplete = 214,
+    /// A migration may only advance to the next schema version, never skip.
+    MigrationVersionSkip = 215,
+    /// The migration is not ready to finalize; not all steps have run.
+    MigrationNotReady = 216,
     /// The global emergency pause is active; obligation-creating
     /// operations are blocked (#997).
     Paused = 200,
