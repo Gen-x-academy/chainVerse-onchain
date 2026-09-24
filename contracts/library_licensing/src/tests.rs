@@ -15,7 +15,9 @@ use crate::{
     LicenseStatus, ReadingListManifest, ReadingListVersion, RenditionMigrationPolicy,
 };
 
+mod auth_trees;
 mod entitlements;
+mod lifecycle_properties;
 mod seats;
 
 fn setup() -> (Env, Address) {
