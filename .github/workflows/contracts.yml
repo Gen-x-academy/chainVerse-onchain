@@ -38,6 +38,17 @@ jobs:
         working-directory: contracts
         run: cargo test --workspace
 
+      # #1012: authorization-tree assertions run without blanket mock_all_auths,
+      # so a regression that widens who may sign fails here rather than passing
+      # silently in the suites that mock every auth.
+      - name: Authorization trees (library-licensing)
+        working-directory: contracts
+        run: cargo test -p library-licensing auth_trees
+
+      # #1013: generated lifecycle sequences over seats and license status.
+      - name: Lifecycle properties (library-licensing)
+        working-directory: contracts
+        run: cargo test -p library-licensing lifecycle_properties
       # #1009: property tests proving seats, deposits, charges, payments,
       # waivers, and withdrawals never create a negative liability.
       - name: Checked arithmetic properties (shared::math)
