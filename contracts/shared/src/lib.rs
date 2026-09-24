@@ -1,11 +1,19 @@
 #![no_std]
 
+pub mod commitments;
+pub mod config;
 pub mod error;
 pub mod events;
+pub mod math;
+pub mod signing;
 pub mod storage;
 
+pub use commitments::{CommitmentError, IdentifierKind};
+pub use config::{ConfigError, TimeRange, Validated};
 pub use error::ContractError;
 pub use events::EventEmitter;
+pub use math::{DebtAccount, MathError, Rounding};
+pub use signing::{MessageType, SigningDomain, SigningError, ENVELOPE_VERSION};
 pub use storage::{
     get_instance_storage, get_persistent_storage, remove_instance_storage,
     remove_persistent_storage, set_instance_storage, set_persistent_storage,
