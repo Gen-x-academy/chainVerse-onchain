@@ -122,4 +122,37 @@ pub enum ContractError {
     DuplicateRequestNonce = 15,
     /// The work has active holds that need to be processed before checkout.
     WorkHasActiveHolds = 16,
+    /// A schema migration is currently in progress; writes are gated.
+    MigrationInProgress = 212,
+    /// No migration has been started for the requested operation.
+    MigrationNotStarted = 213,
+    /// The migration has already completed (or no migration needed).
+    MigrationAlreadyComplete = 214,
+    /// A migration may only advance to the next schema version, never skip.
+    MigrationVersionSkip = 215,
+    /// The migration is not ready to finalize; not all steps have run.
+    MigrationNotReady = 216,
+    /// The global emergency pause is active; obligation-creating
+    /// operations are blocked (#997).
+    Paused = 200,
+    /// The library is already paused; repeated pause calls are rejected.
+    AlreadyPaused = 201,
+    /// The library is not paused; repeated unpause calls are rejected.
+    NotPaused = 202,
+    /// A timelock delay outside the bounded window was supplied (#995).
+    TimelockConfigInvalid = 203,
+    /// A queued change's execution time is outside the current window.
+    TimelockEtaInvalid = 204,
+    /// The timelock queue is full; no further changes can be queued.
+    TimelockQueueFull = 205,
+    /// An identical change from the same proposer is already pending.
+    TimelockAlreadyQueued = 206,
+    /// No queued change exists for the given id.
+    TimelockNotFound = 207,
+    /// The change was already executed; tombstones forbid replay.
+    TimelockAlreadyExecuted = 208,
+    /// The change was cancelled before its execution time.
+    TimelockCancelled = 209,
+    /// The change's execution time has not arrived yet.
+    TimelockNotReady = 210,
 }

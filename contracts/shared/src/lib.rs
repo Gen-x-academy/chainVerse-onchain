@@ -1,11 +1,15 @@
 #![no_std]
 
+pub mod commitments;
+pub mod config;
 pub mod error;
 pub mod events;
 pub mod math;
 pub mod signing;
 pub mod storage;
 
+pub use commitments::{CommitmentError, IdentifierKind};
+pub use config::{ConfigError, TimeRange, Validated};
 pub use error::ContractError;
 pub use events::EventEmitter;
 pub use math::{DebtAccount, MathError, Rounding};
