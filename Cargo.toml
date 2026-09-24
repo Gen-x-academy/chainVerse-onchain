@@ -20,6 +20,11 @@ members = [
     "contracts/library-fines",
     "contracts/library-rights",
     "contracts/royalty-splits",
+    "contracts/scholarship-registry",
+    "contracts/scholarship-core",
+    "contracts/scholarship-programs",
+    "contracts/scholarship-eligibility",
+    "contracts/scholarship-applications",
 ]
 
 [workspace.dependencies]
