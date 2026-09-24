@@ -38,6 +38,52 @@ jobs:
         working-directory: contracts
         run: cargo test --workspace
 
+      # #1017: blocks a merge that pushes any library-rights entrypoint past
+      # its share of Soroban's per-transaction CPU/memory limit. Ceilings and
+      # the tolerance policy live in contracts/library-rights/src/tests/budgets.rs
+      # and docs/library-rights-resource-budgets.md.
+      - name: Resource budgets (library-rights)
+        working-directory: contracts
+        run: cargo test -p library-rights budgets
+
+      # #1016: model check of the hold and loan state machines.
+      - name: Model check (library-rights lending)
+        working-directory: contracts
+        run: cargo test -p library-rights model_check
+      # #1012: authorization-tree assertions run without blanket mock_all_auths,
+      # so a regression that widens who may sign fails here rather than passing
+      # silently in the suites that mock every auth.
+      - name: Authorization trees (library-licensing)
+        working-directory: contracts
+        run: cargo test -p library-licensing auth_trees
+
+      # #1013: generated lifecycle sequences over seats and license status.
+      - name: Lifecycle properties (library-licensing)
+        working-directory: contracts
+        run: cargo test -p library-licensing lifecycle_properties
+      # #1009: property tests proving seats, deposits, charges, payments,
+      # waivers, and withdrawals never create a negative liability.
+      - name: Checked arithmetic properties (shared::math)
+        working-directory: contracts
+        run: cargo test -p shared math
+
+      # #1007: canonical signing envelope — layout, version gating, and
+      # cross-network / cross-contract / cross-message-type replay.
+      - name: Signing envelope domain separation (shared::signing)
+        working-directory: contracts
+        run: cargo test -p shared signing
+      # #1002: every policy and dependency update is validated before storage,
+      # with typed errors and boundary/property coverage on every field.
+      - name: Configuration validation (shared::config)
+        working-directory: contracts
+        run: cargo test -p shared config
+
+      # #1005: salted, domain-separated commitments for low-entropy
+      # identifiers, plus the guard that rejects raw ones.
+      - name: Identifier commitments (shared::commitments)
+        working-directory: contracts
+        run: cargo test -p shared commitments
+
       - name: Clippy (deny warnings)
         working-directory: contracts
         run: cargo clippy --workspace --all-targets -- -D warnings
