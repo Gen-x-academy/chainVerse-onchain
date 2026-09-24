@@ -38,6 +38,18 @@ jobs:
         working-directory: contracts
         run: cargo test --workspace
 
+      # #1002: every policy and dependency update is validated before storage,
+      # with typed errors and boundary/property coverage on every field.
+      - name: Configuration validation (shared::config)
+        working-directory: contracts
+        run: cargo test -p shared config
+
+      # #1005: salted, domain-separated commitments for low-entropy
+      # identifiers, plus the guard that rejects raw ones.
+      - name: Identifier commitments (shared::commitments)
+        working-directory: contracts
+        run: cargo test -p shared commitments
+
       - name: Clippy (deny warnings)
         working-directory: contracts
         run: cargo clippy --workspace --all-targets -- -D warnings
