@@ -54,6 +54,8 @@ mod privacy;
 mod provenance;
 mod registry;
 mod storage;
+mod tests_wasm_info;
+mod tests_migration;
 
 /// Shared test setup: a fresh env with a freshly registered contract.
 fn setup() -> (Env, Address) {
