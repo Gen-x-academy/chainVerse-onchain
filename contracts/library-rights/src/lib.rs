@@ -111,6 +111,8 @@ mod provenance;
 mod metadata;
 mod registry;
 mod types;
+mod wasm_info;
+mod migration;
 
 pub use enrollment::{CourseRegistryClient, CourseRegistryInterface};
 pub use errors::ContractError;
@@ -259,6 +261,7 @@ impl LibraryRightsContract {
         policy_id: Symbol,
     ) -> Result<(), ContractError> {
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         // Verify policy exists before linking it to a work
         let _ = Self::get_policy(env.clone(), policy_id.clone())?;
         
@@ -441,6 +444,7 @@ impl LibraryRightsContract {
         borrower: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -503,6 +507,7 @@ impl LibraryRightsContract {
         holder: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -572,6 +577,7 @@ impl LibraryRightsContract {
         expiry: u64,
     ) -> Result<(), ContractError> {
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -1549,6 +1555,7 @@ impl LibraryRightsContract {
         fine_per_day: i128,
     ) -> Result<u32, ContractError> {
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         if scope.institution != caller && caller != governance::get_role(&env, Role::PolicyManager)?
         {
             return Err(ContractError::NotAdmin);
@@ -1626,6 +1633,7 @@ impl LibraryRightsContract {
         expires_at: u64,
     ) -> Result<(), ContractError> {
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         if expires_at <= env.ledger().timestamp() {
             return Err(ContractError::InvalidTimestamp);
         }
@@ -1812,6 +1820,75 @@ impl LibraryRightsContract {
 
     pub fn version(env: Env) -> String {
         String::from_str(&env, CONTRACT_VERSION)
+    }
+}
+
+/// Version, WASM-approval, and migration surface (#999, #1000).
+#[contractimpl]
+impl LibraryRightsContract {
+    /// Current storage schema version (0 before bootstrap).
+    pub fn schema_version(env: Env) -> u32 {
+        crate::wasm_info::schema_version(&env)
+    }
+
+    /// Semantic ABI revision of this build's entrypoint surface.
+    pub fn abi_version(env: Env) -> u32 {
+        crate::wasm_info::abi_version(&env)
+    }
+
+    /// One-call compatibility probe: schema + ABI + approved WASM hash.
+    pub fn deploy_info(env: Env) -> crate::wasm_info::DeployInfo {
+        crate::wasm_info::deploy_info(&env)
+    }
+
+    /// The currently approved WASM commitment (zero unless authorized).
+    pub fn approved_wasm_hash(env: Env) -> BytesN<32> {
+        crate::wasm_info::approved_wasm_hash(&env)
+    }
+
+    /// Governed (`Admin`) update of the approved WASM commitment.
+    pub fn approve_wasm_hash(
+        env: Env,
+        caller: Address,
+        new_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        crate::wasm_info::approve_wasm_hash(&env, caller, new_hash)
+    }
+
+    /// Begins a migration to the next schema version (`Admin`, no skips).
+    pub fn begin_migration(
+        env: Env,
+        caller: Address,
+        target_version: u32,
+    ) -> Result<(), ContractError> {
+        crate::migration::begin(&env, caller, target_version)
+    }
+
+    /// Applies up to `limit` migration steps (resumable, idempotent).
+    pub fn migrate_batch(
+        env: Env,
+        caller: Address,
+        limit: u32,
+    ) -> Result<(u32, bool), ContractError> {
+        crate::migration::migrate_batch(&env, caller, limit)
+    }
+
+    /// Completes an active migration and stamps the new schema version.
+    pub fn finalize_migration(
+        env: Env,
+        caller: Address,
+    ) -> Result<(), ContractError> {
+        crate::migration::finalize(&env, caller)
+    }
+
+    /// Current migration status for tooling and dashboards.
+    pub fn migration_status(env: Env) -> crate::migration::MigrationStatus {
+        crate::migration::status(&env)
+    }
+
+    /// Completed-migration log length.
+    pub fn migration_log_count(env: Env) -> u64 {
+        crate::migration::log_count(&env)
     }
 }
 
