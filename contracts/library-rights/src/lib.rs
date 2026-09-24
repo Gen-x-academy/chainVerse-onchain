@@ -109,8 +109,12 @@ mod governance;
 mod keys;
 mod provenance;
 mod metadata;
+mod pause;
 mod registry;
 mod types;
+mod wasm_info;
+mod migration;
+mod timelock;
 
 pub use enrollment::{CourseRegistryClient, CourseRegistryInterface};
 pub use errors::ContractError;
@@ -201,6 +205,7 @@ impl LibraryRightsContract {
         max_concurrent_loans_per_patron: u32,
         max_total_concurrent_loans: u32,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
         
         // Get existing policy to preserve total_active_loans if updating
@@ -258,7 +263,9 @@ impl LibraryRightsContract {
         custodian: Address,
         policy_id: Symbol,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         // Verify policy exists before linking it to a work
         let _ = Self::get_policy(env.clone(), policy_id.clone())?;
         
@@ -440,7 +447,9 @@ impl LibraryRightsContract {
         work_id: BytesN<32>,
         borrower: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         caller.require_auth();
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -502,7 +511,9 @@ impl LibraryRightsContract {
         work_id: BytesN<32>,
         holder: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         caller.require_auth();
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -539,6 +550,7 @@ impl LibraryRightsContract {
         work_id: BytesN<32>,
         holder: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         caller.require_auth();
 
         let hold_key = DK::Hold(work_id.clone(), holder.clone());
@@ -571,7 +583,9 @@ impl LibraryRightsContract {
         seats: u32,
         expiry: u64,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
 
         let work_key = DK::Work(work_id.clone());
         if !env.storage().persistent().has(&work_key) {
@@ -608,6 +622,7 @@ impl LibraryRightsContract {
         manifest_hash: BytesN<32>,
         schema_version: u32,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         classifications::commit_classification(&env, &caller, kind, manifest_hash, schema_version)
     }
 
@@ -645,6 +660,7 @@ impl LibraryRightsContract {
         provenance_type: ProvenanceType,
         provenance_hash: BytesN<32>,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         provenance::attest_provenance(&env, &caller, work_id, provenance_type, provenance_hash)
     }
 
@@ -672,6 +688,7 @@ impl LibraryRightsContract {
         metadata: MetadataCommitment,
         custodian: Address,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         registry::register_work(&env, &caller, &work_id, &metadata, &custodian)
     }
 
@@ -685,6 +702,7 @@ impl LibraryRightsContract {
         metadata: MetadataCommitment,
         custodian: Address,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         registry::register_edition(
             &env,
             &caller,
@@ -707,6 +725,7 @@ impl LibraryRightsContract {
         metadata: MetadataCommitment,
         custodian: Address,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         registry::register_rendition(
             &env,
             &caller,
@@ -726,6 +745,7 @@ impl LibraryRightsContract {
         entry_id: BytesN<32>,
         metadata: MetadataCommitment,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         registry::update_metadata(&env, &caller, &entry_id, &metadata)
     }
 
@@ -737,6 +757,7 @@ impl LibraryRightsContract {
         rendition_id: BytesN<32>,
         content: ContentCommitment,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         registry::update_content_hash(&env, &caller, &rendition_id, &content)
     }
 
@@ -794,6 +815,7 @@ impl LibraryRightsContract {
         network_id: BytesN<32>,
         expires_at: u64,
     ) -> Result<BytesN<32>, ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
         let issued_at = env.ledger().timestamp();
         if expires_at <= issued_at {
@@ -960,6 +982,7 @@ impl LibraryRightsContract {
         max_renewals: u32,
         max_license_duration: u64,
     ) -> Result<BytesN<32>, ContractError> {
+        pause::ensure_active(&env)?;
         // Authorize the patron to create their own loan
         patron.require_auth();
 
@@ -1109,6 +1132,7 @@ impl LibraryRightsContract {
         caller: Address,
         course_registry_id: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::Admin, &caller)?;
         env.storage()
             .instance()
@@ -1124,6 +1148,7 @@ impl LibraryRightsContract {
         course_id: BytesN<32>,
         borrower: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         caller.require_auth();
 
         let course_registry_id: Address = env
@@ -1335,6 +1360,7 @@ impl LibraryRightsContract {
         caller: Address,
         keeper: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::Admin, &caller)?;
         
         let key = DK::Keeper(keeper.clone());
@@ -1357,6 +1383,7 @@ impl LibraryRightsContract {
         caller: Address,
         keeper: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::Admin, &caller)?;
         
         let key = DK::Keeper(keeper.clone());
@@ -1385,6 +1412,7 @@ impl LibraryRightsContract {
         loan_id: BytesN<32>,
         renewal_duration: u64,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         // Authorize the patron to renew their own loan
         patron.require_auth();
         
@@ -1548,7 +1576,9 @@ impl LibraryRightsContract {
         hold_duration_secs: u64,
         fine_per_day: i128,
     ) -> Result<u32, ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         if scope.institution != caller && caller != governance::get_role(&env, Role::PolicyManager)?
         {
             return Err(ContractError::NotAdmin);
@@ -1625,7 +1655,9 @@ impl LibraryRightsContract {
         institution: Address,
         expires_at: u64,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
+        crate::migration::ensure_writable(&env)?;
         if expires_at <= env.ledger().timestamp() {
             return Err(ContractError::InvalidTimestamp);
         }
@@ -1652,6 +1684,7 @@ impl LibraryRightsContract {
         work_id: BytesN<32>,
         format: Symbol,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
         let key = DK::Rendition(rendition_id);
         env.storage().persistent().set(
@@ -1674,6 +1707,7 @@ impl LibraryRightsContract {
         seat_id: BytesN<32>,
         institution: Address,
     ) -> Result<(), ContractError> {
+        pause::ensure_active(&env)?;
         governance::require_role(&env, Role::PolicyManager, &caller)?;
         let key = DK::Seat(seat_id);
         env.storage().persistent().set(
@@ -1704,6 +1738,7 @@ impl LibraryRightsContract {
         rendition_id: BytesN<32>,
         seat_id: BytesN<32>,
     ) -> Result<BytesN<32>, ContractError> {
+        pause::ensure_active(&env)?;
         borrower.require_auth();
         let registry = CourseRegistryClient::new(&env, &course_registry);
         if !registry.is_enrolled(&borrower, &course_id) {
@@ -1815,5 +1850,160 @@ impl LibraryRightsContract {
     }
 }
 
+/// Version, WASM-approval, and migration surface (#999, #1000).
+#[contractimpl]
+impl LibraryRightsContract {
+    /// Current storage schema version (0 before bootstrap).
+    pub fn schema_version(env: Env) -> u32 {
+        crate::wasm_info::schema_version(&env)
+    }
+
+    /// Semantic ABI revision of this build's entrypoint surface.
+    pub fn abi_version(env: Env) -> u32 {
+        crate::wasm_info::abi_version(&env)
+    }
+
+    /// One-call compatibility probe: schema + ABI + approved WASM hash.
+    pub fn deploy_info(env: Env) -> crate::wasm_info::DeployInfo {
+        crate::wasm_info::deploy_info(&env)
+    }
+
+    /// The currently approved WASM commitment (zero unless authorized).
+    pub fn approved_wasm_hash(env: Env) -> BytesN<32> {
+        crate::wasm_info::approved_wasm_hash(&env)
+    }
+
+    /// Governed (`Admin`) update of the approved WASM commitment.
+    pub fn approve_wasm_hash(
+        env: Env,
+        caller: Address,
+        new_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        crate::wasm_info::approve_wasm_hash(&env, caller, new_hash)
+    }
+
+    /// Begins a migration to the next schema version (`Admin`, no skips).
+    pub fn begin_migration(
+        env: Env,
+        caller: Address,
+        target_version: u32,
+    ) -> Result<(), ContractError> {
+        crate::migration::begin(&env, caller, target_version)
+    }
+
+    /// Applies up to `limit` migration steps (resumable, idempotent).
+    pub fn migrate_batch(
+        env: Env,
+        caller: Address,
+        limit: u32,
+    ) -> Result<(u32, bool), ContractError> {
+        crate::migration::migrate_batch(&env, caller, limit)
+    }
+
+    /// Completes an active migration and stamps the new schema version.
+    pub fn finalize_migration(
+        env: Env,
+        caller: Address,
+    ) -> Result<(), ContractError> {
+        crate::migration::finalize(&env, caller)
+    }
+
+    /// Current migration status for tooling and dashboards.
+    pub fn migration_status(env: Env) -> crate::migration::MigrationStatus {
+        crate::migration::status(&env)
+    }
+
+    /// Completed-migration log length.
+    pub fn migration_log_count(env: Env) -> u64 {
+        crate::migration::log_count(&env)
+    }
+}
+
+/// Control-plane hardening (#997, #995): the global emergency pause and
+/// the governed-change timelock. Both are purely additive on top of the
+/// existing contract surface.
+#[contractimpl]
+impl LibraryRightsContract {
+    /// Pauses the library (global emergency pause, #997). `Admin` or
+    /// `Emergency`. Blocks obligation-creating entrypoints until a
+    /// governed unpause restores normal operation.
+    pub fn pause_library(
+        env: Env,
+        caller: Address,
+        reason_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        pause::pause(&env, caller, reason_hash)
+    }
+
+    /// Governed unpause (#997). `Admin` only, reason-bearing for audit.
+    pub fn unpause_library(
+        env: Env,
+        caller: Address,
+        reason_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        pause::unpause(&env, caller, reason_hash)
+    }
+
+    /// Whether the library is currently paused (#997).
+    pub fn is_paused(env: Env) -> bool {
+        pause::is_paused(&env)
+    }
+
+    /// Full pause status snapshot, for dashboards and monitors (#997).
+    pub fn pause_status(env: Env) -> crate::pause::PauseStatus {
+        pause::status(&env)
+    }
+
+    /// The currently configured timelock delay window (#995).
+    pub fn timelock_config(env: Env) -> crate::timelock::TimelockConfig {
+        crate::timelock::config(&env)
+    }
+
+    /// Queues a governed change behind the configured delay (#995).
+    pub fn queue_change(
+        env: Env,
+        caller: Address,
+        action: crate::timelock::GovernedAction,
+        eta: u64,
+    ) -> Result<BytesN<32>, ContractError> {
+        crate::timelock::queue(&env, caller, action, eta)
+    }
+
+    /// Cancels a pending governed change before it executes (#995).
+    pub fn cancel_change(
+        env: Env,
+        caller: Address,
+        change_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        crate::timelock::cancel(&env, caller, change_id)
+    }
+
+    /// Executes a pending governed change once its delay has elapsed (#995).
+    pub fn execute_change(
+        env: Env,
+        caller: Address,
+        change_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        crate::timelock::execute(&env, caller, change_id)
+    }
+
+    /// Reads a single queued, pending governed change (#995).
+    pub fn pending_change(
+        env: Env,
+        change_id: BytesN<32>,
+    ) -> Result<crate::timelock::QueuedChange, ContractError> {
+        crate::timelock::pending_change(&env, change_id)
+    }
+
+    /// Lists the ids of all pending governed changes (bounded, #995).
+    pub fn pending_changes(env: Env) -> soroban_sdk::Vec<BytesN<32>> {
+        crate::timelock::pending_ids_list(&env)
+    }
+}
+
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_pause;
+#[cfg(test)]
+mod tests_timelock;
