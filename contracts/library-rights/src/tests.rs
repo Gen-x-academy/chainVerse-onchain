@@ -43,11 +43,13 @@ use crate::LibraryRightsContract;
 use course_registry::CourseRegistryContract;
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Symbol};
 
+mod budgets;
 mod classifications;
 mod content;
 mod governance;
 mod metadata;
 mod integrity_membership;
+mod model_check;
 mod privacy;
 mod provenance;
 mod registry;

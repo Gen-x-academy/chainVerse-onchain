@@ -38,6 +38,19 @@ jobs:
         working-directory: contracts
         run: cargo test --workspace
 
+      # #1017: blocks a merge that pushes any library-rights entrypoint past
+      # its share of Soroban's per-transaction CPU/memory limit. Ceilings and
+      # the tolerance policy live in contracts/library-rights/src/tests/budgets.rs
+      # and docs/library-rights-resource-budgets.md.
+      - name: Resource budgets (library-rights)
+        working-directory: contracts
+        run: cargo test -p library-rights budgets
+
+      # #1016: model check of the hold and loan state machines.
+      - name: Model check (library-rights lending)
+        working-directory: contracts
+        run: cargo test -p library-rights model_check
+
       - name: Clippy (deny warnings)
         working-directory: contracts
         run: cargo clippy --workspace --all-targets -- -D warnings
