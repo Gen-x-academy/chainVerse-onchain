@@ -1,6 +1,9 @@
 #![cfg(test)]
 use crate::{ContractError, ScholarshipEligibilityContract};
-use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, Symbol};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    vec, Address, BytesN, Env, Symbol,
+};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
@@ -23,7 +26,11 @@ fn test_publish_rule_starts_at_version_one() {
     client.initialize(&admin);
     let pid = program_id(&env, 1);
 
-    let required = vec![&env, Symbol::new(&env, "enrolled"), Symbol::new(&env, "income_band")];
+    let required = vec![
+        &env,
+        Symbol::new(&env, "enrolled"),
+        Symbol::new(&env, "income_band"),
+    ];
     let version = client.publish_eligibility_rule(&admin, &pid, &required);
     assert_eq!(version, 1);
     assert_eq!(client.get_latest_rule_version(&pid), 1);
@@ -67,7 +74,11 @@ fn test_republishing_rule_creates_new_immutable_version() {
     let v1_types = vec![&env, Symbol::new(&env, "enrolled")];
     client.publish_eligibility_rule(&admin, &pid, &v1_types);
 
-    let v2_types = vec![&env, Symbol::new(&env, "enrolled"), Symbol::new(&env, "income_band")];
+    let v2_types = vec![
+        &env,
+        Symbol::new(&env, "enrolled"),
+        Symbol::new(&env, "income_band"),
+    ];
     let v2 = client.publish_eligibility_rule(&admin, &pid, &v2_types);
     assert_eq!(v2, 2);
 

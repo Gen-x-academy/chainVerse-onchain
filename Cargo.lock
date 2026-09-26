@@ -237,7 +237,6 @@ name = "certificates"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
- "ed25519-dalek 2.1.1",
  "soroban-sdk",
 ]
 
@@ -343,7 +342,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
 dependencies = [
  "generic-array",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
  "zeroize",
 ]
@@ -365,7 +364,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
  "hybrid-array",
- "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -408,10 +406,6 @@ dependencies = [
  "fiat-crypto 0.3.0",
  "rustc_version",
  "subtle",
- "rand_core 0.10.1",
- "rustc_version",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -547,7 +541,6 @@ dependencies = [
  "elliptic-curve",
  "rfc6979",
  "signature",
- "signature 2.2.0",
 ]
 
 [[package]]
@@ -557,16 +550,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
- "signature 2.2.0",
-]
-
-[[package]]
-name = "ed25519"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
-dependencies = [
- "signature 3.0.0",
+ "signature",
 ]
 
 [[package]]
@@ -580,25 +564,6 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2",
- "ed25519 2.2.3",
- "rand_core 0.6.4",
- "serde",
- "sha2 0.10.8",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "ed25519-dalek"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
-dependencies = [
- "curve25519-dalek 5.0.0",
- "ed25519 3.0.0",
- "rand_core 0.10.1",
- "sha2 0.11.0",
- "signature 3.0.0",
  "subtle",
  "zeroize",
 ]
@@ -622,7 +587,6 @@ dependencies = [
  "generic-array",
  "group",
  "rand_core",
- "rand_core 0.6.4",
  "sec1",
  "subtle",
  "zeroize",
@@ -656,9 +620,9 @@ dependencies = [
 
 [[package]]
 name = "ethnum"
-version = "1.5.0"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b90ca2580b73ab6a1f724b76ca11ab632df820fd6040c336200d2c1df7b3c82c"
+checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 
 [[package]]
 name = "ff"
@@ -666,7 +630,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -749,7 +713,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -901,7 +865,6 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "sha2",
- "sha2 0.10.8",
 ]
 
 [[package]]
@@ -926,6 +889,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "library-fines"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "library-licensing"
 version = "0.1.0"
 dependencies = [
@@ -936,6 +907,7 @@ dependencies = [
 name = "library-rights"
 version = "0.1.0"
 dependencies = [
+ "course_registry",
  "soroban-sdk",
 ]
 
@@ -1008,7 +980,6 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2",
- "sha2 0.10.8",
 ]
 
 [[package]]
@@ -1113,7 +1084,7 @@ checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
  "rand_chacha",
- "rand_core 0.6.4",
+ "rand_core",
 ]
 
 [[package]]
@@ -1123,7 +1094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.6.4",
+ "rand_core",
 ]
 
 [[package]]
@@ -1134,12 +1105,6 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
 ]
-
-[[package]]
-name = "rand_core"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "reward"
@@ -1156,6 +1121,13 @@ checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
 dependencies = [
  "hmac",
  "subtle",
+]
+
+[[package]]
+name = "royalty-splits"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1178,6 +1150,41 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "scholarship-applications"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-core"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-eligibility"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-programs"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-registry"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 
 [[package]]
 name = "sec1"
@@ -1271,17 +1278,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.1",
- "digest 0.11.3",
-]
-
-[[package]]
 name = "sha3"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1312,16 +1308,6 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "signature"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
-dependencies = [
- "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -1390,7 +1376,6 @@ dependencies = [
  "curve25519-dalek 5.0.0",
  "ecdsa",
  "ed25519-dalek",
- "ed25519-dalek 3.0.0",
  "elliptic-curve",
  "generic-array",
  "getrandom",
@@ -1405,7 +1390,6 @@ dependencies = [
  "rand_chacha",
  "sec1",
  "sha2",
- "sha2 0.10.8",
  "sha3",
  "soroban-builtin-sdk-macros",
  "soroban-env-common",
@@ -1455,7 +1439,6 @@ dependencies = [
  "ctor",
  "derive_arbitrary",
  "ed25519-dalek",
- "ed25519-dalek 2.1.1",
  "rand",
  "rustc_version",
  "serde",
@@ -1479,7 +1462,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustc_version",
- "sha2 0.10.8",
+ "sha2",
  "soroban-env-common",
  "soroban-spec",
  "soroban-spec-rust",
@@ -1508,7 +1491,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "sha2 0.10.8",
+ "sha2",
  "soroban-spec",
  "stellar-xdr",
  "syn 2.0.119",

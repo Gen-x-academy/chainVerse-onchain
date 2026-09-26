@@ -19,14 +19,6 @@
 //!
 //! Answer validation (#1071) and secure document upload (#1072) are
 //! tracked separately and are not implemented here.
-//! Scope (issues #1074, #1075): register a program, then let an applicant
-//! submit exactly one application per (applicant, program) pair in a single
-//! atomic transition. On-chain storage is privacy-minimized — it never holds
-//! form answers, only a caller-supplied integrity commitment (`data_hash`)
-//! over the off-chain application content, plus the metadata needed to
-//! enforce uniqueness, deadlines, and consent. See
-//! `contracts/docs/scholarship-applications.md` for ownership, privacy,
-//! migration, and operational notes.
 //!
 //! Withdrawal (#1076) and tamper-evident receipts (#1077) are tracked
 //! separately and are not implemented here.
@@ -70,10 +62,6 @@ pub enum ContractError {
     /// Version counter would overflow u32 — practically unreachable, but
     /// checked rather than silently wrapping.
     VersionOverflow = 18,
-    ConsentRequired = 8,
-    /// #1074 — an application already exists for this (applicant, program) pair.
-    DuplicateApplication = 9,
-    ApplicationNotFound = 10,
 }
 
 #[contracttype]
@@ -158,10 +146,6 @@ pub struct ConsentRecord {
     pub accepted_at: u64,
     pub revoked: bool,
     pub revoked_at: u64,
-    /// Integrity commitment over the off-chain application content (e.g. a
-    /// hash of the form answers/documents). Never the answers themselves —
-    /// this contract is privacy-minimized by design.
-    pub data_hash: BytesN<32>,
 }
 
 #[contract]
@@ -196,8 +180,6 @@ impl ScholarshipApplicationsContract {
 
     /// Admin-only: register a program that applications can be submitted
     /// against.
-    /// Admin-only: register (or re-register) a program that applications can
-    /// be submitted against.
     pub fn register_program(
         env: Env,
         admin: Address,
@@ -308,10 +290,7 @@ impl ScholarshipApplicationsContract {
         Ok(next_version)
     }
 
-    pub fn get_latest_form_version(
-        env: Env,
-        program_id: BytesN<32>,
-    ) -> Result<u32, ContractError> {
+    pub fn get_latest_form_version(env: Env, program_id: BytesN<32>) -> Result<u32, ContractError> {
         env.storage()
             .persistent()
             .get(&DataKey::FormVersion(program_id))
@@ -506,25 +485,23 @@ impl ScholarshipApplicationsContract {
 
     // ── #1075/#1074 — atomic, deduplicated submission ────────────────────
 
-    /// Submit an application atomically: eligibility (program active),
-    /// deadline, form-version validity, current-and-valid consent, and
-    /// uniqueness (#1074) are all validated before any state is written.
-    /// If any check fails, the whole invocation reverts (standard Soroban
-    /// semantics) and no partial record is ever created.
     /// #1075 — submit an application atomically: eligibility (program
-    /// active), deadline, consent, and uniqueness (#1074) are all validated
-    /// before any state is written. If any check fails, the whole
-    /// invocation reverts (standard Soroban semantics) and no partial
-    /// record — and no submission receipt — is ever created, so a failed
-    /// check is safe to retry and a retry after a transient failure cannot
-    /// duplicate a successful submission.
+    /// active), deadline, form-version validity, current-and-valid consent,
+    /// and uniqueness (#1074) are all validated before any state is written.
+    /// If any check fails, the whole invocation reverts (standard Soroban
+    /// semantics) and no partial record — and no submission receipt — is ever
+    /// created, so a failed check is safe to retry and a retry after a
+    /// transient failure cannot duplicate a successful submission.
+    ///
+    /// Consent is proven by the applicant's own on-chain `ConsentRecord`,
+    /// not by a caller-supplied boolean, so there is no way to submit
+    /// without having affirmatively consented.
     pub fn submit_application(
         env: Env,
         applicant: Address,
         program_id: BytesN<32>,
         data_hash: BytesN<32>,
         form_version: u32,
-        consent: bool,
     ) -> Result<(), ContractError> {
         applicant.require_auth();
 
@@ -570,12 +547,6 @@ impl ScholarshipApplicationsContract {
         }
 
         // #1074 — the (applicant, program_id) key itself is the uniqueness
-        // constraint.
-        if !consent {
-            return Err(ContractError::ConsentRequired);
-        }
-
-        // #1074 — the (applicant, program_id) key itself is the uniqueness
         // constraint: a prior successful submission always leaves this key
         // set, so a retried or duplicate submit is rejected here before any
         // write happens, rather than after.
@@ -597,11 +568,9 @@ impl ScholarshipApplicationsContract {
         env.storage()
             .persistent()
             .set(&application_key, &application);
-        env.storage().persistent().extend_ttl(
-            &application_key,
-            RECORD_MIN_TTL,
-            RECORD_MAX_TTL,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&application_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("SUBMIT"),),
