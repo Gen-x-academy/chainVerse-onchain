@@ -45,6 +45,7 @@
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] Any dependent changes have been merged and published
+- [ ] I have rebased onto `upstream/main` rather than merging `main` into my branch (see [Keeping your branch up to date](../CONTRIBUTING.md#keeping-your-branch-up-to-date))
 
 ## Additional Notes
 <!-- Add any additional notes, concerns, or context about this PR -->
