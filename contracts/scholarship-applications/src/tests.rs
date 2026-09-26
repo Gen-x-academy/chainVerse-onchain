@@ -1,6 +1,9 @@
 #![cfg(test)]
 use crate::{ContractError, ScholarshipApplicationsContract};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, BytesN, Env,
+};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
@@ -19,7 +22,7 @@ fn hash(env: &Env, byte: u8) -> BytesN<32> {
 }
 
 fn setup_program(
-    env: &Env,
+    _env: &Env,
     client: &crate::ScholarshipApplicationsContractClient,
     admin: &Address,
     pid: &BytesN<32>,
@@ -69,8 +72,7 @@ fn test_non_admin_cannot_publish_form_schema() {
 
     let attacker = Address::generate(&env);
     let result = client.try_publish_form_schema(&attacker, &pid, &hash(&env, 1));
-fn data_hash(env: &Env, byte: u8) -> BytesN<32> {
-    BytesN::from_array(env, &[byte; 32])
+    assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
 // ── initialization / program setup ──────────────────────────────────────────
@@ -290,6 +292,9 @@ fn test_duplicate_application_still_rejected_with_versioning() {
 
     let result = client.try_submit_application(&applicant, &pid, &hash(&env, 43), &1);
     assert_eq!(result, Err(Ok(ContractError::DuplicateApplication)));
+}
+
+#[test]
 fn test_register_program_twice_fails() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
@@ -307,19 +312,17 @@ fn test_register_program_twice_fails() {
 fn test_submit_application_success() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
 
     let applicant = Address::generate(&env);
-    let hash = data_hash(&env, 7);
-    client.submit_application(&applicant, &pid, &hash, &true);
+    let data = hash(&env, 7);
+    client.record_consent(&applicant, &pid);
+    client.submit_application(&applicant, &pid, &data, &1);
 
     let application = client.get_application(&applicant, &pid);
     assert_eq!(application.applicant, applicant);
     assert_eq!(application.program_id, pid);
-    assert_eq!(application.data_hash, hash);
+    assert_eq!(application.data_hash, data);
     assert_eq!(application.status, crate::ApplicationStatus::Submitted);
 }
 
@@ -329,12 +332,8 @@ fn test_submit_application_requires_existing_program() {
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
 
     let applicant = Address::generate(&env);
-    let result = client.try_submit_application(
-        &applicant,
-        &program_id(&env, 99),
-        &data_hash(&env, 1),
-        &true,
-    );
+    let result =
+        client.try_submit_application(&applicant, &program_id(&env, 99), &hash(&env, 1), &1);
     assert_eq!(result, Err(Ok(ContractError::ProgramNotFound)));
 }
 
@@ -342,15 +341,12 @@ fn test_submit_application_requires_existing_program() {
 fn test_submit_application_rejects_inactive_program() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
     client.set_program_active(&admin, &pid, &false);
 
     let applicant = Address::generate(&env);
-    let result =
-        client.try_submit_application(&applicant, &pid, &data_hash(&env, 1), &true);
+    client.record_consent(&applicant, &pid);
+    let result = client.try_submit_application(&applicant, &pid, &hash(&env, 1), &1);
     assert_eq!(result, Err(Ok(ContractError::ProgramInactive)));
 }
 
@@ -358,32 +354,14 @@ fn test_submit_application_rejects_inactive_program() {
 fn test_submit_application_rejects_after_deadline() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
+    let pid = ready_program(&env, &client, &admin);
 
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &0u64); // deadline already in the past
-    env.ledger().set_timestamp(100);
+    env.ledger().set_timestamp(2_000_000); // past the 1_000_000s deadline
 
     let applicant = Address::generate(&env);
-    let result =
-        client.try_submit_application(&applicant, &pid, &data_hash(&env, 1), &true);
+    client.record_consent(&applicant, &pid);
+    let result = client.try_submit_application(&applicant, &pid, &hash(&env, 1), &1);
     assert_eq!(result, Err(Ok(ContractError::DeadlinePassed)));
-}
-
-#[test]
-fn test_submit_application_requires_consent() {
-    let (env, contract_id, admin) = setup();
-    let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
-
-    let applicant = Address::generate(&env);
-    let result =
-        client.try_submit_application(&applicant, &pid, &data_hash(&env, 1), &false);
-    assert_eq!(result, Err(Ok(ContractError::ConsentRequired)));
-    assert!(!client.has_applied(&applicant, &pid));
 }
 
 // A failed check must leave nothing written — a subsequent valid submission
@@ -393,17 +371,14 @@ fn test_submit_application_requires_consent() {
 fn test_failed_submission_does_not_block_a_later_valid_one() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
 
     let applicant = Address::generate(&env);
-    let failed =
-        client.try_submit_application(&applicant, &pid, &data_hash(&env, 1), &false);
-    assert!(failed.is_err());
+    let failed = client.try_submit_application(&applicant, &pid, &hash(&env, 1), &99);
+    assert_eq!(failed, Err(Ok(ContractError::FormSchemaNotFound)));
 
-    client.submit_application(&applicant, &pid, &data_hash(&env, 1), &true);
+    client.record_consent(&applicant, &pid);
+    client.submit_application(&applicant, &pid, &hash(&env, 1), &1);
     assert!(client.has_applied(&applicant, &pid));
 }
 
@@ -413,24 +388,21 @@ fn test_failed_submission_does_not_block_a_later_valid_one() {
 fn test_duplicate_application_rejected() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
 
     let applicant = Address::generate(&env);
-    client.submit_application(&applicant, &pid, &data_hash(&env, 1), &true);
+    client.record_consent(&applicant, &pid);
+    client.submit_application(&applicant, &pid, &hash(&env, 1), &1);
 
     // Retry with different content — the uniqueness constraint is on
     // (applicant, program), not on the submitted content, so this must
     // still be rejected as a duplicate rather than silently overwriting.
-    let result =
-        client.try_submit_application(&applicant, &pid, &data_hash(&env, 2), &true);
+    let result = client.try_submit_application(&applicant, &pid, &hash(&env, 2), &1);
     assert_eq!(result, Err(Ok(ContractError::DuplicateApplication)));
 
     // The original submission must be untouched.
     let application = client.get_application(&applicant, &pid);
-    assert_eq!(application.data_hash, data_hash(&env, 1));
+    assert_eq!(application.data_hash, hash(&env, 1));
 }
 
 #[test]
@@ -441,12 +413,17 @@ fn test_same_applicant_can_apply_to_different_programs() {
 
     let pid_a = program_id(&env, 1);
     let pid_b = program_id(&env, 2);
-    client.register_program(&admin, &pid_a, &1_000_000u64);
-    client.register_program(&admin, &pid_b, &1_000_000u64);
+    for pid in [&pid_a, &pid_b] {
+        client.register_program(&admin, pid, &1_000_000u64);
+        client.publish_form_schema(&admin, pid, &hash(&env, 1));
+        client.publish_consent_terms(&admin, pid, &hash(&env, 9));
+    }
 
     let applicant = Address::generate(&env);
-    client.submit_application(&applicant, &pid_a, &data_hash(&env, 1), &true);
-    client.submit_application(&applicant, &pid_b, &data_hash(&env, 2), &true);
+    client.record_consent(&applicant, &pid_a);
+    client.record_consent(&applicant, &pid_b);
+    client.submit_application(&applicant, &pid_a, &hash(&env, 1), &1);
+    client.submit_application(&applicant, &pid_b, &hash(&env, 2), &1);
 
     assert!(client.has_applied(&applicant, &pid_a));
     assert!(client.has_applied(&applicant, &pid_b));
@@ -456,15 +433,15 @@ fn test_same_applicant_can_apply_to_different_programs() {
 fn test_different_applicants_can_apply_to_same_program() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
-    client.submit_application(&alice, &pid, &data_hash(&env, 1), &true);
-    client.submit_application(&bob, &pid, &data_hash(&env, 2), &true);
+    for applicant in [&alice, &bob] {
+        client.record_consent(applicant, &pid);
+    }
+    client.submit_application(&alice, &pid, &hash(&env, 1), &1);
+    client.submit_application(&bob, &pid, &hash(&env, 2), &1);
 
     assert!(client.has_applied(&alice, &pid));
     assert!(client.has_applied(&bob, &pid));
@@ -474,10 +451,7 @@ fn test_different_applicants_can_apply_to_same_program() {
 fn test_has_applied_false_before_submission() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
-    client.initialize(&admin);
-
-    let pid = program_id(&env, 1);
-    client.register_program(&admin, &pid, &1_000_000u64);
+    let pid = ready_program(&env, &client, &admin);
     let applicant = Address::generate(&env);
 
     assert!(!client.has_applied(&applicant, &pid));
@@ -491,4 +465,29 @@ fn test_get_application_not_found() {
     let applicant = Address::generate(&env);
     let result = client.try_get_application(&applicant, &program_id(&env, 1));
     assert_eq!(result, Err(Ok(ContractError::ApplicationNotFound)));
+}
+
+// ── program activation ──────────────────────────────────────────────────────
+
+#[test]
+fn test_set_program_active_requires_admin() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    let pid = program_id(&env, 1);
+    client.register_program(&admin, &pid, &1_000_000u64);
+
+    let attacker = Address::generate(&env);
+    let result = client.try_set_program_active(&attacker, &pid, &false);
+    assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
+}
+
+#[test]
+fn test_set_program_active_on_missing_program_fails() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    let result = client.try_set_program_active(&admin, &program_id(&env, 42), &false);
+    assert_eq!(result, Err(Ok(ContractError::ProgramNotFound)));
 }
