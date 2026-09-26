@@ -62,6 +62,47 @@ The template location is at `.github/PULL_REQUEST_TEMPLATE.md` and provides a st
    rustup target add wasm32-unknown-unknown
    ```
 
+## Keeping your branch up to date
+
+**Rebase onto `main`. Do not merge `main` into your feature branch.**
+
+```bash
+git fetch upstream
+git rebase upstream/main      # yes
+git merge upstream/main       # no
+```
+
+Merging `main` back into a long-lived feature branch, then merging that branch
+forward into `main`, duplicates any region that changed on both sides. The
+duplication usually lands as a repeated `use` block or an unclosed delimiter,
+and it does not fail the build in your branch — it fails later, on `main`, in a
+PR that has nothing to do with it.
+
+This is not hypothetical. Seven contracts are currently unparseable on `main`
+for exactly this reason, and `Contracts CI` has been red on every push for more
+than eight consecutive merges:
+
+| Contract | Introduced by |
+| --- | --- |
+| `payout-automation` | #779 |
+| `reward` | #881 |
+| `staking` | #1030 |
+| `chv_token` | #1039 |
+| `course_registry` | #1042 |
+| `library_licensing` | #1055 |
+| `library-rights` | #1157 |
+
+Five of the seven came from a `Merge branch 'main' into <branch>` commit. In
+each case the parent commit still parsed, which is the quickest way to confirm
+this is what happened to your branch:
+
+```bash
+git diff <parent-sha> <commit-sha> -- contracts/<crate>/src/lib.rs
+```
+
+If the diff shows whole blocks appearing twice rather than changing, delete the
+duplicated region and keep your actual work.
+
 ## Contributing to Soroban Contracts
 
 This section is for anyone adding or modifying a Rust/Soroban smart contract under `contracts/`.
