@@ -508,3 +508,5 @@ before deployment rather than after.
 | [events.md](events.md) | Event catalogue across all contracts |
 | [indexer-projection-schema.md](indexer-projection-schema.md) | How to build a consistent projection |
 | [ADR 0002](../../docs/adr/0002-scholarships-on-chain-boundaries.md) | Why the contracts do not call each other |
+| [scholarship-staging.md](scholarship-staging.md) | Provisioning, verifying, and reversing a staging scenario |
+| [scholarship-launch-readiness.md](scholarship-launch-readiness.md) | Go-live criteria, hard blockers, and rollback |
