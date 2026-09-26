@@ -1,0 +1,29 @@
+[package]
+name = "scholarship-e2e"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-contract test harness for the Scholarships On-chain epic: end-to-end journeys, state-machine properties, deadline load, and security abuse cases."
+
+# Test-only crate. It ships no contract of its own — it exists to drive the
+# five scholarship contracts against a single simulated ledger.
+[lib]
+name = "scholarship_e2e"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+scholarship-applications = { path = "../scholarship-applications" }
+scholarship-core = { path = "../scholarship-core" }
+scholarship-eligibility = { path = "../scholarship-eligibility" }
+scholarship-programs = { path = "../scholarship-programs" }
+scholarship-registry = { path = "../scholarship-registry" }
+# `testutils` is a normal dependency, not a dev-dependency, because the
+# shared fixture in `src/fixture.rs` is part of this crate's lib target and
+# needs `Env::register`/`mock_auths`. That is safe: this crate builds no
+# contract and is never compiled to wasm, so the test host is always the
+# right target.
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[dev-dependencies]
+proptest = "=1.11.0"
+soroban-sdk = { workspace = true, features = ["testutils"] }
