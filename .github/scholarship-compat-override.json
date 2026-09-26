@@ -1,0 +1,5 @@
+{
+  "note": "Approvals for intentional breaking changes to the scholarship contract interface. Anything listed here is exempted by scripts/scholarship_surface.py --check. An entry without a non-empty `migration` note is rejected, because an unexplained exception is a bypass rather than a decision. Each approval belongs in the same PR as the change it permits, so the justification is reviewable alongside the diff. Delete an entry once the migration it describes has shipped everywhere.",
+  "schema": 1,
+  "approvals": []
+}

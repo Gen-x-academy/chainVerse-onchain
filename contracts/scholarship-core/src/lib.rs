@@ -1,4 +1,9 @@
 #![no_std]
+// `create_program` takes the full program record as explicit parameters —
+// eight including `env`. Grouping them into a struct would change the
+// contract's public ABI to work around a lint, which is not a trade this
+// contract should make.
+#![allow(clippy::too_many_arguments)]
 
 //! Scholarship/bursary program data model and lifecycle contract.
 //!
@@ -15,7 +20,9 @@
 //! `contracts/docs/scholarship-core.md` for ownership, privacy,
 //! migration, and operational notes.
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Symbol,
+};
 
 const CONTRACT_VERSION: u32 = 1;
 
@@ -135,7 +142,7 @@ impl ScholarshipCoreContract {
             return Err(ContractError::ProgramAlreadyExists);
         }
 
-        if title.len() == 0 || title.len() > MAX_TITLE_LEN {
+        if title.is_empty() || title.len() > MAX_TITLE_LEN {
             return Err(ContractError::InvalidTitle);
         }
         if description.len() > MAX_DESCRIPTION_LEN {
@@ -162,8 +169,10 @@ impl ScholarshipCoreContract {
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
 
-        env.events()
-            .publish((soroban_sdk::symbol_short!("PROGNEW"),), (program_id, owner));
+        env.events().publish(
+            (soroban_sdk::symbol_short!("PROGNEW"),),
+            (program_id, owner),
+        );
         Ok(())
     }
 
@@ -258,3 +267,8 @@ impl ScholarshipCoreContract {
 
 #[cfg(test)]
 mod tests;
+
+// Issue #1146 — error-path coverage, including states only reachable by
+// seeding storage directly.
+#[cfg(test)]
+mod error_tests;

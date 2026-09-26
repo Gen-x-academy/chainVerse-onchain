@@ -78,7 +78,25 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{symbol_short, Env};
+    use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env};
+
+    /// An empty contract, registered purely so the host has a frame the
+    /// storage helpers can be called from.
+    #[contract]
+    pub struct StorageProbe;
+
+    #[contractimpl]
+    impl StorageProbe {}
+
+    /// Storage is only reachable from inside a contract frame, and only for a
+    /// contract the host knows about, so every test registers a throwaway
+    /// contract and runs its assertions inside `env.as_contract`. A fresh
+    /// `Env` per test keeps them isolated.
+    fn contract() -> (Env, Address) {
+        let env = Env::default();
+        let id = env.register(StorageProbe, ());
+        (env, id)
+    }
 
     // =====================
     // Instance Storage Tests
@@ -86,39 +104,47 @@ mod tests {
 
     #[test]
     fn test_instance_set_and_get() {
-        let env = Env::default();
-        let key = symbol_short!("MY_KEY");
-        set_instance_storage(&env, &key, &42u32);
-        let result: Option<u32> = get_instance_storage(&env, &key);
-        assert_eq!(result, Some(42u32));
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("MY_KEY");
+            set_instance_storage(&env, &key, &42u32);
+            let result: Option<u32> = get_instance_storage(&env, &key);
+            assert_eq!(result, Some(42u32));
+        });
     }
 
     #[test]
     fn test_instance_get_nonexistent_returns_none() {
-        let env = Env::default();
-        let key = symbol_short!("MISSING");
-        let result: Option<u32> = get_instance_storage(&env, &key);
-        assert_eq!(result, None);
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("MISSING");
+            let result: Option<u32> = get_instance_storage(&env, &key);
+            assert_eq!(result, None);
+        });
     }
 
     #[test]
     fn test_instance_remove_clears_value() {
-        let env = Env::default();
-        let key = symbol_short!("DEL_KEY");
-        set_instance_storage(&env, &key, &99u32);
-        remove_instance_storage(&env, &key);
-        let result: Option<u32> = get_instance_storage(&env, &key);
-        assert_eq!(result, None);
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("DEL_KEY");
+            set_instance_storage(&env, &key, &99u32);
+            remove_instance_storage(&env, &key);
+            let result: Option<u32> = get_instance_storage(&env, &key);
+            assert_eq!(result, None);
+        });
     }
 
     #[test]
     fn test_instance_set_overwrites_value() {
-        let env = Env::default();
-        let key = symbol_short!("OVR_KEY");
-        set_instance_storage(&env, &key, &10u32);
-        set_instance_storage(&env, &key, &20u32);
-        let result: Option<u32> = get_instance_storage(&env, &key);
-        assert_eq!(result, Some(20u32));
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("OVR_KEY");
+            set_instance_storage(&env, &key, &10u32);
+            set_instance_storage(&env, &key, &20u32);
+            let result: Option<u32> = get_instance_storage(&env, &key);
+            assert_eq!(result, Some(20u32));
+        });
     }
 
     // ========================
@@ -127,38 +153,46 @@ mod tests {
 
     #[test]
     fn test_persistent_set_and_get() {
-        let env = Env::default();
-        let key = symbol_short!("P_KEY");
-        set_persistent_storage(&env, &key, &42u32);
-        let result: Option<u32> = get_persistent_storage(&env, &key);
-        assert_eq!(result, Some(42u32));
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("P_KEY");
+            set_persistent_storage(&env, &key, &42u32);
+            let result: Option<u32> = get_persistent_storage(&env, &key);
+            assert_eq!(result, Some(42u32));
+        });
     }
 
     #[test]
     fn test_persistent_get_nonexistent_returns_none() {
-        let env = Env::default();
-        let key = symbol_short!("P_MISS");
-        let result: Option<u32> = get_persistent_storage(&env, &key);
-        assert_eq!(result, None);
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("P_MISS");
+            let result: Option<u32> = get_persistent_storage(&env, &key);
+            assert_eq!(result, None);
+        });
     }
 
     #[test]
     fn test_persistent_remove_clears_value() {
-        let env = Env::default();
-        let key = symbol_short!("P_DEL");
-        set_persistent_storage(&env, &key, &99u32);
-        remove_persistent_storage(&env, &key);
-        let result: Option<u32> = get_persistent_storage(&env, &key);
-        assert_eq!(result, None);
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("P_DEL");
+            set_persistent_storage(&env, &key, &99u32);
+            remove_persistent_storage(&env, &key);
+            let result: Option<u32> = get_persistent_storage(&env, &key);
+            assert_eq!(result, None);
+        });
     }
 
     #[test]
     fn test_persistent_set_overwrites_value() {
-        let env = Env::default();
-        let key = symbol_short!("P_OVR");
-        set_persistent_storage(&env, &key, &10u32);
-        set_persistent_storage(&env, &key, &20u32);
-        let result: Option<u32> = get_persistent_storage(&env, &key);
-        assert_eq!(result, Some(20u32));
+        let (env, id) = contract();
+        env.as_contract(&id, || {
+            let key = symbol_short!("P_OVR");
+            set_persistent_storage(&env, &key, &10u32);
+            set_persistent_storage(&env, &key, &20u32);
+            let result: Option<u32> = get_persistent_storage(&env, &key);
+            assert_eq!(result, Some(20u32));
+        });
     }
 }
