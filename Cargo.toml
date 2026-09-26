@@ -28,6 +28,7 @@ members = [
     "contracts/scholarship-milestones",
     "contracts/scholarship-disbursements",
     "contracts/scholarship-outbox",
+    "contracts/scholarship-migration",
 ]
 
 [workspace.dependencies]
