@@ -267,3 +267,8 @@ impl ScholarshipCoreContract {
 
 #[cfg(test)]
 mod tests;
+
+// Issue #1146 — error-path coverage, including states only reachable by
+// seeding storage directly.
+#[cfg(test)]
+mod error_tests;

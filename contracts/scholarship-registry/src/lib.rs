@@ -200,3 +200,7 @@ impl ScholarshipRegistryContract {
 
 #[cfg(test)]
 mod tests;
+
+// Issue #1146 — error-path coverage.
+#[cfg(test)]
+mod error_tests;
