@@ -22,6 +22,12 @@
 //!   batches at a deadline, plus tenant-isolation checks.
 //! - [`tests/security.rs`] (#1151) — object authorization, wallet
 //!   substitution, replay, retry, and stored-content abuse cases.
+//! - [`tests/observability.rs`] (#1147) — the event stream, what a refused
+//!   call announces, what the stream discloses about an applicant, and TTL
+//!   liveness. The suites above all assert on state; none of them look at the
+//!   fourteen events the contracts publish, so before this file existed a
+//!   contract could emit a wrong topic, a wrong payload, or an event for a
+//!   rejected operation and the suite would still have been green.
 //!
 //! [`World`] wires all five contracts onto one simulated ledger with a
 //! named cast of actors. Every test builds its own `World`, so no test can
