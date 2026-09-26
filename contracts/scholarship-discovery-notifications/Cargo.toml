@@ -1,0 +1,18 @@
+[package]
+name = "scholarship-discovery-notifications"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+soroban-sdk = { version = "20.0.4", features = ["contract"] }
+shared = { path = "../shared" }
+chainverse-types = { path = "../chainverse-types" }
+scholarship-core = { path = "../scholarship-core" }
+scholarship-programs = { path = "../scholarship-programs" }
+scholarship-eligibility = { path = "../scholarship-eligibility" }
+scholarship-applications = { path = "../scholarship-applications" }
+scholarship-milestones = { path = "../scholarship-milestones" }
+scholarship-communications = { path = "../scholarship-communications" }
+
+[dev-dependencies]
+soroban-sdk = { version = "20.0.4", features = ["contract", "testutils"] }
