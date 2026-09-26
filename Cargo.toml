@@ -26,6 +26,8 @@ members = [
     "contracts/scholarship-eligibility",
     "contracts/scholarship-applications",
     "contracts/scholarship-e2e",
+    "contracts/scholarship-milestones",
+    "contracts/scholarship-disbursements",
 ]
 
 [workspace.dependencies]

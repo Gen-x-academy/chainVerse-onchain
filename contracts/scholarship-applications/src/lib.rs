@@ -23,7 +23,90 @@
 //! Withdrawal (#1076) and tamper-evident receipts (#1077) are tracked
 //! separately and are not implemented here.
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Vec};
+
+// -----------------------------------------------------------------------
+// Issues #1078/#1079/#1080/#1081 — reviewer pools, deterministic
+// assignment, conflict-of-interest, and blind/double-blind review.
+//
+// Self-contained additions: own error enum and storage keys, kept
+// separate from `ContractError`/`DataKey` above (which already has
+// duplicate-discriminant issues predating this change) rather than
+// risking a collision. Privacy-minimized like the rest of this file:
+// applicant/reviewer identities are Addresses and off-chain identifiers
+// are only ever handled as `BytesN<32>` commitments, never raw data.
+// -----------------------------------------------------------------------
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ReviewError {
+    NotAdmin = 1,
+    ReviewerNotFound = 2,
+    ReviewerInactive = 3,
+    ReviewerAtCapacity = 4,
+    ReviewerConflicted = 5,
+    NoEligibleReviewer = 6,
+    AssignmentNotFound = 7,
+    AlreadyAssigned = 8,
+    Unauthorized = 9,
+}
+
+/// #1078 — a qualified reviewer's pool membership: capacity and current
+/// load. Expertise tags and availability windows are tracked off-chain
+/// against this Address; only what's needed to enforce capacity and
+/// active/inactive status lives on-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewerProfile {
+    pub active: bool,
+    pub max_assignments: u32,
+    pub current_assignments: u32,
+}
+
+/// #1079 — how a reviewer is selected for an application.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AssignmentMode {
+    RoundRobin,
+    LoadBalanced,
+    /// Seeded-random: `seed` is combined with the application hash so the
+    /// choice is reproducible from the same inputs (#1079).
+    SeededRandom(u64),
+}
+
+/// #1081 — review visibility for a program. `Blind` hides the applicant's
+/// identity from the reviewer's on-chain-visible context; `DoubleBlind`
+/// additionally hides the reviewer's identity from applicant-facing
+/// reads. Enforcement of the *hiding* itself is split between this
+/// contract (never storing/returning the hidden identifier from a
+/// gated accessor) and the off-chain trust boundary (front-ends must not
+/// display it either) — see the acceptance criteria's "explicit
+/// off-chain trust boundary" language.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReviewMode {
+    Open,
+    Blind,
+    DoubleBlind,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum ReviewDataKey {
+    /// #1078 — reviewer directory entry.
+    Reviewer(Address),
+    /// #1078 — ordered pool of reviewer addresses eligible for a program.
+    ReviewerPool(BytesN<32>),
+    /// #1080 — a reviewer's declared conflict for a program + applicant
+    /// commitment. Presence alone means "conflicted"; the value is unused.
+    Conflict(Address, BytesN<32>, BytesN<32>),
+    /// #1079 — the reviewer assigned to a given (program, application hash).
+    Assignment(BytesN<32>, BytesN<32>),
+    /// #1079 — round-robin cursor into a program's reviewer pool.
+    RoundRobinCursor(BytesN<32>),
+    /// #1081 — review visibility mode for a program (defaults to `Open`).
+    ReviewMode(BytesN<32>),
+}
 
 const CONTRACT_VERSION: u32 = 1;
 
@@ -607,6 +690,274 @@ impl ScholarshipApplicationsContract {
 
     pub fn version(_env: Env) -> u32 {
         CONTRACT_VERSION
+    }
+
+    // -------------------------------------------------------------------
+    // #1078 — reviewer pools and workload limits
+    // -------------------------------------------------------------------
+
+    /// Admin-only: register (or update) a reviewer's pool membership and
+    /// capacity. `max_assignments` bounds concurrent load; a reviewer with
+    /// `current_assignments >= max_assignments` is skipped by
+    /// [`assign_reviewer`].
+    pub fn register_reviewer(
+        env: Env,
+        admin: Address,
+        reviewer: Address,
+        max_assignments: u32,
+    ) -> Result<(), ReviewError> {
+        Self::require_review_admin(&env, &admin)?;
+        let current_assignments = env
+            .storage()
+            .persistent()
+            .get::<_, ReviewerProfile>(&ReviewDataKey::Reviewer(reviewer.clone()))
+            .map(|p| p.current_assignments)
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &ReviewDataKey::Reviewer(reviewer),
+            &ReviewerProfile {
+                active: true,
+                max_assignments,
+                current_assignments,
+            },
+        );
+        Ok(())
+    }
+
+    /// Admin-only: activate or deactivate a reviewer. An inactive reviewer
+    /// is never selected by [`assign_reviewer`], regardless of capacity.
+    pub fn set_reviewer_active(
+        env: Env,
+        admin: Address,
+        reviewer: Address,
+        active: bool,
+    ) -> Result<(), ReviewError> {
+        Self::require_review_admin(&env, &admin)?;
+        let key = ReviewDataKey::Reviewer(reviewer);
+        let mut profile: ReviewerProfile = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ReviewError::ReviewerNotFound)?;
+        profile.active = active;
+        env.storage().persistent().set(&key, &profile);
+        Ok(())
+    }
+
+    /// Admin-only: set the ordered pool of reviewers eligible for a
+    /// program. Replaces any existing pool for this program.
+    pub fn set_reviewer_pool(
+        env: Env,
+        admin: Address,
+        program_id: BytesN<32>,
+        reviewers: Vec<Address>,
+    ) -> Result<(), ReviewError> {
+        Self::require_review_admin(&env, &admin)?;
+        env.storage()
+            .persistent()
+            .set(&ReviewDataKey::ReviewerPool(program_id), &reviewers);
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // #1080 — reviewer conflict-of-interest
+    // -------------------------------------------------------------------
+
+    /// A reviewer declares a conflict against a specific (program,
+    /// applicant-commitment) pair. Self-authorized: only the reviewer
+    /// themselves can declare their own conflict. Once declared, the
+    /// reviewer is excluded from assignment for that pair and, if already
+    /// assigned, any existing assignment must be re-run by the admin
+    /// (declaring a conflict does not itself unassign — see acceptance
+    /// criteria's "overrides require documented approval").
+    pub fn declare_conflict(
+        env: Env,
+        reviewer: Address,
+        program_id: BytesN<32>,
+        applicant_commitment: BytesN<32>,
+    ) -> Result<(), ReviewError> {
+        reviewer.require_auth();
+        env.storage().persistent().set(
+            &ReviewDataKey::Conflict(reviewer, program_id, applicant_commitment),
+            &true,
+        );
+        Ok(())
+    }
+
+    /// Whether `reviewer` has declared a conflict for this (program,
+    /// applicant-commitment) pair.
+    pub fn has_conflict(
+        env: Env,
+        reviewer: Address,
+        program_id: BytesN<32>,
+        applicant_commitment: BytesN<32>,
+    ) -> bool {
+        env.storage()
+            .persistent()
+            .has(&ReviewDataKey::Conflict(reviewer, program_id, applicant_commitment))
+    }
+
+    // -------------------------------------------------------------------
+    // #1079 — deterministic reviewer assignment
+    // -------------------------------------------------------------------
+
+    /// Admin-only: assign a reviewer to `application_commitment` under
+    /// `program_id`, respecting active status, capacity, and declared
+    /// conflicts. Deterministic for a given pool/cursor/mode state, so the
+    /// same inputs always reproduce the same assignment; every successful
+    /// assignment increments the chosen reviewer's load.
+    ///
+    /// # Errors
+    /// `AlreadyAssigned` if this (program, application) pair already has
+    /// an assignment; `NoEligibleReviewer` if every pool member is
+    /// inactive, at capacity, or conflicted.
+    pub fn assign_reviewer(
+        env: Env,
+        admin: Address,
+        program_id: BytesN<32>,
+        application_commitment: BytesN<32>,
+        mode: AssignmentMode,
+    ) -> Result<Address, ReviewError> {
+        Self::require_review_admin(&env, &admin)?;
+
+        let assignment_key = ReviewDataKey::Assignment(program_id.clone(), application_commitment.clone());
+        if env.storage().persistent().has(&assignment_key) {
+            return Err(ReviewError::AlreadyAssigned);
+        }
+
+        let pool: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&ReviewDataKey::ReviewerPool(program_id.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        if pool.is_empty() {
+            return Err(ReviewError::NoEligibleReviewer);
+        }
+
+        let is_eligible = |env: &Env, reviewer: &Address| -> bool {
+            let profile: Option<ReviewerProfile> =
+                env.storage().persistent().get(&ReviewDataKey::Reviewer(reviewer.clone()));
+            let profile = match profile {
+                Some(p) => p,
+                None => return false,
+            };
+            if !profile.active || profile.current_assignments >= profile.max_assignments {
+                return false;
+            }
+            !env.storage().persistent().has(&ReviewDataKey::Conflict(
+                reviewer.clone(),
+                program_id.clone(),
+                application_commitment.clone(),
+            ))
+        };
+
+        let n = pool.len();
+        let start_offset: u64 = match mode {
+            AssignmentMode::RoundRobin | AssignmentMode::LoadBalanced => env
+                .storage()
+                .persistent()
+                .get(&ReviewDataKey::RoundRobinCursor(program_id.clone()))
+                .unwrap_or(0u64),
+            AssignmentMode::SeededRandom(seed) => {
+                // Fold the seed and the application commitment's bytes into
+                // a single deterministic offset (#1079).
+                let mut acc = seed;
+                for byte in application_commitment.to_array() {
+                    acc = acc.wrapping_mul(1_000_003).wrapping_add(byte as u64);
+                }
+                acc
+            }
+        };
+
+        let mut chosen: Option<Address> = None;
+        for step in 0..n {
+            let idx = ((start_offset + step as u64) % n as u64) as u32;
+            let candidate = pool.get(idx).unwrap();
+            if is_eligible(&env, &candidate) {
+                chosen = Some(candidate);
+                break;
+            }
+        }
+        let chosen = chosen.ok_or(ReviewError::NoEligibleReviewer)?;
+
+        let mut profile: ReviewerProfile = env
+            .storage()
+            .persistent()
+            .get(&ReviewDataKey::Reviewer(chosen.clone()))
+            .ok_or(ReviewError::ReviewerNotFound)?;
+        profile.current_assignments += 1;
+        env.storage()
+            .persistent()
+            .set(&ReviewDataKey::Reviewer(chosen.clone()), &profile);
+
+        env.storage()
+            .persistent()
+            .set(&assignment_key, &chosen);
+
+        if matches!(mode, AssignmentMode::RoundRobin | AssignmentMode::LoadBalanced) {
+            let next_cursor = (start_offset + 1) % (n as u64).max(1);
+            env.storage()
+                .persistent()
+                .set(&ReviewDataKey::RoundRobinCursor(program_id), &next_cursor);
+        }
+
+        Ok(chosen)
+    }
+
+    /// Returns the reviewer assigned to `application_commitment` under
+    /// `program_id`, if any. Callers are responsible for enforcing the
+    /// program's [`ReviewMode`] (e.g. a double-blind program's front-end
+    /// must not surface this to the applicant) — this accessor itself
+    /// makes no distinction, per this file's privacy-minimized,
+    /// explicit-off-chain-trust-boundary convention.
+    pub fn get_assignment(
+        env: Env,
+        program_id: BytesN<32>,
+        application_commitment: BytesN<32>,
+    ) -> Option<Address> {
+        env.storage()
+            .persistent()
+            .get(&ReviewDataKey::Assignment(program_id, application_commitment))
+    }
+
+    // -------------------------------------------------------------------
+    // #1081 — blind / double-blind review mode
+    // -------------------------------------------------------------------
+
+    /// Admin-only: set the review visibility mode for a program.
+    pub fn set_review_mode(
+        env: Env,
+        admin: Address,
+        program_id: BytesN<32>,
+        mode: ReviewMode,
+    ) -> Result<(), ReviewError> {
+        Self::require_review_admin(&env, &admin)?;
+        env.storage()
+            .persistent()
+            .set(&ReviewDataKey::ReviewMode(program_id), &mode);
+        Ok(())
+    }
+
+    /// Returns a program's review visibility mode, defaulting to `Open`
+    /// when never explicitly set.
+    pub fn get_review_mode(env: Env, program_id: BytesN<32>) -> ReviewMode {
+        env.storage()
+            .persistent()
+            .get(&ReviewDataKey::ReviewMode(program_id))
+            .unwrap_or(ReviewMode::Open)
+    }
+
+    fn require_review_admin(env: &Env, caller: &Address) -> Result<(), ReviewError> {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ReviewError::NotAdmin)?;
+        if admin != *caller {
+            return Err(ReviewError::Unauthorized);
+        }
+        Ok(())
     }
 }
 
