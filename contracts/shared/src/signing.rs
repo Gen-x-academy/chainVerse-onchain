@@ -92,6 +92,10 @@ pub enum MessageType {
     DelegatedSession,
     /// A patron's authorization to settle a debt from their deposit.
     DebtSettlement,
+    /// A scholarship recipient's proof of control over a configured payout
+    /// wallet (issue #1097). Scoped to this message type so a payout-wallet
+    /// proof can never be replayed as any other signed action.
+    PayoutWalletProof,
 }
 
 impl MessageType {
@@ -106,6 +110,7 @@ impl MessageType {
             MessageType::FineAssessment => Symbol::new(env, "fine_assessment"),
             MessageType::DelegatedSession => Symbol::new(env, "delegated_session"),
             MessageType::DebtSettlement => Symbol::new(env, "debt_settlement"),
+            MessageType::PayoutWalletProof => Symbol::new(env, "payout_wallet_proof"),
         }
     }
 }
@@ -372,6 +377,7 @@ mod tests {
             MessageType::FineAssessment,
             MessageType::DelegatedSession,
             MessageType::DebtSettlement,
+            MessageType::PayoutWalletProof,
         ];
 
         // Every pair must differ — an issuer offer must never double as a fine

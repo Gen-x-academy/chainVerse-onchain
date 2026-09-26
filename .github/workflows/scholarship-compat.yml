@@ -1,0 +1,53 @@
+name: Scholarship Interface Compatibility
+
+# Soroban contracts carry no source-level semver. A renamed function, a
+# reordered parameter, or a changed event topic is invisible in a diff review
+# and breaks every deployed client and indexer at the same moment. This gate
+# compares the derived public interface against a committed baseline and fails
+# on anything that would break a consumer.
+#
+# It deliberately does not need a Rust toolchain: the surface is derived from
+# the sources, so this runs even while the contracts workspace is broken.
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/scholarship-*/**'
+      - 'scripts/scholarship_surface.py'
+      - 'scripts/test_scholarship_surface.py'
+      - 'contracts/scholarship-api-baseline.json'
+      - '.github/scholarship-compat-override.json'
+      - '.github/workflows/scholarship-compat.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/scholarship-*/**'
+      - 'contracts/scholarship-api-baseline.json'
+
+permissions:
+  contents: read
+
+jobs:
+  interface:
+    name: Public interface unchanged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Unit tests for the gate
+        # A gate that cannot be shown to catch a removed function is
+        # indistinguishable from a gate that does nothing, so its own tests
+        # are a precondition for trusting its verdict.
+        run: python3 scripts/test_scholarship_surface.py
+
+      - name: Compare against the committed baseline
+        run: python3 scripts/scholarship_surface.py --check
+
+      - name: Summarise the interface
+        # Printed on success too: the inventory is the cheapest way for a
+        # reviewer to see what a PR actually did to the public surface.
+        run: python3 scripts/scholarship_surface.py --report

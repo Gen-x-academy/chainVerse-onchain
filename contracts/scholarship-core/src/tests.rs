@@ -1,6 +1,9 @@
 #![cfg(test)]
 use crate::{ContractError, FundingModel, ProgramStatus, ScholarshipCoreContract};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Symbol};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, BytesN, Env, String, Symbol,
+};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();

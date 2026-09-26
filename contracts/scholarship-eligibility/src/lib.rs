@@ -20,7 +20,9 @@
 //! Prerequisite/exclusion graphs between programs (#1067) are tracked
 //! separately and are not implemented here.
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol, Vec,
+};
 
 const CONTRACT_VERSION: u32 = 1;
 
@@ -143,7 +145,9 @@ impl ScholarshipEligibilityContract {
     /// `revoke_attestation` if they must be invalidated too.
     pub fn remove_issuer(env: Env, admin: Address, issuer: Address) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
-        env.storage().persistent().set(&DataKey::Issuer(issuer), &false);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Issuer(issuer), &false);
         Ok(())
     }
 
@@ -211,10 +215,7 @@ impl ScholarshipEligibilityContract {
         Ok(next_version)
     }
 
-    pub fn get_latest_rule_version(
-        env: Env,
-        program_id: BytesN<32>,
-    ) -> Result<u32, ContractError> {
+    pub fn get_latest_rule_version(env: Env, program_id: BytesN<32>) -> Result<u32, ContractError> {
         env.storage()
             .persistent()
             .get(&DataKey::RuleVersion(program_id))
@@ -329,11 +330,10 @@ impl ScholarshipEligibilityContract {
         scope: BytesN<32>,
         attestation_type: Symbol,
     ) -> bool {
-        let record: Option<Attestation> = env.storage().persistent().get(&DataKey::Attestation(
-            subject,
-            scope,
-            attestation_type,
-        ));
+        let record: Option<Attestation> =
+            env.storage()
+                .persistent()
+                .get(&DataKey::Attestation(subject, scope, attestation_type));
         match record {
             Some(a) => !a.revoked && a.expiry > env.ledger().timestamp(),
             None => false,
@@ -394,3 +394,7 @@ impl ScholarshipEligibilityContract {
 
 #[cfg(test)]
 mod tests;
+
+// Issue #1146 — error-path coverage.
+#[cfg(test)]
+mod error_tests;

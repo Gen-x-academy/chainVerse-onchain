@@ -46,6 +46,10 @@ pub enum ContractError {
     BudgetExceeded = 10,
     /// #1064 — releasing an award when none are currently reserved.
     NoAwardsReserved = 11,
+    /// #1064 — `configure_award_budget` was called on a program that
+    /// already has reserved awards. The budget may be replaced only
+    /// before any award is reserved; see the note on the function.
+    BudgetAlreadyCommitted = 12,
 }
 
 #[contracttype]
@@ -195,6 +199,15 @@ impl ScholarshipProgramsContract {
     /// stated budget couldn't even cover `max_recipients` at
     /// `per_award_amount` each — a reserve-rule sanity check up front,
     /// rather than discovering it mid-intake.
+    ///
+    /// A program that already has reserved awards cannot be reconfigured.
+    /// Replacing the budget mid-batch would reset `awarded_count` and
+    /// `committed_amount` to zero, which is not a neutral edit: it hands
+    /// back capacity that has genuinely been committed and lets a program
+    /// over-commit against its own `total_budget` — a single admin call
+    /// would turn a four-slot batch into an unbounded one. Sponsors who
+    /// need to change the terms of a live batch must close it and open a
+    /// new program, which is the same rule the lifecycle already enforces.
     pub fn configure_award_budget(
         env: Env,
         admin: Address,
@@ -213,6 +226,18 @@ impl ScholarshipProgramsContract {
             .ok_or(ContractError::InvalidBudgetConfig)?;
         if required > total_budget {
             return Err(ContractError::InvalidBudgetConfig);
+        }
+
+        // Refuse to overwrite a budget that is already in use, rather than
+        // silently zeroing the commitment it records.
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AwardBudget>(&DataKey::Budget(program_id.clone()))
+        {
+            if existing.awarded_count > 0 || existing.committed_amount > 0 {
+                return Err(ContractError::BudgetAlreadyCommitted);
+            }
         }
 
         let budget = AwardBudget {
@@ -332,12 +357,13 @@ impl ScholarshipProgramsContract {
 
     /// Authoritative remaining recipient capacity: `max_recipients -
     /// awarded_count`. Never derived off-chain.
+    ///
+    /// `saturating_sub` rather than `checked_sub().unwrap_or(0)` because the
+    /// two are equivalent here and the saturating form states the intent:
+    /// capacity can never go negative, it just stops at zero.
     pub fn remaining_capacity(env: Env, program_id: BytesN<32>) -> Result<u32, ContractError> {
         let budget = Self::get_award_budget(env, program_id)?;
-        Ok(budget
-            .max_recipients
-            .checked_sub(budget.awarded_count)
-            .unwrap_or(0))
+        Ok(budget.max_recipients.saturating_sub(budget.awarded_count))
     }
 
     pub fn version(_env: Env) -> u32 {
@@ -347,3 +373,7 @@ impl ScholarshipProgramsContract {
 
 #[cfg(test)]
 mod tests;
+
+// Issue #1146 — error-path coverage.
+#[cfg(test)]
+mod error_tests;
