@@ -150,3 +150,143 @@ and letting the old one age out. Two properties make that safe:
   the operator enqueued it in a transaction; correlating it against a
   domain contract's state is the orchestrator's responsibility, exactly as
   ADR 0002 describes.
+
+## Signed sponsor webhooks (#1141)
+
+A sponsor wants to know when an award is reserved or paid without polling
+the chain. That means an HTTP push, which means the chain is no longer
+involved, and the honest question is what the contract can still guarantee
+once it isn't.
+
+### The trust boundary, stated plainly
+
+**The chain never sends an HTTP request and never verifies an off-chain
+signature.** Soroban has no sockets, and a webhook signature is produced by
+a key the chain does not hold. So the on-chain half is deliberately limited
+to what a contract *can* enforce:
+
+| Property | Enforced |
+| --- | --- |
+| Exact authorization | Contract — `register_endpoint` needs the operator's **and** the owner's signature |
+| "Selected events only" | Contract — `record_delivery` re-checks the subscription |
+| Timestamp | Contract — `recorded_at` from the ledger, `expires_at` in the signed preimage |
+| Ordering, gap-free | Contract — a sequence must be strictly the next one |
+| Retryable | Contract — a retry is a new sequence and an incrementing `attempt` |
+| Replay resistance, on-chain | Contract — sequence + expiry, both refused once stale |
+| Replay resistance, at the sponsor | Signed preimage + the sponsor's own cursor |
+| **Signature authenticity** | **Off-chain** — the sponsor's HTTP handler |
+| **Did it actually arrive** | **Off-chain** — the relay's claim is not receipt |
+
+The last two rows are the ones a reader is most likely to assume are
+covered. They are not, and no amount of on-chain code makes them so. A
+sponsor **must** verify the HMAC in its handler and **must** track the
+highest sequence and `expires_at` it has accepted. What this contract
+provides is the means to do both correctly: a canonical byte string to
+verify against, and a cursor that makes a replay visible.
+
+### Enrollment is bilateral
+
+`register_endpoint` requires the operator's auth **and** the owner's.
+Neither the platform alone nor a sponsor alone can enroll an endpoint. A
+compromised platform key therefore cannot silently start shipping one
+sponsor's award events to an attacker's URL, and a sponsor cannot be
+enrolled without its key.
+
+Endpoints are identified by `sha256(url)` and authenticated by
+`sha256(secret)`. **Neither the URL nor the secret is ever stored.** A
+webhook URL is frequently a bearer capability, and the secret is the thing
+an attacker wants; the chain holds only commitments, and the relay and
+sponsor hold the values.
+
+### Secret rotation is a preimage field, not a revocation list
+
+`rotate_secret` bumps `secret_epoch`, which is part of the signed preimage.
+A signature captured under the old secret stops verifying the moment the
+epoch is bumped — the sponsor recomputes the preimage from the endpoint it
+just read on-chain and gets a different digest. **Leaking a secret is a
+one-transaction fix**, and there is no revocation list to distribute and
+nothing for a sponsor to remember to invalidate. Rotation works on a live
+endpoint, since rotating a working secret is the normal case.
+
+### Two network-bound values the caller does not supply
+
+`delivery_payload` takes the network id and the contract address from the
+environment, not as parameters. A caller-supplied network id would put the
+cross-network defence in the caller's hands; deriving both means a testnet
+signature cannot be minted on mainnet at all, and a signature for one
+deployment is not valid against another. `delivery_payload` is
+unauthenticated and read-only on purpose: a sponsor verifying an incoming
+delivery recomputes the expected digest from the chain alone, without
+holding the secret. That is what makes the secret prove *possession*
+instead of being the only source of truth.
+
+`webhook_signing.rs` is a separate domain from the library's
+`shared::signing` envelope — different tag, different layout. Reusing the
+library envelope would have made a library signature a valid webhook
+signature; `cross_domain_signatures_differ` pins that separation down with a
+test.
+
+### Selection is enforced, not trusted
+
+`deliverable` reports whether an endpoint should receive an event, and
+`record_delivery` re-checks the subscription rather than trusting the
+relay's filter. An applicant submission must not reach a sponsor that never
+asked for one, and if the only thing standing between them was the relay's
+own good behaviour, that would be a one-line bug away from a disclosure.
+
+The single exception is `DeliveryOutcome::Skipped`: a relay recording that
+it deliberately did *not* send an out-of-subscription event. That outcome
+is the one allowed to name an unsubscribed event, because otherwise the
+decision would be invisible and the sponsor could not tell "nothing
+happened" from "you were filtered out". It still advances the sequence, so
+the gap-free ordering is preserved. Anything claiming to have been sent
+must be subscribed.
+
+### Relay claims vs. arrival
+
+`record_delivery` records that the relay *tried*. `acknowledge_delivery`
+records that something *arrived*, and only the endpoint's owner can call it.
+The distinction is the point: a relay is not trusted to report its own
+success. Acknowledgements are strictly increasing, so a replayed delivery
+presented twice is refused with `ReplayDetected`.
+
+### Bounds
+
+| Bound | Value | Consequence past it |
+| --- | --- | --- |
+| Enrolled endpoints | 100 | `TooManyEndpoints` |
+| Topics per endpoint | 16 | `TooManyTopics` |
+| Delivery records per endpoint | 256 | oldest evicted, `delivery_history_floor` advances |
+| Signature window | 24 h | `InvalidExpiry` |
+
+The attempt counter per `(endpoint, event)` is a **separate storage key**,
+so it survives history eviction: after the oldest record is dropped, a
+sponsor can still see that an event was attempted 257 times. Eviction only
+loses the per-attempt detail, never the retry count.
+
+Endpoint and delivery state get the longer retention window (~10 weeks,
+extended from ~5 weeks) because both are read on every relay cycle and by
+every sponsor. A delivery record outliving its event is expected: the
+history is the audit trail, and it stays readable after the event it
+describes has been pruned.
+
+## Operational impact
+
+- **The relay is now a two-phase actor per endpoint.** Read
+  `delivery_payload`, sign, POST, then `record_delivery`. A crash between
+  the POST and the record leaves the sponsor with a delivery the chain does
+  not know about; the next cycle re-signs the same sequence, the sponsor's
+  replay check rejects it, and the relay records the retry. The
+  acknowledgement, not the record, is what tells you it landed.
+- **Sequence exhaustion is not a concern**, but `expires_at` churn is: the
+  relay must re-read the endpoint each cycle, because a rotation changes
+  the expected preimage underneath it. Signatures signed against a cached
+  epoch fail verification, which is the intended behaviour but looks like a
+  bug if the relay caches too long.
+- **Rotating a secret does not pause delivery.** Signatures produced under
+  the old epoch stop verifying immediately, so a rotation should be
+  coordinated with the relay — but it does not have to be, because a
+  failed delivery is a `Failed` record and a retry, not a lost event.
+- **History is a window, not a ledger.** Past 256 records per endpoint the
+  detail is gone. For a longer audit trail, export on-chain; do not expect
+  to page back indefinitely.
