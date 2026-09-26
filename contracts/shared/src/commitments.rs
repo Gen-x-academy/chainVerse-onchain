@@ -637,8 +637,8 @@ mod tests {
                 let version_b = (rng.next() % 4) as u32 + 1;
                 let salt_a = salt(&env, (rng.next() % 200) as u8 + 1);
                 let salt_b = salt(&env, (rng.next() % 200) as u8 + 1);
-                let id_a = ident(&env, &(rng.next() as u64).to_be_bytes());
-                let id_b = ident(&env, &(rng.next() as u64).to_be_bytes());
+                let id_a = ident(&env, &rng.next().to_be_bytes());
+                let id_b = ident(&env, &rng.next().to_be_bytes());
 
                 let a = commit(&env, kind_a, version_a, &salt_a, &id_a).unwrap();
                 let b = commit(&env, kind_b, version_b, &salt_b, &id_b).unwrap();

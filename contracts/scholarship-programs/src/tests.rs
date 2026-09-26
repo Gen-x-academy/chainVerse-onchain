@@ -1,6 +1,9 @@
 #![cfg(test)]
 use crate::{ContractError, ScholarshipProgramsContract};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, BytesN, Env,
+};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
@@ -35,8 +38,7 @@ fn test_non_admin_cannot_set_window() {
     let pid = program_id(&env, 1);
     let attacker = Address::generate(&env);
 
-    let result =
-        client.try_set_program_window(&attacker, &pid, &0u64, &1000u64, &0i32, &0u64);
+    let result = client.try_set_program_window(&attacker, &pid, &0u64, &1000u64, &0i32, &0u64);
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
@@ -187,20 +189,49 @@ fn test_reserve_award_cannot_exceed_max_recipients() {
     assert_eq!(client.remaining_capacity(&pid), 0);
 }
 
+// `configure_award_budget` rejects any ceiling that could not cover
+// `max_recipients` at `per_award_amount`, so the amount ceiling is enforced at
+// configuration time rather than discovered mid-intake. Given that invariant,
+// the budget guard inside `reserve_award` is unreachable on its own: if
+// `awarded_count < max_recipients` then `committed_amount + per_award_amount
+// <= max_recipients * per_award_amount <= total_budget` always holds, and
+// capacity is therefore always the binding constraint. This test pins that
+// reasoning so a future relaxation of the config rule cannot quietly leave the
+// amount ceiling unenforced.
 #[test]
-fn test_reserve_award_cannot_exceed_total_budget() {
+fn test_a_budget_too_small_to_cover_its_recipients_is_rejected_at_configure_time() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
     // max_recipients is generously large, but total_budget only covers 2 awards.
-    client.configure_award_budget(&admin, &pid, &100u32, &100i128, &200i128);
+    let result = client.try_configure_award_budget(&admin, &pid, &100u32, &100i128, &200i128);
+    assert_eq!(result, Err(Ok(ContractError::InvalidBudgetConfig)));
+    // Nothing was written, so there is no partial budget to reserve against.
+    assert_eq!(
+        client.try_get_award_budget(&pid),
+        Err(Ok(ContractError::BudgetNotFound))
+    );
+}
+
+// The tightest legal configuration still fails on capacity, not on amount —
+// the two ceilings cannot be reached independently.
+#[test]
+fn test_tightest_legal_budget_fails_on_capacity() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    let pid = program_id(&env, 1);
+    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &200i128);
 
     client.reserve_award(&admin, &pid);
     client.reserve_award(&admin, &pid);
 
     let result = client.try_reserve_award(&admin, &pid);
-    assert_eq!(result, Err(Ok(ContractError::BudgetExceeded)));
+    assert_eq!(result, Err(Ok(ContractError::CapacityExceeded)));
+
+    let budget = client.get_award_budget(&pid);
+    assert_eq!(budget.committed_amount, budget.total_budget);
 }
 
 #[test]
