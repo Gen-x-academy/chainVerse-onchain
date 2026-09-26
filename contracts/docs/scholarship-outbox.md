@@ -290,3 +290,128 @@ describes has been pruned.
 - **History is a window, not a ledger.** Past 256 records per endpoint the
   detail is gone. For a longer audit trail, export on-chain; do not expect
   to page back indefinitely.
+
+## Settlement reconciliation (#1142)
+
+A backend has an *opinion*: a payment or award intent, and an amount it
+believes it is settling. The chain has a *fact*: a transaction that settled,
+in a ledger, for an amount. This section reconciles the two, and the guiding
+rule is that **the opinion never wins**.
+
+### Finality is explicit, per intent, and zero is not allowed
+
+A Stellar transaction reported as successful is not final. The ledger
+containing it can still be rolled back, a fee-bump can change the outcome,
+and a later close can settle it differently. Reconciling on "the backend
+said it succeeded" is the bug this contract exists to prevent.
+
+So each intent stores its own `required_finality`, and reconciliation
+requires `current_ledger - observed_ledger >= required_finality`. It is
+per-intent rather than a global constant because the right answer depends on
+the operation: a scholarship disbursement and a rounding adjustment do not
+deserve the same confidence.
+
+Two bounds matter:
+
+- **`required_finality == 0` is refused.** "Final immediately" is exactly
+  the failure mode being guarded against, so it must not be expressible.
+- **`required_finality > MAX_FINALITY` (100 ledgers) is refused.** Otherwise
+  a caller can pass a threshold that makes an intent permanently
+  unreconcilable. The failure mode of an unbounded window is *silence*,
+  which is worse than a late answer.
+
+`observe_settlement` also refuses a transaction claimed to be in ledger zero
+or in a ledger that has not happened yet, since either would let the
+finality check pass for a transaction that does not exist.
+
+### Reprocessing is a complete no-op
+
+Once an intent is decided, `reconcile_settlement` returns its state and
+writes **nothing at all** — not the state, not the amount, not the timestamp,
+not `attempts`. The tests assert whole-record equality rather than
+spot-checking fields, because a partial guarantee here is not a guarantee.
+
+That is what makes a backend retry loop, a duplicated webhook, or a
+re-delivered event harmless. `attempts` counts *adjudications* rather than
+calls, so a backend spinning while an intent is still pending is visible in
+the record, while post-settlement retries leave no trace at all.
+
+### A mismatch is a fact, not a phase
+
+`Mismatched` is **never cleared by re-running**. The observed transaction is
+immutable, so the disagreement is too; only `resolve_settlement` moves it,
+with the operator's reason committed by hash.
+
+This is the property that makes the alert trustworthy. If a re-run with the
+"correct" amount could clear a mismatch, the alert would be suppressible by
+the very backend that caused it. The same reasoning makes the second
+observation immutable:
+
+> `observe_settlement` is idempotent for the same transaction and
+> **refuses a different one**. If a second observation could replace the
+> first, a backend could swap in a transaction that happens to agree with its
+> intent and make a real mismatch vanish.
+
+### The UI cannot render a pending intent as settled
+
+`settlement_status` returns `settled_amount` **only** when the state is
+`Reconciled`, and zero otherwise. A pending or disputed intent has no
+settled figure to render, so "not yet settled" cannot be shown as money the
+sponsor received by forgetting a branch. `observed_amount` stays available
+for an operator reconciling by hand — the two sides are both needed — but it
+is a different field with a different name.
+
+`settled_amount` goes further and *refuses to answer* for an unreconciled
+intent (`InvalidState`), so a caller wanting a number has to handle the error
+rather than receive a zero it might display as "nothing was paid".
+
+### Mismatches alert
+
+Two states page somebody: `Mismatched` (the chain disagrees) and `Expired`
+(the transaction never appeared). Both are "the backend and the chain
+disagree", and neither resolves on its own.
+
+`alert_count()` is a running total that only rises on an alert and only falls
+in the sense that a monitor can compare it against resolved intents. It exists
+so alerting does not depend on someone tailing every reconciliation topic, and
+so a rising number is unambiguous.
+
+`expire_settlement` is separate from a mismatch on purpose: "no transaction"
+is usually a backend that failed to submit, while "the wrong amount" is a
+real dispute, and they need different responses.
+
+### Bounds
+
+| Bound | Value | Consequence past it |
+| --- | --- | --- |
+| Tracked intents | 5,000 | `TooManyIntents` |
+| Finality threshold | 1–100 ledgers | `InvalidFinality` |
+
+`archive_settlement` is the release valve, and it accepts **only**
+`Reconciled` intents. It is refused for `Pending`, `Mismatched`, and
+`Expired` so the valve cannot double as a way to erase an open dispute in
+order to free a slot. The archival itself emits an event, so an auditor can
+see that an intent existed and was removed even though it no longer does.
+Past 5,000 unsettled intents, the correct response is to fix the backlog, not
+to archive the disputes.
+
+## Settlement: operational impact
+
+- **Three phases per intent, and the backend drives all three.** `open`, then
+  `observe` with the transaction hash and ledger, then `reconcile` with the
+  amount once the finality window has passed. `reconcile` before that returns
+  `NotFinal` — the backend must retry on a later ledger, not immediately.
+- **The backend must not treat a successful submission as a settlement.** It
+  is a `Pending` intent until `reconcile_settlement` returns `Reconciled`.
+  This is the operational change most likely to surface existing bugs, and it
+  is the point of the issue.
+- **Alert on `alert_count()`, and expect it to be non-zero occasionally.** A
+  mismatch is the system working. An `alert_count()` that never moves across a
+  busy period is more suspicious than one that does.
+- **A mismatch cannot be auto-cleared.** Any automation that retries
+  `reconcile` to "fix" a mismatch will keep getting `Mismatched` back, which
+  is correct. Clearing one is a human decision via `resolve_settlement`, and
+  it is recorded.
+- **Reconciliation is per-intent and idempotent, so replaying a whole
+  settlement batch is safe.** That is deliberate: it makes a
+  re-drive-after-deploy a non-event rather than a source of duplicate alerts.

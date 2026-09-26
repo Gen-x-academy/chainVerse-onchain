@@ -100,6 +100,21 @@ const MAX_DELIVERY_HISTORY: u32 = 256;
 /// long a captured signature stays useful if the sponsor never sees it.
 const MAX_SIGNATURE_TTL: u64 = 86_400;
 
+// ── Settlement bounds (issue #1142) ────────────────────────────────────────
+
+/// Ceiling on simultaneously tracked settlement intents. Bounded so a
+/// backend that never archives cannot grow instance storage without limit;
+/// `archive_settlement` is the release valve, and it only accepts
+/// already-settled intents so history cannot be dropped to make room for a
+/// live dispute.
+const MAX_TRACKED_INTENTS: u64 = 5_000;
+
+/// Most ledger closes an intent may wait to become final. Bounded so a
+/// caller cannot pass a threshold that makes an intent permanently
+/// unreconcilable -- the failure mode of an unbounded finality window is
+/// silence, which is worse than a late answer.
+const MAX_FINALITY: u32 = 100;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ContractError {
@@ -163,6 +178,29 @@ pub enum ContractError {
     /// The caller is not the endpoint's owner. Endpoints belong to the
     /// sponsor, not to the platform.
     NotEndpointOwner = 26,
+    // ── Settlement reconciliation (issue #1142) ──
+    /// No settlement intent with that id.
+    IntentNotFound = 27,
+    /// That intent id is already tracked. Ids are content-derived, so a
+    /// repeat means a producer bug, not an update.
+    IntentExists = 28,
+    /// The tracked-intent table is at its ceiling.
+    TooManyIntents = 29,
+    /// A finality threshold of zero, or above `MAX_FINALITY`.
+    InvalidFinality = 30,
+    /// An amount that is not positive. A settlement of zero or less is not
+    /// a settlement, and allowing it would let a mismatch read as a match.
+    InvalidAmount = 31,
+    /// The observation arrived before the required ledger closes have
+    /// passed. Reconciling early is the failure this whole contract exists
+    /// to prevent.
+    NotFinal = 32,
+    /// A transaction has already been observed for this intent. Swapping
+    /// the observed transaction is how a mismatch would be made to
+    /// disappear.
+    AlreadyObserved = 33,
+    /// The intent is not in a state that allows this transition.
+    InvalidState = 34,
 }
 
 /// Storage layout.
@@ -197,6 +235,12 @@ pub enum DataKey {
     Attempts(u64, u64),
     /// Highest delivery sequence the sponsor itself has acknowledged.
     EndpointAck(u64),
+    // ── Settlement state (issue #1142) ──
+    TrackedIntents,
+    Intent(BytesN<32>),
+    /// Running count of intents that reached `Mismatched` or `Expired`, so
+    /// a monitor can alert on the number without replaying every intent.
+    AlertedIntents,
 }
 
 /// One durable outbox entry.
@@ -286,6 +330,89 @@ pub struct DeliveryRecord {
     pub outcome: DeliveryOutcome,
     /// Ledger time the sponsor acknowledged it, or 0 if it has not.
     pub acked_at: u64,
+}
+
+/// Where a settlement intent stands relative to what the chain says
+/// actually happened (issue #1142).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettlementState {
+    /// Opened, and either unobserved or observed but not yet final.
+    Pending,
+    /// The chain's authoritative amount matched the intent. Terminal-good.
+    Reconciled,
+    /// The chain disagrees with the intent. Requires operator resolution --
+    /// it is never cleared by a later re-run, because a mismatch is a fact
+    /// about a specific observation.
+    Mismatched,
+    /// The observation never arrived inside the finality window.
+    Expired,
+}
+
+impl SettlementState {
+    /// Whether this state should page somebody.
+    ///
+    /// Both alarming states are "the backend and the chain disagree" or
+    /// "nothing happened at all", and neither resolves on its own.
+    pub fn is_alerting(self) -> bool {
+        matches!(self, SettlementState::Mismatched | SettlementState::Expired)
+    }
+}
+
+/// A backend payment or award intent, tracked against the chain's own
+/// record of it.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettlementIntent {
+    /// Producer-chosen id, normally a hash of the intent. Content-derived
+    /// so a retry cannot create a second intent for one payment.
+    pub intent_id: BytesN<32>,
+    /// The domain contract the intent concerns. Recorded for provenance.
+    pub source: Address,
+    /// Ties the intent to the outbox event that announced it, so a
+    /// settlement can be traced back to the state change that caused it.
+    pub correlation_id: BytesN<32>,
+    /// What the backend believes it is settling.
+    pub expected_amount: i128,
+    pub state: SettlementState,
+    pub opened_at: u64,
+    /// Ledger closes that must pass after the observed transaction's ledger
+    /// before its outcome is treated as authoritative. Stored per intent
+    /// because the right answer depends on the operation's risk, and
+    /// hardcoding one number would be wrong for some of them.
+    pub required_finality: u32,
+    /// Zero until a transaction is observed.
+    pub observed_tx_hash: BytesN<32>,
+    /// Zero until a transaction is observed.
+    pub observed_ledger: u32,
+    /// What the chain actually settled, filled in at reconciliation.
+    pub observed_amount: i128,
+    /// How many times this intent was actually adjudicated. A repeat call
+    /// on an already-decided intent is a complete no-op, so this counts
+    /// adjudications rather than calls: a backend retrying while an intent
+    /// is still pending shows up here, and post-settlement retries do not
+    /// pollute the number.
+    pub attempts: u32,
+    /// Ledger time of the reconciliation that settled the state, or 0.
+    pub reconciled_at: u64,
+    /// `sha256` of the operator's note when a mismatch was resolved.
+    pub resolution_hash: BytesN<32>,
+}
+
+/// The single shape a frontend reads (issue #1142: "frontend status uses
+/// reconciled state").
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettlementView {
+    pub intent_id: BytesN<32>,
+    pub state: SettlementState,
+    /// Present only when `state` is `Reconciled`. Zero otherwise, so an
+    /// un-reconciled intent cannot be rendered as a settled amount by
+    /// accident.
+    pub settled_amount: i128,
+    pub observed_amount: i128,
+    pub reconciled_at: u64,
+    pub attempts: u32,
 }
 
 #[contract]
@@ -1002,6 +1129,364 @@ impl ScholarshipOutboxContract {
         Ok(())
     }
 
+    // ── Settlement reconciliation (#1142) ─────────────────────────────────
+    //
+    // The backend has an opinion (a payment or award intent); the chain has
+    // a fact (a transaction that settled, in a ledger, with an amount).
+    // This reconciles the two and refuses to let the opinion win.
+    //
+    // Four rules, in the order they matter:
+    //
+    // 1. **Finality is explicit and per-intent.** A Stellar transaction
+    //    reported as successful is not final: the ledger containing it can
+    //    still be rolled back, and a fee-bump or a later close can change
+    //    the outcome. An intent is only reconcilable once
+    //    `current_ledger - observed_ledger >= required_finality`. Zero is
+    //    refused -- "final immediately" is exactly the bug this contract
+    //    exists to catch.
+    // 2. **Reprocessing is idempotent.** Reconciling a settled intent
+    //    returns the same state and changes nothing, so a backend retry
+    //    loop or a duplicate webhook cannot flip a verdict.
+    // 3. **A mismatch is a fact, not a phase.** `Mismatched` is never
+    //    cleared by re-running: the observed transaction is immutable, so
+    //    the disagreement is too. Only an explicit `resolve_mismatch`
+    //    moves it, which is what makes the alert trustworthy.
+    // 4. **The UI cannot render a pending intent as settled.**
+    //    `settlement_status` zeroes `settled_amount` unless the state is
+    //    `Reconciled`.
+
+    /// Open a settlement intent. The backend's claim, not yet compared to
+    /// anything.
+    pub fn open_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+        source: Address,
+        correlation_id: BytesN<32>,
+        expected_amount: i128,
+        required_finality: u32,
+    ) -> Result<(), ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+
+        // Zero would make every intent final the instant it was observed,
+        // which is the failure mode #1142 asks us to prevent. A ceiling
+        // stops a caller parking an intent in `Pending` forever.
+        if required_finality == 0 || required_finality > MAX_FINALITY {
+            return Err(ContractError::InvalidFinality);
+        }
+        if expected_amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Intent(intent_id.clone()))
+        {
+            return Err(ContractError::IntentExists);
+        }
+
+        let tracked: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TrackedIntents)
+            .unwrap_or(0u64);
+        if tracked >= MAX_TRACKED_INTENTS {
+            return Err(ContractError::TooManyIntents);
+        }
+
+        let intent = SettlementIntent {
+            intent_id: intent_id.clone(),
+            source,
+            correlation_id,
+            expected_amount,
+            state: SettlementState::Pending,
+            opened_at: env.ledger().timestamp(),
+            required_finality,
+            observed_tx_hash: BytesN::from_array(&env, &[0u8; 32]),
+            observed_ledger: 0,
+            observed_amount: 0,
+            attempts: 0,
+            reconciled_at: 0,
+            resolution_hash: BytesN::from_array(&env, &[0u8; 32]),
+        };
+        Self::save_intent(&env, &intent);
+        env.storage().instance().set(
+            &DataKey::TrackedIntents,
+            &tracked.checked_add(1).ok_or(ContractError::IdOverflow)?,
+        );
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("opn"), intent_id.clone()),
+            (expected_amount, required_finality, env.ledger().timestamp()),
+        );
+        Ok(())
+    }
+
+    /// Report the transaction that was submitted for this intent.
+    ///
+    /// Idempotent for the same transaction, and **refuses a different one**
+    /// once set. That refusal is the load-bearing part: if a second
+    /// observation could replace the first, a backend could swap in a
+    /// transaction that happens to agree with its intent and make a
+    /// mismatch vanish.
+    pub fn observe_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+        tx_hash: BytesN<32>,
+        tx_ledger: u32,
+    ) -> Result<(), ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+
+        let mut intent = Self::load_intent(&env, &intent_id)?;
+        if intent.state != SettlementState::Pending {
+            return Err(ContractError::InvalidState);
+        }
+        if intent.observed_ledger != 0 {
+            return if intent.observed_tx_hash == tx_hash && intent.observed_ledger == tx_ledger {
+                // Same transaction reported twice: nothing to do.
+                Ok(())
+            } else {
+                Err(ContractError::AlreadyObserved)
+            };
+        }
+        if tx_ledger == 0 || tx_ledger > env.ledger().sequence() {
+            return Err(ContractError::NotFinal);
+        }
+
+        intent.observed_tx_hash = tx_hash;
+        intent.observed_ledger = tx_ledger;
+        Self::save_intent(&env, &intent);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("obsv"), intent_id), tx_ledger);
+        Ok(())
+    }
+
+    /// Compare the intent against what the chain settled.
+    ///
+    /// Returns the resulting state. Safe to call repeatedly: once an
+    /// intent is decided, this returns its state and writes nothing at all,
+    /// so a retry loop or a duplicate webhook cannot flip a verdict or
+    /// disturb the record of how it was reached.
+    pub fn reconcile_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+        observed_amount: i128,
+    ) -> Result<SettlementState, ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+
+        let mut intent = Self::load_intent(&env, &intent_id)?;
+        let now = env.ledger().timestamp();
+
+        // Terminal-good and terminal-bad states are both sticky, and this
+        // early return is what makes reprocessing a complete no-op: not
+        // just the state, every field of the record.
+        if intent.state != SettlementState::Pending {
+            return Ok(intent.state);
+        }
+
+        if intent.observed_ledger == 0 {
+            return Err(ContractError::NotFinal);
+        }
+        let passed = env
+            .ledger()
+            .sequence()
+            .checked_sub(intent.observed_ledger)
+            .ok_or(ContractError::NotFinal)?;
+        if passed < intent.required_finality {
+            return Err(ContractError::NotFinal);
+        }
+
+        intent.attempts = intent
+            .attempts
+            .checked_add(1)
+            .ok_or(ContractError::IdOverflow)?;
+        intent.observed_amount = observed_amount;
+        intent.reconciled_at = now;
+
+        if observed_amount == intent.expected_amount {
+            intent.state = SettlementState::Reconciled;
+        } else {
+            intent.state = SettlementState::Mismatched;
+            Self::raise_alert(&env)?;
+        }
+        Self::save_intent(&env, &intent);
+
+        // A dedicated event plus a running count, so alerting does not
+        // depend on someone tailing every settlement topic.
+        env.events().publish(
+            (soroban_sdk::symbol_short!("recon"), intent_id.clone()),
+            (
+                intent.state,
+                intent.expected_amount,
+                observed_amount,
+                intent.attempts,
+            ),
+        );
+        Ok(intent.state)
+    }
+
+    /// Give up on an intent whose transaction never appeared.
+    ///
+    /// Separate from `Expired`'s alerting because "no transaction" and "the
+    /// wrong amount" need different responses: the first is usually a
+    /// backend that failed to submit, the second is a real dispute.
+    pub fn expire_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+
+        let mut intent = Self::load_intent(&env, &intent_id)?;
+        if intent.state != SettlementState::Pending {
+            return Err(ContractError::InvalidState);
+        }
+        intent.state = SettlementState::Expired;
+        intent.reconciled_at = env.ledger().timestamp();
+        Self::save_intent(&env, &intent);
+        Self::raise_alert(&env)?;
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("expr"), intent_id),
+            intent.reconciled_at,
+        );
+        Ok(())
+    }
+
+    /// Clear a mismatch or expiry with a recorded reason.
+    ///
+    /// The only way out of an alarming state short of archiving. The
+    /// operator's note is committed by hash, so the resolution is
+    /// auditable without putting free text on chain.
+    pub fn resolve_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+        resolution_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+        Self::require_commitment(&env, &resolution_hash)?;
+
+        let mut intent = Self::load_intent(&env, &intent_id)?;
+        if !intent.state.is_alerting() {
+            // Resolving something that is fine, or something still pending,
+            // is a caller bug worth surfacing rather than a no-op.
+            return Err(ContractError::InvalidState);
+        }
+        intent.state = SettlementState::Reconciled;
+        intent.reconciled_at = env.ledger().timestamp();
+        intent.resolution_hash = resolution_hash;
+        Self::save_intent(&env, &intent);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("rsv"), intent_id),
+            intent.reconciled_at,
+        );
+        Ok(())
+    }
+
+    /// Drop a settled intent, freeing a slot.
+    ///
+    /// Refused for `Pending`, `Mismatched`, and `Expired` on purpose: the
+    /// release valve must not double as a way to erase an open dispute.
+    pub fn archive_settlement(
+        env: Env,
+        operator: Address,
+        intent_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        operator.require_auth();
+        Self::require_admin(&env, &operator)?;
+
+        let intent = Self::load_intent(&env, &intent_id)?;
+        if intent.state != SettlementState::Reconciled {
+            return Err(ContractError::InvalidState);
+        }
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Intent(intent_id.clone()));
+        let tracked: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TrackedIntents)
+            .unwrap_or(0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TrackedIntents, &tracked.saturating_sub(1));
+
+        // The removal itself is the record, so an auditor can see that an
+        // intent existed and was archived even though it no longer does.
+        env.events().publish(
+            (soroban_sdk::symbol_short!("arch"), intent_id),
+            env.ledger().timestamp(),
+        );
+        Ok(())
+    }
+
+    // ── Settlement views ──────────────────────────────────────────────────
+
+    /// What a frontend should render. `settled_amount` is zero unless the
+    /// state is `Reconciled`, so a pending or disputed intent cannot be
+    /// displayed as a settled figure by accident.
+    pub fn settlement_status(
+        env: Env,
+        intent_id: BytesN<32>,
+    ) -> Result<SettlementView, ContractError> {
+        let intent = Self::load_intent(&env, &intent_id)?;
+        let settled_amount = if intent.state == SettlementState::Reconciled {
+            intent.observed_amount
+        } else {
+            0
+        };
+        Ok(SettlementView {
+            intent_id: intent.intent_id,
+            state: intent.state,
+            settled_amount,
+            observed_amount: intent.observed_amount,
+            reconciled_at: intent.reconciled_at,
+            attempts: intent.attempts,
+        })
+    }
+
+    /// The settled amount, or `NotFinal` if the intent has not been
+    /// reconciled. A caller that wants to render a number must handle the
+    /// error, which is the point.
+    pub fn settled_amount(env: Env, intent_id: BytesN<32>) -> Result<i128, ContractError> {
+        let intent = Self::load_intent(&env, &intent_id)?;
+        match intent.state {
+            SettlementState::Reconciled => Ok(intent.observed_amount),
+            _ => Err(ContractError::InvalidState),
+        }
+    }
+
+    pub fn get_intent(env: Env, intent_id: BytesN<32>) -> Result<SettlementIntent, ContractError> {
+        Self::load_intent(&env, &intent_id)
+    }
+
+    /// Running count of intents in an alarming state. Meant to be polled by
+    /// a monitor; it cannot go down except by resolving, so a rising number
+    /// is unambiguous.
+    pub fn alert_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AlertedIntents)
+            .unwrap_or(0u64)
+    }
+
+    pub fn tracked_intents(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TrackedIntents)
+            .unwrap_or(0u64)
+    }
+
     // ── Views ─────────────────────────────────────────────────────────────
 
     pub fn get_endpoint(env: Env, endpoint_id: u64) -> Result<WebhookEndpoint, ContractError> {
@@ -1113,6 +1598,37 @@ impl ScholarshipOutboxContract {
             .ok_or(ContractError::IdOverflow)
     }
 
+    fn load_intent(env: &Env, intent_id: &BytesN<32>) -> Result<SettlementIntent, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Intent(intent_id.clone()))
+            .ok_or(ContractError::IntentNotFound)
+    }
+
+    fn save_intent(env: &Env, intent: &SettlementIntent) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Intent(intent.intent_id.clone()), intent);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Intent(intent.intent_id.clone()),
+            RECORD_MIN_TTL,
+            RECORD_MAX_TTL,
+        );
+    }
+
+    fn raise_alert(env: &Env) -> Result<(), ContractError> {
+        let alerts: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AlertedIntents)
+            .unwrap_or(0u64);
+        env.storage().instance().set(
+            &DataKey::AlertedIntents,
+            &alerts.checked_add(1).ok_or(ContractError::IdOverflow)?,
+        );
+        Ok(())
+    }
+
     /// Validates a claimed expiry against the ledger clock.
     fn check_expiry(now: u64, expires_at: u64) -> Result<(), ContractError> {
         let ttl = expires_at
@@ -1130,3 +1646,6 @@ mod tests;
 
 #[cfg(test)]
 mod webhook_tests;
+
+#[cfg(test)]
+mod settlement_tests;
