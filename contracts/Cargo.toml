@@ -27,6 +27,7 @@ members = [
     "scholarship-programs",
     "scholarship-registry",
     "scholarship-finance",
+    "scholarship-dashboards",
 ]
 
 [workspace.dependencies]
