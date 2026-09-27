@@ -31,6 +31,7 @@ members = [
     "scholarship-communications",
     "scholarship-disbursement-enhancements",
     "scholarship-discovery-notifications",
+    "scholarship-review-workflow",
 ]
 
 [workspace.dependencies]
