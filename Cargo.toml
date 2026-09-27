@@ -25,12 +25,8 @@ members = [
     "contracts/scholarship-programs",
     "contracts/scholarship-eligibility",
     "contracts/scholarship-applications",
-    "contracts/scholarship-admin",
-    "contracts/scholarship-e2e",
-    "contracts/scholarship-milestones",
-    "contracts/scholarship-disbursements",
-    "contracts/scholarship-outbox",
-    "contracts/scholarship-migration",
+    "contracts/scholarship-reviews",
+    "contracts/scholarship-decisions",
 ]
 
 [workspace.dependencies]
