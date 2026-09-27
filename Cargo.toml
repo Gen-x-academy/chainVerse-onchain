@@ -27,6 +27,10 @@ members = [
     "contracts/scholarship-applications",
     "contracts/scholarship-reviews",
     "contracts/scholarship-decisions",
+    "contracts/scholarship-fairness-review",
+    "contracts/scholarship-aggregate-analytics",
+    "contracts/scholarship-fraud-signals",
+    "contracts/scholarship-payment-anomaly",
 ]
 
 [workspace.dependencies]

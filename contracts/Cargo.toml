@@ -32,6 +32,10 @@ members = [
     "scholarship-disbursement-enhancements",
     "scholarship-discovery-notifications",
     "scholarship-review-workflow",
+    "scholarship-fairness-review",
+    "scholarship-aggregate-analytics",
+    "scholarship-fraud-signals",
+    "scholarship-payment-anomaly",
 ]
 
 [workspace.dependencies]
