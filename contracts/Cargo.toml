@@ -27,6 +27,11 @@ members = [
     "scholarship-programs",
     "scholarship-registry",
     "scholarship-finance",
+    "scholarship-dashboards",
+    "scholarship-communications",
+    "scholarship-disbursement-enhancements",
+    "scholarship-discovery-notifications",
+    "scholarship-review-workflow",
 ]
 
 [workspace.dependencies]
