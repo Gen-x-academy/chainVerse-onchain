@@ -18,6 +18,15 @@ members = [
     "token",
     "library-rights",
     "library_licensing",
+    "scholarship-admin",
+    "scholarship-applications",
+    "scholarship-core",
+    "scholarship-disbursements",
+    "scholarship-eligibility",
+    "scholarship-milestones",
+    "scholarship-programs",
+    "scholarship-registry",
+    "scholarship-finance",
 ]
 
 [workspace.dependencies]
