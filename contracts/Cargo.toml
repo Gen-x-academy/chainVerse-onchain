@@ -30,6 +30,7 @@ members = [
     "scholarship-dashboards",
     "scholarship-communications",
     "scholarship-disbursement-enhancements",
+    "scholarship-discovery-notifications",
 ]
 
 [workspace.dependencies]
