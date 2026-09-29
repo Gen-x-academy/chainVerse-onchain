@@ -31,6 +31,10 @@ members = [
     "contracts/scholarship-aggregate-analytics",
     "contracts/scholarship-fraud-signals",
     "contracts/scholarship-payment-anomaly",
+    "contracts/scholarship-access-control",
+    "contracts/scholarship-identity",
+    "contracts/scholarship-rate-limits",
+    "contracts/scholarship-idempotency",
 ]
 
 [workspace.dependencies]
