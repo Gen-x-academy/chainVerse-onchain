@@ -27,6 +27,10 @@ members = [
     "contracts/scholarship-applications",
     "contracts/scholarship-reviews",
     "contracts/scholarship-decisions",
+    "contracts/scholarship-access-control",
+    "contracts/scholarship-identity",
+    "contracts/scholarship-rate-limits",
+    "contracts/scholarship-idempotency",
 ]
 
 [workspace.dependencies]
