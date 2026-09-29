@@ -25,16 +25,8 @@ members = [
     "contracts/scholarship-programs",
     "contracts/scholarship-eligibility",
     "contracts/scholarship-applications",
-    "contracts/scholarship-reviews",
-    "contracts/scholarship-decisions",
-    "contracts/scholarship-fairness-review",
-    "contracts/scholarship-aggregate-analytics",
-    "contracts/scholarship-fraud-signals",
-    "contracts/scholarship-payment-anomaly",
-    "contracts/scholarship-access-control",
-    "contracts/scholarship-identity",
-    "contracts/scholarship-rate-limits",
-    "contracts/scholarship-idempotency",
+    "contracts/scholarship-awards",
+    "contracts/scholarship-milestones",
 ]
 
 [workspace.dependencies]

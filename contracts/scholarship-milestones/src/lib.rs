@@ -1,46 +1,53 @@
 #![no_std]
 
-//! Scholarship/bursary milestone evidence contract.
+//! Scholarship/bursary milestone-disbursement schedule contract.
 //!
-//! Scope of this pass (issues #1094, #1095): let a recipient (or a
-//! trusted system on their behalf) submit *privacy-minimized* evidence
-//! against an active milestone, and let an authorized verifier approve,
-//! reject, or request changes on that evidence with an explicit reason
-//! code — without either side ever putting the underlying evidence
-//! on-chain.
+//! Scope of this pass (issue #1093): split an award into enrollment,
+//! attendance, coursework, completion, or custom verified milestones, each
+//! carrying a percentage and a disbursement date, and release them in
+//! order once verified.
 //!
-//! - **#1094 — Submit milestone evidence.** `submit_evidence()` records a
-//!   caller-supplied `data_hash: BytesN<32>` — an integrity commitment over
-//!   off-chain (and, where needed, encrypted) evidence — against an active
-//!   milestone, keyed by `(program_id, milestone_id, recipient)`. Evidence
-//!   is *versioned*: a new submission for the same tuple creates version
-//!   N+1, and re-submitting the exact same `data_hash` is idempotent and
-//!   returns the existing version rather than creating a duplicate. Only
-//!   the recipient themselves, or an admin-allowlisted trusted submitter,
-//!   may submit for a recipient.
-//! - **#1095 — Verify milestone evidence.** `verify_evidence()` lets an
-//!   admin-allowlisted verifier decide a *specific evidence version*
-//!   (`Approved` / `Rejected` / `ChangesRequested`) with an explicit
-//!   `ReasonCode`. A verifier who is also the evidence's recipient or
-//!   submitter is rejected as a conflict of interest. Each evidence
-//!   version is decidable at most once, so an approval emits **at most one**
-//!   payment-eligibility event (`EVPASS`) for that version — re-deciding is
-//!   impossible and a changed decision requires a new evidence version.
-//!   Every decision is recorded on the version and published as `EVDECID`.
+//! Acceptance criteria handled here:
 //!
-//! Privacy-minimized by design: on-chain state only ever contains stable
-//! identifiers (addresses, IDs), a `BytesN<32>` commitment, status/reason
-//! enums, and timestamps — never grades, documents, or any other evidence
-//! content. See `contracts/docs/scholarship-milestones.md` for ownership,
-//! privacy, migration, and operational notes.
+//! - **Percentages and amounts reconcile to the award.** Percentages are
+//!   expressed in basis points and must sum to exactly 10,000. Milestone
+//!   amounts are *derived* from those percentages against the schedule's
+//!   `total_amount`, with the final milestone absorbing any integer-
+//!   division remainder, so the amounts always sum exactly to the award.
+//! - **Dates are ordered.** Milestone dates must be strictly increasing;
+//!   any other ordering is rejected with `DatesNotOrdered`.
+//! - **Immutable after activation except governed amendment.** A schedule
+//!   is defined inactive, then activated exactly once. While inactive it
+//!   may only be redefined once (a define-then-define calls is rejected),
+//!   and once active every change must go through `amend_schedule`, which
+//!   is admin-only, bumps the version, records the amend timestamp, and is
+//!   refused once any milestone has been released
+//!   (`ScheduleLockedAfterDisbursement`) so disbursement history can never
+//!   be silently rewritten.
+//!
+//! On-chain storage is privacy-minimized: milestone labels are represented
+//! only by `BytesN<32>` commitments over off-chain text; no descriptive
+//! content is stored. See `contracts/docs/scholarship-milestones.md` for
+//! ownership, privacy, migration, and operational notes.
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol, Vec,
+};
 
 const CONTRACT_VERSION: u32 = 1;
 
-// TTL constants: ~1 year at 6-second ledgers, matching the sibling scholarship contracts.
+// TTL constants: ~1 year at 6-second ledgers, matching the sibling
+// scholarship contracts' convention.
 const RECORD_MIN_TTL: u32 = 3_110_400;
 const RECORD_MAX_TTL: u32 = 6_220_800;
+
+/// #1093 — bounded storage: a schedule may hold at most this many
+/// milestones, so no single record can grow without bound.
+const MAX_MILESTONES: u32 = 16;
+
+/// Percentages are basis points; 100% == 10,000 bps.
+const BPS_DENOM_U32: u32 = 10_000;
+const BPS_DENOM_I128: i128 = 10_000;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -48,115 +55,103 @@ pub enum ContractError {
     NotInitialized = 1,
     AlreadyInitialized = 2,
     NotAdmin = 3,
-    /// #1094 — the caller is neither the recipient nor an authorized trusted submitter.
-    NotAuthorizedSubmitter = 4,
-    MilestoneNotFound = 5,
-    /// #1094 — evidence may only be submitted against an `Active` milestone.
-    MilestoneNotActive = 6,
-    /// #1094 — a milestone with this `(program_id, milestone_id)` already exists.
-    MilestoneAlreadyExists = 7,
-    /// #1094 — the per-recipient evidence version counter would overflow `u32`.
-    VersionOverflow = 8,
-    EvidenceNotFound = 9,
-    /// #1095 — the caller is not on the verifier allowlist.
-    NotAuthorizedVerifier = 10,
-    /// #1095 — a verifier may not decide evidence they submitted or that is theirs.
-    VerifierConflict = 11,
-    /// #1095 — this evidence version has already been decided; decisions are terminal.
-    AlreadyDecided = 12,
-    /// #1095 — the reason code is not coherent with the requested decision.
-    InvalidReasonCode = 13,
+    ScheduleNotFound = 4,
+    /// A schedule already exists for this award; use `amend_schedule`.
+    ScheduleAlreadyExists = 5,
+    /// #1093 — a schedule must have between 1 and MAX_MILESTONES milestones.
+    InvalidMilestoneCount = 6,
+    /// #1093 — milestone percentages must sum to exactly 10,000 bps.
+    PercentagesDoNotSumTo100 = 7,
+    /// #1093 — milestone dates must be strictly increasing.
+    DatesNotOrdered = 8,
+    /// The schedule's total amount must be strictly positive.
+    InvalidAmount = 9,
+    /// The schedule has not been activated yet.
+    ScheduleInactive = 10,
+    /// The schedule has already been activated.
+    ScheduleAlreadyActive = 11,
+    MilestoneIndexOutOfRange = 12,
+    /// A milestone must be verified before it can be released.
+    MilestoneNotVerified = 13,
+    MilestoneAlreadyVerified = 14,
+    MilestoneAlreadyReleased = 15,
+    /// Milestones must be released in schedule order.
+    OutOfOrderRelease = 16,
+    /// #1093 — an activated schedule cannot be amended once any milestone
+    /// has been released.
+    ScheduleLockedAfterDisbursement = 17,
+    /// Version counter would overflow u32 — practically unreachable, but
+    /// checked rather than silently wrapping.
+    VersionOverflow = 18,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
-    /// #1094 — a milestone for `(program_id, milestone_id)`.
-    Milestone(BytesN<32>, u64),
-    /// #1094 — address allowlisted to submit evidence on recipients' behalf.
-    Submitter(Address),
-    /// #1095 — address allowlisted to decide evidence.
-    Verifier(Address),
-    /// #1094 — latest evidence version for `(program_id, milestone_id, recipient)`.
-    EvidenceVersion(BytesN<32>, u64, Address),
-    /// #1094 — an immutable evidence version.
-    Evidence(BytesN<32>, u64, Address, u32),
+    /// A milestone schedule, keyed by the award it splits.
+    Schedule(BytesN<32>),
 }
 
-/// #1094 — a milestone can only accept evidence while `Active`.
+/// #1093 — the kind of verified milestone. `Custom` milestones use the
+/// `label_hash` commitment for their off-chain label.
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MilestoneStatus {
-    Active,
-    Closed,
+pub enum MilestoneKind {
+    Enrollment,
+    Attendance,
+    Coursework,
+    Completion,
+    Custom,
 }
 
-/// #1095 — the lifecycle of a single evidence version. `Pending` is the
-/// only non-terminal state; a decided version is never decided again.
+/// Caller-supplied definition of one milestone. Amounts are not accepted
+/// here — they are derived from `percentage_bps` against the schedule's
+/// total, which is what makes reconciliation exact.
 #[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EvidenceStatus {
-    Pending,
-    Approved,
-    Rejected,
-    ChangesRequested,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneInput {
+    pub kind: MilestoneKind,
+    /// Integrity commitment over the off-chain milestone label/description.
+    pub label_hash: BytesN<32>,
+    /// Share of the award, in basis points (1% == 100 bps).
+    pub percentage_bps: u32,
+    /// Ledger timestamp at/after which this milestone may be released.
+    pub due_at: u64,
 }
 
-/// #1095 — what a verifier decided. Deliberately separate from
-/// [`EvidenceStatus`] so a caller can never pass `Pending` as a decision.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum VerificationDecision {
-    Approved,
-    Rejected,
-    ChangesRequested,
-}
-
-/// #1095 — explicit, closed reason codes. A bounded enum rather than free
-/// text, so a verifier cannot accidentally publish sensitive detail
-/// on-chain through a "reason" string; the real rationale stays off-chain.
-#[contracttype]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReasonCode {
-    NotReviewed,
-    MeetsCriteria,
-    InsufficientEvidence,
-    EvidenceMismatch,
-    OutsideScope,
-}
-
+/// A materialized milestone: the caller's input plus its derived amount and
+/// verification/release state.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Milestone {
-    pub program_id: BytesN<32>,
-    pub milestone_id: u64,
-    pub status: MilestoneStatus,
-    pub created_by: Address,
-    pub created_at: u64,
+    pub index: u32,
+    pub kind: MilestoneKind,
+    pub label_hash: BytesN<32>,
+    pub percentage_bps: u32,
+    /// Derived from `percentage_bps` against the schedule total.
+    pub amount: i128,
+    pub due_at: u64,
+    pub verified: bool,
+    pub released: bool,
 }
 
-/// #1094/#1095 — one immutable version of a recipient's evidence for a
-/// milestone, plus the (at most one) decision recorded against it.
+/// #1093 — a complete, reconciled disbursement schedule for one award.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EvidenceRecord {
-    pub program_id: BytesN<32>,
-    pub milestone_id: u64,
-    pub recipient: Address,
-    /// Monotonic, starts at 1 — never mutated after creation.
+pub struct MilestoneSchedule {
+    pub award_id: BytesN<32>,
+    pub total_amount: i128,
+    pub currency: Symbol,
+    /// Increments on every governed amendment; starts at 1.
     pub version: u32,
-    /// Integrity commitment over off-chain evidence; never the evidence itself.
-    pub data_hash: BytesN<32>,
-    pub submitted_by: Address,
-    pub submitted_at: u64,
-    pub status: EvidenceStatus,
-    /// False until a verifier decides this version.
-    pub decided: bool,
-    /// The submitter until decided, then the deciding verifier.
-    pub decided_by: Address,
-    pub decided_at: u64,
-    pub reason_code: ReasonCode,
+    /// False until `activate_schedule`; immutable once true except via
+    /// `amend_schedule`.
+    pub active: bool,
+    pub created_at: u64,
+    pub activated_at: u64,
+    pub amended_at: u64,
+    pub milestones: Vec<Milestone>,
 }
 
 #[contract]
@@ -164,6 +159,7 @@ pub struct ScholarshipMilestonesContract;
 
 #[contractimpl]
 impl ScholarshipMilestonesContract {
+    /// Initialize the contract admin. Run once.
     pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
@@ -186,389 +182,328 @@ impl ScholarshipMilestonesContract {
         Ok(())
     }
 
-    fn load_milestone(
-        env: &Env,
-        program_id: &BytesN<32>,
-        milestone_id: u64,
-    ) -> Result<Milestone, ContractError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Milestone(program_id.clone(), milestone_id))
-            .ok_or(ContractError::MilestoneNotFound)
-    }
-
-    // ── #1094 — milestones ────────────────────────────────────────────────
-
-    /// Admin-only: create a milestone for a program. The `(program_id,
-    /// milestone_id)` pair is a stable identifier and cannot be re-created.
-    pub fn create_milestone(
-        env: Env,
-        admin: Address,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-    ) -> Result<(), ContractError> {
-        Self::require_admin(&env, &admin)?;
-
-        let key = DataKey::Milestone(program_id.clone(), milestone_id);
-        if env.storage().persistent().has(&key) {
-            return Err(ContractError::MilestoneAlreadyExists);
-        }
-
-        let now = env.ledger().timestamp();
-        let milestone = Milestone {
-            program_id: program_id.clone(),
-            milestone_id,
-            status: MilestoneStatus::Active,
-            created_by: admin.clone(),
-            created_at: now,
-        };
-
-        env.storage().persistent().set(&key, &milestone);
+    fn put_schedule(env: &Env, schedule: &MilestoneSchedule) {
+        let key = DataKey::Schedule(schedule.award_id.clone());
+        env.storage().persistent().set(&key, schedule);
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-
-        env.events()
-            .publish((symbol_short!("MSTONE"),), (program_id, milestone_id));
-        Ok(())
     }
 
-    /// Admin-only: open or close a milestone. Evidence may only be
-    /// submitted while a milestone is `Active`; closing one never removes
-    /// or alters evidence already recorded against it.
-    pub fn set_milestone_status(
+    fn load_schedule(env: &Env, award_id: &BytesN<32>) -> Result<MilestoneSchedule, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Schedule(award_id.clone()))
+            .ok_or(ContractError::ScheduleNotFound)
+    }
+
+    /// #1093 — validate percentages/dates and derive the reconciled
+    /// milestone list. Amounts are computed from percentages with the final
+    /// milestone absorbing the integer-division remainder, so the derived
+    /// amounts always sum exactly to `total_amount`.
+    fn build_milestones(
+        env: &Env,
+        total_amount: i128,
+        inputs: &Vec<MilestoneInput>,
+    ) -> Result<Vec<Milestone>, ContractError> {
+        let count = inputs.len();
+        if count == 0 || count > MAX_MILESTONES {
+            return Err(ContractError::InvalidMilestoneCount);
+        }
+        if total_amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        // First pass: validate percentages sum and dates are strictly ordered.
+        let mut bps_sum: u32 = 0;
+        let mut prev_due: u64 = 0;
+        for i in 0..count {
+            let input = inputs.get(i).ok_or(ContractError::InvalidMilestoneCount)?;
+            bps_sum = bps_sum
+                .checked_add(input.percentage_bps)
+                .ok_or(ContractError::PercentagesDoNotSumTo100)?;
+            if i > 0 && input.due_at <= prev_due {
+                return Err(ContractError::DatesNotOrdered);
+            }
+            prev_due = input.due_at;
+        }
+        if bps_sum != BPS_DENOM_U32 {
+            return Err(ContractError::PercentagesDoNotSumTo100);
+        }
+
+        // Second pass: derive amounts, last milestone absorbing the remainder.
+        let mut milestones: Vec<Milestone> = Vec::new(env);
+        let mut allocated: i128 = 0;
+        for i in 0..count {
+            let input = inputs.get(i).ok_or(ContractError::InvalidMilestoneCount)?;
+            let amount = if i == count - 1 {
+                total_amount
+                    .checked_sub(allocated)
+                    .ok_or(ContractError::InvalidAmount)?
+            } else {
+                total_amount
+                    .checked_mul(input.percentage_bps as i128)
+                    .ok_or(ContractError::InvalidAmount)?
+                    / BPS_DENOM_I128
+            };
+            allocated = allocated
+                .checked_add(amount)
+                .ok_or(ContractError::InvalidAmount)?;
+
+            milestones.push_back(Milestone {
+                index: i,
+                kind: input.kind,
+                label_hash: input.label_hash,
+                percentage_bps: input.percentage_bps,
+                amount,
+                due_at: input.due_at,
+                verified: false,
+                released: false,
+            });
+        }
+
+        Ok(milestones)
+    }
+
+    // ── #1093 — define / activate / amend ────────────────────────────────
+
+    /// Admin-only: define a new, inactive schedule for an award. Rejected if
+    /// a schedule already exists for that award (use `amend_schedule`), if
+    /// the milestone count is out of range, if percentages do not sum to
+    /// 100%, if dates are not strictly ordered, or if the total amount is
+    /// not positive.
+    pub fn define_schedule(
         env: Env,
         admin: Address,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-        status: MilestoneStatus,
+        award_id: BytesN<32>,
+        total_amount: i128,
+        currency: Symbol,
+        inputs: Vec<MilestoneInput>,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
 
-        let key = DataKey::Milestone(program_id.clone(), milestone_id);
-        let mut milestone: Milestone = env
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Schedule(award_id.clone()))
+        {
+            return Err(ContractError::ScheduleAlreadyExists);
+        }
+
+        let milestones = Self::build_milestones(&env, total_amount, &inputs)?;
+        let now = env.ledger().timestamp();
+        let schedule = MilestoneSchedule {
+            award_id: award_id.clone(),
+            total_amount,
+            currency,
+            version: 1,
+            active: false,
+            created_at: now,
+            activated_at: 0,
+            amended_at: 0,
+            milestones,
+        };
+        Self::put_schedule(&env, &schedule);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("MSDEF"),), (award_id,));
+        Ok(())
+    }
+
+    /// Admin-only: activate a schedule exactly once. From this point the
+    /// schedule only changes through `amend_schedule`.
+    pub fn activate_schedule(
+        env: Env,
+        admin: Address,
+        award_id: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env, &admin)?;
+
+        let mut schedule = Self::load_schedule(&env, &award_id)?;
+        if schedule.active {
+            return Err(ContractError::ScheduleAlreadyActive);
+        }
+        schedule.active = true;
+        schedule.activated_at = env.ledger().timestamp();
+        Self::put_schedule(&env, &schedule);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("MSACT"),), (award_id,));
+        Ok(())
+    }
+
+    /// #1093 — the only way to change an activated schedule. Admin-only,
+    /// version-bumping, and refused once any milestone has been released so
+    /// that an amendment can never rewrite already-disbursed history.
+    pub fn amend_schedule(
+        env: Env,
+        admin: Address,
+        award_id: BytesN<32>,
+        total_amount: i128,
+        currency: Symbol,
+        inputs: Vec<MilestoneInput>,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env, &admin)?;
+
+        let mut schedule = Self::load_schedule(&env, &award_id)?;
+        if !schedule.active {
+            return Err(ContractError::ScheduleInactive);
+        }
+        let count = schedule.milestones.len();
+        for i in 0..count {
+            if let Some(m) = schedule.milestones.get(i) {
+                if m.released {
+                    return Err(ContractError::ScheduleLockedAfterDisbursement);
+                }
+            }
+        }
+
+        let milestones = Self::build_milestones(&env, total_amount, &inputs)?;
+        schedule.total_amount = total_amount;
+        schedule.currency = currency;
+        schedule.milestones = milestones;
+        schedule.version = schedule
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
+        schedule.amended_at = env.ledger().timestamp();
+        Self::put_schedule(&env, &schedule);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("MSAMD"),), (award_id,));
+        Ok(())
+    }
+
+    pub fn get_schedule(
+        env: Env,
+        award_id: BytesN<32>,
+    ) -> Result<MilestoneSchedule, ContractError> {
+        let key = DataKey::Schedule(award_id);
+        let schedule: MilestoneSchedule = env
             .storage()
             .persistent()
             .get(&key)
-            .ok_or(ContractError::MilestoneNotFound)?;
-
-        milestone.status = status;
-        env.storage().persistent().set(&key, &milestone);
+            .ok_or(ContractError::ScheduleNotFound)?;
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-
-        env.events()
-            .publish((symbol_short!("MSTAT"),), (program_id, milestone_id, status));
-        Ok(())
+        Ok(schedule)
     }
 
     pub fn get_milestone(
         env: Env,
-        program_id: BytesN<32>,
-        milestone_id: u64,
+        award_id: BytesN<32>,
+        index: u32,
     ) -> Result<Milestone, ContractError> {
-        Self::load_milestone(&env, &program_id, milestone_id)
+        let schedule = Self::get_schedule(env, award_id)?;
+        schedule
+            .milestones
+            .get(index)
+            .ok_or(ContractError::MilestoneIndexOutOfRange)
     }
 
-    // ── submitter / verifier allowlists ───────────────────────────────────
+    // ── #1093 — verification and release ─────────────────────────────────
 
-    /// Admin-only: authorize `submitter` to submit evidence on a
-    /// recipient's behalf (a "trusted system").
-    pub fn add_submitter(
+    /// Admin-only: mark a milestone verified, enabling its release.
+    pub fn verify_milestone(
         env: Env,
         admin: Address,
-        submitter: Address,
+        award_id: BytesN<32>,
+        index: u32,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
-        let key = DataKey::Submitter(submitter);
-        env.storage().persistent().set(&key, &true);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        let mut schedule = Self::load_schedule(&env, &award_id)?;
+        if !schedule.active {
+            return Err(ContractError::ScheduleInactive);
+        }
+        let mut milestone = schedule
+            .milestones
+            .get(index)
+            .ok_or(ContractError::MilestoneIndexOutOfRange)?;
+        if milestone.verified {
+            return Err(ContractError::MilestoneAlreadyVerified);
+        }
+        milestone.verified = true;
+        schedule.milestones.set(index, milestone);
+        Self::put_schedule(&env, &schedule);
+
+        env.events()
+            .publish((soroban_sdk::symbol_short!("MSVRF"),), (award_id, index));
         Ok(())
     }
 
-    pub fn remove_submitter(
+    /// Admin-only: release a verified milestone's funds. Milestones must be
+    /// released in schedule order, and each can be released only once, so
+    /// the schedule is a faithful, monotonic disbursement plan.
+    pub fn release_milestone(
         env: Env,
         admin: Address,
-        submitter: Address,
+        award_id: BytesN<32>,
+        index: u32,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Submitter(submitter), &false);
-        Ok(())
-    }
 
-    pub fn is_authorized_submitter(env: Env, submitter: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Submitter(submitter))
-            .unwrap_or(false)
-    }
-
-    /// Admin-only: authorize `verifier` to decide evidence.
-    pub fn add_verifier(
-        env: Env,
-        admin: Address,
-        verifier: Address,
-    ) -> Result<(), ContractError> {
-        Self::require_admin(&env, &admin)?;
-        let key = DataKey::Verifier(verifier);
-        env.storage().persistent().set(&key, &true);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-        Ok(())
-    }
-
-    pub fn remove_verifier(
-        env: Env,
-        admin: Address,
-        verifier: Address,
-    ) -> Result<(), ContractError> {
-        Self::require_admin(&env, &admin)?;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Verifier(verifier), &false);
-        Ok(())
-    }
-
-    pub fn is_authorized_verifier(env: Env, verifier: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Verifier(verifier))
-            .unwrap_or(false)
-    }
-
-    // ── #1094 — submit milestone evidence ─────────────────────────────────
-
-    /// Submit privacy-minimized evidence against an active milestone.
-    ///
-    /// Authorization is exact: the caller must be `recipient` itself, or an
-    /// admin-allowlisted trusted submitter acting on the recipient's behalf.
-    ///
-    /// Evidence is versioned per `(program_id, milestone_id, recipient)`.
-    /// Re-submitting the *same* `data_hash` as the current version is
-    /// idempotent — it returns that version and changes nothing (no new
-    /// version, no event), so a retried call cannot create a duplicate.
-    /// Submitting a different hash creates the next version.
-    pub fn submit_evidence(
-        env: Env,
-        submitter: Address,
-        recipient: Address,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-        data_hash: BytesN<32>,
-    ) -> Result<u32, ContractError> {
-        submitter.require_auth();
-
-        let milestone = Self::load_milestone(&env, &program_id, milestone_id)?;
-        if milestone.status != MilestoneStatus::Active {
-            return Err(ContractError::MilestoneNotActive);
+        let mut schedule = Self::load_schedule(&env, &award_id)?;
+        if !schedule.active {
+            return Err(ContractError::ScheduleInactive);
         }
 
-        if submitter != recipient && !Self::is_authorized_submitter(env.clone(), submitter.clone())
-        {
-            return Err(ContractError::NotAuthorizedSubmitter);
+        let mut milestone = schedule
+            .milestones
+            .get(index)
+            .ok_or(ContractError::MilestoneIndexOutOfRange)?;
+        if milestone.released {
+            return Err(ContractError::MilestoneAlreadyReleased);
+        }
+        if !milestone.verified {
+            return Err(ContractError::MilestoneNotVerified);
         }
 
-        let version_key = DataKey::EvidenceVersion(
-            program_id.clone(),
-            milestone_id,
-            recipient.clone(),
-        );
-        let latest: u32 = env
-            .storage()
-            .persistent()
-            .get(&version_key)
-            .unwrap_or(0);
-
-        // Idempotent re-submission of the current version.
-        if latest > 0 {
-            let existing: EvidenceRecord = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Evidence(
-                    program_id.clone(),
-                    milestone_id,
-                    recipient.clone(),
-                    latest,
-                ))
-                .ok_or(ContractError::EvidenceNotFound)?;
-            if existing.data_hash == data_hash {
-                return Ok(latest);
+        // Every earlier milestone must already be released.
+        for j in 0..index {
+            let earlier = schedule
+                .milestones
+                .get(j)
+                .ok_or(ContractError::MilestoneIndexOutOfRange)?;
+            if !earlier.released {
+                return Err(ContractError::OutOfOrderRelease);
             }
         }
 
-        let version = latest
-            .checked_add(1)
-            .ok_or(ContractError::VersionOverflow)?;
+        milestone.released = true;
+        schedule.milestones.set(index, milestone);
+        Self::put_schedule(&env, &schedule);
 
-        let now = env.ledger().timestamp();
-        let record = EvidenceRecord {
-            program_id: program_id.clone(),
-            milestone_id,
-            recipient: recipient.clone(),
-            version,
-            data_hash,
-            submitted_by: submitter.clone(),
-            submitted_at: now,
-            status: EvidenceStatus::Pending,
-            decided: false,
-            decided_by: submitter,
-            decided_at: 0,
-            reason_code: ReasonCode::NotReviewed,
-        };
-
-        let evidence_key =
-            DataKey::Evidence(program_id.clone(), milestone_id, recipient.clone(), version);
-        env.storage().persistent().set(&evidence_key, &record);
-        env.storage()
-            .persistent()
-            .extend_ttl(&evidence_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-
-        env.storage().persistent().set(&version_key, &version);
-        env.storage()
-            .persistent()
-            .extend_ttl(&version_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-
-        env.events().publish(
-            (symbol_short!("EVSUBMIT"),),
-            (program_id, milestone_id, recipient, version),
-        );
-
-        Ok(version)
-    }
-
-    pub fn latest_evidence_version(
-        env: Env,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-        recipient: Address,
-    ) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::EvidenceVersion(program_id, milestone_id, recipient))
-            .unwrap_or(0)
-    }
-
-    pub fn get_evidence(
-        env: Env,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-        recipient: Address,
-        version: u32,
-    ) -> Result<EvidenceRecord, ContractError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Evidence(program_id, milestone_id, recipient, version))
-            .ok_or(ContractError::EvidenceNotFound)
-    }
-
-    // ── #1095 — verify milestone evidence ─────────────────────────────────
-
-    fn is_coherent(decision: VerificationDecision, reason: ReasonCode) -> bool {
-        use ReasonCode::*;
-        use VerificationDecision::*;
-        matches!(
-            (decision, reason),
-            (Approved, MeetsCriteria)
-                | (
-                    Rejected | ChangesRequested,
-                    InsufficientEvidence | EvidenceMismatch | OutsideScope
-                )
-        )
-    }
-
-    /// Decide a specific evidence version. Only an admin-allowlisted
-    /// verifier may call this, and a verifier who is the evidence's
-    /// recipient or submitter is rejected as a conflict of interest.
-    ///
-    /// Each version is decidable at most once (`AlreadyDecided` on any
-    /// retry), which is what guarantees an approval emits **at most one**
-    /// payment-eligibility event. A changed decision on the same recipient
-    /// requires submitting a new evidence version, preserving history.
-    ///
-    /// `reason` must be coherent with `decision`: `Approved` requires
-    /// `MeetsCriteria`; `Rejected`/`ChangesRequested` require one of
-    /// `InsufficientEvidence`, `EvidenceMismatch`, or `OutsideScope`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn verify_evidence(
-        env: Env,
-        verifier: Address,
-        program_id: BytesN<32>,
-        milestone_id: u64,
-        recipient: Address,
-        version: u32,
-        decision: VerificationDecision,
-        reason: ReasonCode,
-    ) -> Result<(), ContractError> {
-        verifier.require_auth();
-
-        if !Self::is_authorized_verifier(env.clone(), verifier.clone()) {
-            return Err(ContractError::NotAuthorizedVerifier);
-        }
-        if !Self::is_coherent(decision, reason) {
-            return Err(ContractError::InvalidReasonCode);
-        }
-
-        let key = DataKey::Evidence(
-            program_id.clone(),
-            milestone_id,
-            recipient.clone(),
-            version,
-        );
-        let mut record: EvidenceRecord = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(ContractError::EvidenceNotFound)?;
-
-        // Conflict of interest: the verifier cannot vouch for their own
-        // submission, nor decide evidence belonging to themselves.
-        if verifier == record.submitted_by || verifier == record.recipient {
-            return Err(ContractError::VerifierConflict);
-        }
-
-        if record.decided || record.status != EvidenceStatus::Pending {
-            return Err(ContractError::AlreadyDecided);
-        }
-
-        let status = match decision {
-            VerificationDecision::Approved => EvidenceStatus::Approved,
-            VerificationDecision::Rejected => EvidenceStatus::Rejected,
-            VerificationDecision::ChangesRequested => EvidenceStatus::ChangesRequested,
-        };
-
-        let now = env.ledger().timestamp();
-        record.status = status;
-        record.decided = true;
-        record.decided_by = verifier.clone();
-        record.decided_at = now;
-        record.reason_code = reason;
-
-        env.storage().persistent().set(&key, &record);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-
-        env.events().publish(
-            (symbol_short!("EVDECID"),),
-            (program_id.clone(), milestone_id, recipient.clone(), version, status, reason),
-        );
-
-        // Approval is the one decision that makes an installment payable —
-        // emitted exactly once per version, since a decided version is terminal.
-        if status == EvidenceStatus::Approved {
-            env.events().publish(
-                (symbol_short!("EVPASS"),),
-                (program_id, milestone_id, recipient, version),
-            );
-        }
-
+        env.events()
+            .publish((soroban_sdk::symbol_short!("MSREL"),), (award_id, index));
         Ok(())
+    }
+
+    /// Authoritative total already released across the schedule.
+    pub fn released_total(env: Env, award_id: BytesN<32>) -> Result<i128, ContractError> {
+        let schedule = Self::get_schedule(env, award_id)?;
+        let mut total: i128 = 0;
+        for i in 0..schedule.milestones.len() {
+            if let Some(m) = schedule.milestones.get(i) {
+                if m.released {
+                    total = total
+                        .checked_add(m.amount)
+                        .ok_or(ContractError::InvalidAmount)?;
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    /// Authoritative amount still to be released.
+    pub fn remaining_amount(env: Env, award_id: BytesN<32>) -> Result<i128, ContractError> {
+        let schedule = Self::get_schedule(env.clone(), award_id)?;
+        let released = Self::released_total(env, schedule.award_id.clone())?;
+        schedule
+            .total_amount
+            .checked_sub(released)
+            .ok_or(ContractError::InvalidAmount)
     }
 
     pub fn version(_env: Env) -> u32 {

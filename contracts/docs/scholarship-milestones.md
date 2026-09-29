@@ -1,98 +1,87 @@
 # Scholarship Milestones Contract
 
-- Status: Implemented (partial — see Scope)
+- Status: Implemented
 - Owner: Scholarships On-chain working group
-- Related issues: #1094 (submit milestone evidence), #1095 (verify
-  milestone evidence)
+- Related issues: #1093 (milestone-based disbursement schedules)
+- Depends on / relates to: ADR 0002 (`docs/adr/0002-scholarships-on-chain-boundaries.md`),
+  `contracts/scholarship-awards` (awards reference a schedule by ID)
 
 ## Scope
 
-This contract (`contracts/scholarship-milestones`) implements two of the
-"Scholarships On-chain/Milestones" epic's behaviors:
+This contract (`contracts/scholarship-milestones`) implements the
+"Scholarships On-chain/Milestones" epic's behavior (#1093): split an award
+into enrollment, attendance, coursework, completion, or custom verified
+milestones, and release them in order once verified.
 
-- **#1094 — Submit milestone evidence.** `submit_evidence()` records a
-  caller-supplied `data_hash: BytesN<32>` — an integrity commitment over
-  off-chain evidence — against a milestone that is currently `Active`.
-  Evidence is keyed and **versioned** by `(program_id, milestone_id,
-  recipient)`: a submission that differs from the current version creates
-  version N+1, and re-submitting the *exact same* `data_hash` is
-  idempotent — it returns the existing version and writes nothing, so a
-  retried call can never create a duplicate. Authorization is exact: the
-  caller must be the `recipient` themselves, or an admin-allowlisted
-  trusted submitter acting on the recipient's behalf.
-- **#1095 — Verify milestone evidence.** `verify_evidence()` lets an
-  admin-allowlisted verifier decide one specific evidence version as
-  `Approved`, `Rejected`, or `ChangesRequested`, each carrying an explicit
-  `ReasonCode`. A verifier who is the evidence's `recipient` or
-  `submitted_by` is rejected with `VerifierConflict`. Each version is
-  decidable **at most once** (`AlreadyDecided` on any retry), which is what
-  guarantees an approval emits at most one payment-eligibility event
-  (`EVPASS`); every decision is stored on the version and emitted as
-  `EVDECID`.
+- **Percentages and amounts reconcile to the award.** Percentages are
+  basis points and must sum to exactly 10,000. `Milestone` amounts are
+  *derived* from those percentages against the schedule's `total_amount`;
+  the final milestone absorbs the integer-division remainder, so the
+  derived amounts always sum exactly to the award even when percentages do
+  not divide evenly. Callers never supply amounts, which removes the
+  possibility of a mismatched amount that doesn't reconcile.
+- **Dates are ordered.** Milestone dates must be strictly increasing
+  (`DatesNotOrdered` otherwise).
+- **Immutable after activation except governed amendment.** A schedule is
+  defined inactive (`define_schedule`), then activated exactly once
+  (`activate_schedule`). While inactive it can only be defined once (a
+  second define is `ScheduleAlreadyExists`). Once active, every change must
+  go through `amend_schedule`, which is admin-only, bumps the schedule
+  `version`, records the amend timestamp, and is refused once any milestone
+  has been released (`ScheduleLockedAfterDisbursement`), so an amendment
+  can never rewrite already-disbursed history.
+- **Verification and ordered release.** `verify_milestone` marks a
+  milestone verifiable; `release_milestone` releases it and enforces strict
+  schedule order and one-release-only, so the schedule is a faithful,
+  monotonic disbursement plan. `released_total` / `remaining_amount` report
+  the authoritative progress.
 
-`ReasonCode` is a closed enum (`MeetsCriteria`, `InsufficientEvidence`,
-`EvidenceMismatch`, `OutsideScope`) and must be coherent with the decision:
-`Approved` requires `MeetsCriteria`; the other decisions require one of the
-three negative codes. An incoherent pair is rejected with
-`InvalidReasonCode` before any state changes.
-
-**Not implemented here** (tracked separately / out of scope): actually
-moving funds is the disbursements contract's job
-(`scholarship-disbursements`, issues #1096/#1097) — this contract only
-records the decision and the eligibility signal. There is no "assignment"
-step distinct from the admin-managed verifier allowlist; a per-milestone
-verifier roster is a natural follow-up if the flat allowlist proves too
-coarse.
+**Not implemented here:** actually moving funds. Releasing a milestone
+records the release and its amount; executing a transfer is follow-up work
+and, per ADR 0002's disbursement non-goal, must be reviewed against the
+existing payment contracts first.
 
 ## Privacy
 
-The contract never stores the evidence itself. On-chain state only ever
-contains stable identifiers (addresses, `program_id`, `milestone_id`),
-a `BytesN<32>` integrity commitment (`data_hash`) over off-chain content,
-status/reason enums, and timestamps. Where evidence is sensitive, it is
-encrypted off-chain before its hash is committed. `ReasonCode` is a bounded
-enum rather than free text precisely so a verifier cannot leak sensitive
-detail through a "reason" string; the real rationale stays off-chain. No
-contract code path accepts or stores evidence content.
+On-chain storage never holds milestone labels or descriptions. A milestone
+carries only a `label_hash: BytesN<32>` integrity commitment over its
+off-chain text. Amounts, percentages, and dates are non-sensitive plan
+metadata.
 
 ## Ownership
 
-The admin (`initialize`) exclusively controls the milestone registry
-(`create_milestone` / `set_milestone_status`) and both allowlists
-(submitters and verifiers). A recipient can only submit evidence for
-themselves; a trusted submitter can submit on a recipient's behalf only
-while allowlisted. Only an allowlisted verifier can decide evidence, and
-never evidence they submitted or that is their own. Removing a verifier
-blocks *new* decisions from them; it does not retroactively change
-decisions they already recorded — those remain part of the audit history.
+The admin (`initialize`) exclusively defines, activates, amends, verifies,
+and releases. There is no recipient-facing entry point in this contract —
+recipients interact with `scholarship-awards`, which references a schedule
+by `award_id`. Verification is a trust decision made by the admin (or, in
+future, a delegated verifier role); the contract records it but cannot
+itself judge whether a milestone's real-world condition was met.
 
 ## Migration
 
-New contract, no prior on-chain state. Setup order: `initialize` →
-`create_milestone` → `add_submitter`/`add_verifier` as needed. A milestone
-must exist and be `Active` before `submit_evidence` succeeds
-(`MilestoneNotFound` / `MilestoneNotActive` otherwise). There is no bulk
-import path from an off-chain system in this pass.
+New contract, no prior on-chain state. After deployment the admin must
+`initialize`, then define a schedule keyed by the award ID it splits before
+`scholarship-awards`' `create_award` can reference it. There is no
+cross-contract validation that the referenced `award_id` exists in the
+awards contract (see Operational impact).
 
 ## Operational impact
 
-- **Decisions are terminal per version.** A changed decision (e.g.
-  `ChangesRequested` → `Approved`) requires submitting a new evidence
-  version; the old version and its decision are preserved. This is the
-  mechanism behind "approval triggers at most one payment eligibility
-  event" — the `EVPASS` event is emitted only on the transition of a
-  `Pending` version to `Approved`, and a version can make that transition
-  at most once.
-- **Closing a milestone does not erase evidence.** `set_milestone_status`
-  only gates *new* submissions; existing versions and decisions remain
-  readable.
-- **Reason codes are coarse by design.** An off-chain system that needs
-  richer rationale should store it off-chain alongside the version; the
-  enum on-chain is an auditable category, not the full explanation.
-- **Storage/TTL/events** follow the sibling scholarship contracts
-  (persistent storage, ~1-year TTL bump on write, `MSTONE`/`MSTAT`/
-  `EVSUBMIT`/`EVDECID`/`EVPASS` events).
-- **Cross-contract wiring** (e.g. `scholarship-programs` budget accounting
-  reacting to `EVPASS`, or an indexer turning it into an intent in
-  `scholarship-disbursements`) is a follow-up, consistent with ADR 0002's
-  "cross-contract enforcement" non-goal.
+- **Storage/TTL.** One schedule record per award, `persistent` with a
+  ~1-year TTL bump. Milestone count is bounded (`MAX_MILESTONES = 16`), so
+  no record can grow without bound — consistent with ADR 0002's bounded-
+  storage invariant.
+- **Events.** `MSDEF`, `MSACT`, `MSAMD`, `MSVRF`, and `MSREL` carry the
+  award ID (and milestone index where applicable) for off-chain indexing.
+- **Cross-contract wiring.** This contract validates percentages, dates,
+  and internal reconciliation against the `total_amount` supplied by the
+  admin — it does not read the award's `amount` from
+  `contracts/scholarship-awards`. An admin could therefore define a
+  schedule whose `total_amount` differs from the award it references.
+  Reconciling the two (e.g. the awards contract resolving a schedule's
+  total) is follow-up integration, in line with ADR 0002's cross-contract
+  non-goal. Off-chain tooling should assert `schedule.total_amount ==
+  award.amount` before accepting a plan.
+- **Verifier trust.** `verify_milestone` is admin-gated today; a future
+  delegated verifier role (per ADR 0002's sponsor-org roles work) would
+  replace this single-admin check without changing the release semantics.
