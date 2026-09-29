@@ -79,7 +79,7 @@ jobs:
       # the open-pr job (and any human) can retrieve it without needing a
       # direct push to main.
       - name: Upload deployment artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: testnet-deployment-${{ github.run_number }}
           path: deployments/testnet.json
