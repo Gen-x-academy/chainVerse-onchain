@@ -1,5 +1,336 @@
 {
   "contracts": {
+    "scholarship-access-control": {
+      "events": {
+        "PERMSET": 4,
+        "ROLEGRT": 3,
+        "ROLERVK": 3
+      },
+      "functions": {
+        "authorize": {
+          "params": [
+            "account: Address",
+            "program_id: BytesN<32>",
+            "role: Role",
+            "resource: Resource",
+            "operation: Operation"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "can": {
+          "params": [
+            "resource: Resource",
+            "role: Role",
+            "operation: Operation"
+          ],
+          "returns": "bool"
+        },
+        "global_scope": {
+          "params": [],
+          "returns": "BytesN<32>"
+        },
+        "grant_role": {
+          "params": [
+            "admin: Address",
+            "account: Address",
+            "program_id: BytesN<32>",
+            "role: Role"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "has_role": {
+          "params": [
+            "account: Address",
+            "program_id: BytesN<32>",
+            "role: Role"
+          ],
+          "returns": "bool"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "require_role": {
+          "params": [
+            "account: Address",
+            "program_id: BytesN<32>",
+            "role: Role"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "revoke_role": {
+          "params": [
+            "admin: Address",
+            "account: Address",
+            "program_id: BytesN<32>",
+            "role: Role"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_permission": {
+          "params": [
+            "admin: Address",
+            "resource: Resource",
+            "role: Role",
+            "operation: Operation",
+            "allowed: bool"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-admin": {
+      "events": {},
+      "functions": {
+        "config_version": {
+          "params": [
+            "kind: ConfigKind",
+            "subject: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<AdminConfig, ContractError>"
+        },
+        "config_version_floor": {
+          "params": [
+            "kind: ConfigKind",
+            "subject: BytesN<32>"
+          ],
+          "returns": "u32"
+        },
+        "flag_version": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment",
+            "version: u32"
+          ],
+          "returns": "Result<FlagConfig, ContractError>"
+        },
+        "flag_version_floor": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment"
+          ],
+          "returns": "u32"
+        },
+        "get_config": {
+          "params": [
+            "kind: ConfigKind",
+            "subject: BytesN<32>"
+          ],
+          "returns": "Result<AdminConfig, ContractError>"
+        },
+        "get_flag": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment"
+          ],
+          "returns": "Result<FlagConfig, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "is_enabled": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment",
+            "cohort: Symbol"
+          ],
+          "returns": "bool"
+        },
+        "list_config": {
+          "params": [
+            "kind: ConfigKind"
+          ],
+          "returns": "Vec<AdminConfig>"
+        },
+        "list_flags": {
+          "params": [
+            "environment: Environment"
+          ],
+          "returns": "Result<Vec<FlagConfig>, ContractError>"
+        },
+        "pin": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment",
+            "workflow: BytesN<32>"
+          ],
+          "returns": "Result<FlagState, ContractError>"
+        },
+        "pinned_state": {
+          "params": [
+            "flag: Flag",
+            "environment: Environment",
+            "workflow: BytesN<32>"
+          ],
+          "returns": "Result<FlagState, ContractError>"
+        },
+        "preview_config": {
+          "params": [
+            "kind: ConfigKind",
+            "a: i128",
+            "b: i128",
+            "ref_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "rollback_config": {
+          "params": [
+            "admin: Address",
+            "kind: ConfigKind",
+            "subject: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "set_config": {
+          "params": [
+            "admin: Address",
+            "kind: ConfigKind",
+            "subject: BytesN<32>",
+            "a: i128",
+            "b: i128",
+            "ref_hash: BytesN<32>",
+            "label: Symbol"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "set_flag": {
+          "params": [
+            "admin: Address",
+            "flag: Flag",
+            "environment: Environment",
+            "state: FlagState",
+            "cohorts: Vec<Symbol>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "tracked_config_keys": {
+          "params": [],
+          "returns": "u64"
+        },
+        "tracked_pins": {
+          "params": [],
+          "returns": "u64"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-aggregate-analytics": {
+      "events": {},
+      "functions": {
+        "create_cohort": {
+          "params": [
+            "caller: Address",
+            "cohort_tag: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "decrement": {
+          "params": [
+            "caller: Address",
+            "cohort_tag: String",
+            "field: MetricField",
+            "delta: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_cohort_metrics": {
+          "params": [
+            "cohort_tag: String"
+          ],
+          "returns": "Result<CohortResult, ContractError>"
+        },
+        "get_metric_definition": {
+          "params": [
+            "key: String"
+          ],
+          "returns": "Option<MetricDefinition>"
+        },
+        "increment": {
+          "params": [
+            "caller: Address",
+            "cohort_tag: String",
+            "field: MetricField",
+            "delta: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "init": {
+          "params": [
+            "admin: Address",
+            "recorder: Address",
+            "k_threshold: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "k_threshold": {
+          "params": [],
+          "returns": "u64"
+        },
+        "pause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "record_disbursements": {
+          "params": [
+            "caller: Address",
+            "batch: DisbursementBatch"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_k_threshold": {
+          "params": [
+            "caller: Address",
+            "new_k: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_recorder": {
+          "params": [
+            "caller: Address",
+            "new_recorder: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "unpause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "upgrade": {
+          "params": [
+            "caller: Address",
+            "new_wasm_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "upsert_metric_definition": {
+          "params": [
+            "caller: Address",
+            "key: String",
+            "name: String",
+            "definition: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        }
+      }
+    },
     "scholarship-applications": {
       "events": {
         "CONSENT": 3,
@@ -195,8 +526,295 @@
             "applicant: Address",
             "program_id: BytesN<32>",
             "data_hash: BytesN<32>",
-            "form_version: u32",
-            "consent: bool"
+            "form_version: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-awards": {
+      "events": {
+        "AWACC": 3,
+        "AWCAN": 3,
+        "AWCRT": 3,
+        "AWDEC": 2,
+        "AWDIS": 3,
+        "AWEXP": 2,
+        "AWTRM": 3
+      },
+      "functions": {
+        "accept_award": {
+          "params": [
+            "recipient: Address",
+            "award_id: BytesN<32>",
+            "declarations_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "can_disburse": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "cancel_award": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "reason_code: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "create_award": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "program_id: BytesN<32>",
+            "recipient: Address",
+            "amount: i128",
+            "currency: Symbol",
+            "terms_version: u32",
+            "terms_hash: BytesN<32>",
+            "acceptance_deadline: u64",
+            "milestone_schedule_id: Option<BytesN<32>>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "decline_award": {
+          "params": [
+            "recipient: Address",
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "expire_award": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_acceptance": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<AgreementAcceptance, ContractError>"
+        },
+        "get_award": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<Award, ContractError>"
+        },
+        "get_recovery": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "i128"
+        },
+        "get_reservation": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "u32"
+        },
+        "has_active_award": {
+          "params": [
+            "recipient: Address",
+            "program_id: BytesN<32>"
+          ],
+          "returns": "bool"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "is_acceptance_expired": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "record_disbursement": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "amount: i128"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "terminate_award": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "reason_code: u32",
+            "recovery_amount: i128"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-communications": {
+      "events": {
+        "AUDITNEW": 4,
+        "PREFSET": 2,
+        "REMINDCL": 2,
+        "REMINDNW": 6,
+        "TMPLAPPR": 2,
+        "TMPLNEW": 4,
+        "TMPLUPD": 2
+      },
+      "functions": {
+        "approve_template": {
+          "params": [
+            "admin: Address",
+            "template_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "cancel_reminder": {
+          "params": [
+            "user: Address",
+            "reminder_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "check_template_accessibility": {
+          "params": [
+            "template_id: BytesN<32>",
+            "journey_stage: JourneyStage",
+            "required_level: WcagLevel"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "create_template": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "locale: String",
+            "event_type: EventType",
+            "channel: Channel",
+            "subject: String",
+            "body: String",
+            "variables: Vec<TemplateVariable>"
+          ],
+          "returns": "Result<CommunicationTemplate, ContractError>"
+        },
+        "get_accessibility_audit": {
+          "params": [
+            "audit_id: BytesN<32>"
+          ],
+          "returns": "Result<AccessibilityAudit, ContractError>"
+        },
+        "get_preferences": {
+          "params": [
+            "user: Address",
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<CommunicationPreferences, ContractError>"
+        },
+        "get_reminder": {
+          "params": [
+            "reminder_id: BytesN<32>"
+          ],
+          "returns": "Result<Reminder, ContractError>"
+        },
+        "get_template": {
+          "params": [
+            "template_id: BytesN<32>"
+          ],
+          "returns": "Result<CommunicationTemplate, ContractError>"
+        },
+        "get_template_version": {
+          "params": [
+            "template_id: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<CommunicationTemplate, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "is_channel_enabled": {
+          "params": [
+            "user: Address",
+            "program_id: BytesN<32>",
+            "event_type: EventType",
+            "channel: Channel"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "mark_reminder_sent": {
+          "params": [
+            "admin: Address",
+            "reminder_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "record_accessibility_audit": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "template_id: Option<BytesN<32>>",
+            "journey_stage: JourneyStage",
+            "wcag_level: WcagLevel",
+            "passed_checks: Vec<String>",
+            "failed_checks: Vec<String>",
+            "warnings: Vec<String>"
+          ],
+          "returns": "Result<AccessibilityAudit, ContractError>"
+        },
+        "schedule_reminder": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "user: Address",
+            "event_type: EventType",
+            "channel: Channel",
+            "template_id: BytesN<32>",
+            "scheduled_at: u64",
+            "timezone_offset_minutes: i32"
+          ],
+          "returns": "Result<Reminder, ContractError>"
+        },
+        "set_preferences": {
+          "params": [
+            "user: Address",
+            "program_id: BytesN<32>",
+            "channels: Map<EventType, Vec<Channel>>",
+            "quiet_hours_start: Option<u8>",
+            "quiet_hours_end: Option<u8>",
+            "timezone_offset_minutes: i32",
+            "mandatory_only: bool"
+          ],
+          "returns": "Result<CommunicationPreferences, ContractError>"
+        },
+        "update_template": {
+          "params": [
+            "admin: Address",
+            "template_id: BytesN<32>",
+            "subject: Option<String>",
+            "body: Option<String>",
+            "variables: Option<Vec<TemplateVariable>>"
+          ],
+          "returns": "Result<CommunicationTemplate, ContractError>"
+        },
+        "validate_template_variables": {
+          "params": [
+            "template_id: BytesN<32>",
+            "variables: Map<String, String>"
           ],
           "returns": "Result<(), ContractError>"
         },
@@ -247,6 +865,423 @@
             "caller: Address",
             "program_id: BytesN<32>",
             "to: ProgramStatus"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-dashboards": {
+      "events": {},
+      "functions": {
+        "get_due_payments": {
+          "params": [
+            "caller: Address",
+            "before: Option<u64>"
+          ],
+          "returns": "Result<Vec<DuePaymentView>, ContractError>"
+        },
+        "get_failed_payments": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<Vec<FailedPaymentView>, ContractError>"
+        },
+        "get_finance_ops_dashboard": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<FinanceOpsDashboard, ContractError>"
+        },
+        "get_reconciliation_items": {
+          "params": [
+            "caller: Address",
+            "program_id: Option<BytesN<32>>"
+          ],
+          "returns": "Result<Vec<ReconciliationItem>, ContractError>"
+        },
+        "get_reviewer_assignments": {
+          "params": [
+            "reviewer: Address"
+          ],
+          "returns": "Result<Vec<ReviewerAssignment>, ContractError>"
+        },
+        "get_reviewer_conflicts": {
+          "params": [
+            "reviewer: Address"
+          ],
+          "returns": "Result<Vec<ConflictView>, ContractError>"
+        },
+        "get_reviewer_workbench": {
+          "params": [
+            "reviewer: Address"
+          ],
+          "returns": "Result<ReviewerDashboard, ContractError>"
+        },
+        "get_sponsor_dashboard": {
+          "params": [
+            "sponsor_id: BytesN<32>",
+            "caller: Address"
+          ],
+          "returns": "Result<SponsorDashboard, ContractError>"
+        },
+        "get_sponsor_program_detail": {
+          "params": [
+            "sponsor_id: BytesN<32>",
+            "program_id: BytesN<32>",
+            "caller: Address"
+          ],
+          "returns": "Result<SponsorProgramView, ContractError>"
+        },
+        "get_student_applications": {
+          "params": [
+            "student: Address"
+          ],
+          "returns": "Result<Vec<StudentApplicationView>, ContractError>"
+        },
+        "get_student_awards": {
+          "params": [
+            "student: Address"
+          ],
+          "returns": "Result<Vec<AwardView>, ContractError>"
+        },
+        "get_student_dashboard": {
+          "params": [
+            "student: Address"
+          ],
+          "returns": "Result<StudentDashboard, ContractError>"
+        },
+        "get_student_info_requests": {
+          "params": [
+            "student: Address"
+          ],
+          "returns": "Result<Vec<InfoRequestView>, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "invalidate_cache": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-decisions": {
+      "events": {
+        "APFIN": 3,
+        "APPEAL": 2,
+        "APVOTE": 4,
+        "AWACC": 3,
+        "CMEMBR": 1,
+        "CQUORUM": 1,
+        "DECFIN": 3,
+        "DECOPEN": 2,
+        "DECRSV": 3,
+        "DECVOTE": 4,
+        "PROGREG": 1,
+        "RSVEXP": 2,
+        "RSVREL": 2
+      },
+      "functions": {
+        "accept_award": {
+          "params": [
+            "applicant: Address",
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "add_member": {
+          "params": [
+            "admin: Address",
+            "member: Address",
+            "role: CommitteeRole"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "expire_reservation": {
+          "params": [
+            "caller: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "file_appeal": {
+          "params": [
+            "applicant: Address",
+            "program_id: BytesN<32>",
+            "grounds_hash: BytesN<32>",
+            "evidence_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "finalize_appeal": {
+          "params": [
+            "caller: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "finalize_decision": {
+          "params": [
+            "caller: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_active_member_count": {
+          "params": [],
+          "returns": "u32"
+        },
+        "get_appeal": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<Appeal, ContractError>"
+        },
+        "get_decision": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<Decision, ContractError>"
+        },
+        "get_member_role": {
+          "params": [
+            "member: Address"
+          ],
+          "returns": "Result<CommitteeRole, ContractError>"
+        },
+        "get_program_config": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<DecisionProgramConfig, ContractError>"
+        },
+        "get_quorum": {
+          "params": [],
+          "returns": "u32"
+        },
+        "get_reservation": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<Reservation, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "is_member": {
+          "params": [
+            "member: Address"
+          ],
+          "returns": "bool"
+        },
+        "open_decision": {
+          "params": [
+            "chair: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "evidence_version: u32",
+            "evidence_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "recuse": {
+          "params": [
+            "member: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "register_program": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "total_budget: i128",
+            "per_award_amount: i128",
+            "reservation_ttl: u64",
+            "appeal_window: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "release_reservation": {
+          "params": [
+            "caller: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "remove_member": {
+          "params": [
+            "admin: Address",
+            "member: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_program_active": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "active: bool"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_quorum": {
+          "params": [
+            "admin: Address",
+            "quorum: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        },
+        "vote": {
+          "params": [
+            "member: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "choice: VoteChoice"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "vote_appeal": {
+          "params": [
+            "member: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "choice: VoteChoice"
+          ],
+          "returns": "Result<(), ContractError>"
+        }
+      }
+    },
+    "scholarship-disbursement-enhancements": {
+      "events": {
+        "ASSETCFG": 2,
+        "BATCHEXE": 4,
+        "RECVRYCM": 2,
+        "RECVRYNW": 3,
+        "TXNEW": 3,
+        "TXSTATE": 3
+      },
+      "functions": {
+        "complete_recovery": {
+          "params": [
+            "admin: Address",
+            "recovery_id: BytesN<32>",
+            "status: RecoveryStatus",
+            "tx_hash: Option<BytesN<32>>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "configure_asset": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "asset_type: AssetType",
+            "asset_code: String",
+            "issuer: Option<Address>",
+            "decimals: u32",
+            "trustline_required: bool"
+          ],
+          "returns": "Result<AssetConfig, ContractError>"
+        },
+        "create_transaction_record": {
+          "params": [
+            "creator: Address",
+            "intent_id: BytesN<32>",
+            "tx_hash: Option<BytesN<32>>",
+            "envelope_xdr: Option<Bytes>",
+            "required_confirmations: u32"
+          ],
+          "returns": "Result<TransactionRecord, ContractError>"
+        },
+        "execute_batch": {
+          "params": [
+            "executor: Address",
+            "program_id: BytesN<32>",
+            "intent_ids: Vec<BytesN<32>>"
+          ],
+          "returns": "Result<BatchExecutionRecord, ContractError>"
+        },
+        "get_asset_config": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<AssetConfig, ContractError>"
+        },
+        "get_recovery_attempt": {
+          "params": [
+            "recovery_id: BytesN<32>"
+          ],
+          "returns": "Result<RecoveryAttempt, ContractError>"
+        },
+        "get_transaction": {
+          "params": [
+            "tx_id: BytesN<32>"
+          ],
+          "returns": "Result<TransactionRecord, ContractError>"
+        },
+        "get_transactions_for_intent": {
+          "params": [
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<Vec<TransactionRecord>, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "initiate_recovery": {
+          "params": [
+            "admin: Address",
+            "transaction_id: BytesN<32>",
+            "recovery_type: RecoveryType",
+            "retry_envelope_xdr: Option<Bytes>"
+          ],
+          "returns": "Result<RecoveryAttempt, ContractError>"
+        },
+        "update_transaction_state": {
+          "params": [
+            "admin: Address",
+            "tx_id: BytesN<32>",
+            "new_state: TransactionState",
+            "tx_hash: Option<BytesN<32>>",
+            "confirmations: u32",
+            "failure_reason: Option<String>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "validate_intent_asset": {
+          "params": [
+            "intent_id: BytesN<32>",
+            "program_id: BytesN<32>"
           ],
           "returns": "Result<(), ContractError>"
         },
@@ -396,6 +1431,112 @@
         }
       }
     },
+    "scholarship-discovery-notifications": {
+      "events": {
+        "NOTIFEVT": 4,
+        "PAGEGEN": 3
+      },
+      "functions": {
+        "dismiss_recommendation": {
+          "params": [
+            "student: Address",
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "emit_notification": {
+          "params": [
+            "admin: Address",
+            "program_id: Option<BytesN<32>>",
+            "recipient: Option<Address>",
+            "event_type: NotificationEventType",
+            "title: String",
+            "body: String",
+            "reference_id: Option<BytesN<32>>",
+            "reference_type: Option<String>",
+            "priority: NotificationPriority"
+          ],
+          "returns": "Result<NotificationEvent, ContractError>"
+        },
+        "generate_program_page": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "canonical_url: String",
+            "title: String",
+            "description: String",
+            "sponsor_name: String",
+            "sponsor_id: BytesN<32>",
+            "currency: Symbol",
+            "funding_type: FundingType",
+            "max_award: i128",
+            "min_award: i128",
+            "deadline: u64",
+            "timezone_offset_minutes: i32",
+            "eligibility_summary: String",
+            "application_window: ProgramWindow",
+            "award_budget: AwardBudget",
+            "is_published: bool",
+            "is_private: bool"
+          ],
+          "returns": "Result<PublicProgramPage, ContractError>"
+        },
+        "get_filter_options": {
+          "params": [],
+          "returns": "Result<FilterOptions, ContractError>"
+        },
+        "get_notification_event": {
+          "params": [
+            "event_id: BytesN<32>"
+          ],
+          "returns": "Result<NotificationEvent, ContractError>"
+        },
+        "get_program_page": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<PublicProgramPage, ContractError>"
+        },
+        "get_recommendations": {
+          "params": [
+            "student: Address"
+          ],
+          "returns": "Result<MatchingResult, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "search_programs": {
+          "params": [
+            "params: SearchParams"
+          ],
+          "returns": "Result<SearchResult, ContractError>"
+        },
+        "update_student_profile": {
+          "params": [
+            "student: Address",
+            "interests: Vec<String>",
+            "academic_level: String",
+            "field_of_study: String",
+            "gpa: Option<String>",
+            "location: String",
+            "demographic_data: Map<String, String>"
+          ],
+          "returns": "Result<StudentProfile, ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-e2e": {
+      "events": {},
+      "functions": {}
+    },
     "scholarship-eligibility": {
       "events": {
         "ATTEST": 3,
@@ -501,52 +1642,479 @@
         }
       }
     },
-    "scholarship-milestones": {
+    "scholarship-fairness-review": {
+      "events": {},
+      "functions": {
+        "accept_admin": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "activate_version": {
+          "params": [
+            "caller: Address",
+            "version: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "active_version": {
+          "params": [],
+          "returns": "u64"
+        },
+        "get_version_summary": {
+          "params": [
+            "version: u64"
+          ],
+          "returns": "Result<RuleVersionSummary, ContractError>"
+        },
+        "init": {
+          "params": [
+            "admin: Address",
+            "reviewer: Address",
+            "high_risk_approver: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "next_version_preview": {
+          "params": [],
+          "returns": "u64"
+        },
+        "pause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "paused": {
+          "params": [],
+          "returns": "bool"
+        },
+        "propose_admin": {
+          "params": [
+            "caller: Address",
+            "new_admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "propose_rule_version": {
+          "params": [
+            "caller: Address",
+            "risk_level: RiskLevel",
+            "rule_payload: Bytes",
+            "change_summary: String",
+            "test_cohort_tag: String",
+            "replaces_version: u64"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "record_review": {
+          "params": [
+            "caller: Address",
+            "version: u64",
+            "outcome: ReviewOutcome",
+            "notes: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "rollback_to": {
+          "params": [
+            "caller: Address",
+            "target_version: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "second_approve": {
+          "params": [
+            "caller: Address",
+            "version: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_high_risk_approver": {
+          "params": [
+            "caller: Address",
+            "new_approver: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_reviewer": {
+          "params": [
+            "caller: Address",
+            "new_reviewer: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "unpause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "upgrade": {
+          "params": [
+            "caller: Address",
+            "new_wasm_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        }
+      }
+    },
+    "scholarship-finance": {
       "events": {
-        "EVDECID": 6,
-        "EVPASS": 4,
-        "EVSUBMIT": 4,
-        "MSTAT": 3,
-        "MSTONE": 2
+        "AWARDREC": 3,
+        "DEPOSIT": 4,
+        "FEECFG": 2,
+        "FUNDROUND": 2,
+        "RECEIPT": 4,
+        "RECONCIL": 3,
+        "RECVRYCM": 2,
+        "RECVRYNW": 5,
+        "REFUNDCM": 2,
+        "REFUNDNW": 5,
+        "STMTGEN": 4
       },
       "functions": {
-        "add_submitter": {
+        "calculate_fees": {
           "params": [
-            "admin: Address",
-            "submitter: Address"
+            "program_id: BytesN<32>",
+            "gross_amount: i128"
+          ],
+          "returns": "Result<(i128, i128, i128, i128), ContractError>"
+        },
+        "complete_recovery": {
+          "params": [
+            "caller: Address",
+            "recovery_id: BytesN<32>",
+            "tx_hash: BytesN<32>"
           ],
           "returns": "Result<(), ContractError>"
         },
-        "add_verifier": {
+        "complete_refund": {
           "params": [
-            "admin: Address",
-            "verifier: Address"
+            "caller: Address",
+            "refund_id: BytesN<32>",
+            "tx_hash: BytesN<32>"
           ],
           "returns": "Result<(), ContractError>"
         },
-        "create_milestone": {
+        "configure_fees": {
           "params": [
             "admin: Address",
             "program_id: BytesN<32>",
-            "milestone_id: u64"
+            "platform_fee: FeeBasis",
+            "network_fee_estimate: i128",
+            "fee_currency: soroban_sdk::Symbol"
+          ],
+          "returns": "Result<FeeConfig, ContractError>"
+        },
+        "create_funding_round": {
+          "params": [
+            "admin: Address",
+            "name: soroban_sdk::String",
+            "description: soroban_sdk::String",
+            "target_amount: i128",
+            "asset: BytesN<32>",
+            "start_time: u64",
+            "end_time: u64"
+          ],
+          "returns": "Result<FundingRound, ContractError>"
+        },
+        "create_receipt": {
+          "params": [
+            "admin: Address",
+            "intent_id: BytesN<32>",
+            "tx_hash: BytesN<32>",
+            "network: soroban_sdk::String"
+          ],
+          "returns": "Result<PaymentReceipt, ContractError>"
+        },
+        "generate_statement": {
+          "params": [
+            "caller: Address",
+            "program_id: BytesN<32>",
+            "sponsor_id: BytesN<32>",
+            "period_start: u64",
+            "period_end: u64"
+          ],
+          "returns": "Result<FinancialStatement, ContractError>"
+        },
+        "get_deposit": {
+          "params": [
+            "deposit_id: BytesN<32>"
+          ],
+          "returns": "Result<DepositRecord, ContractError>"
+        },
+        "get_fee_config": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<FeeConfig, ContractError>"
+        },
+        "get_funding_round": {
+          "params": [
+            "round_id: BytesN<32>"
+          ],
+          "returns": "Result<FundingRound, ContractError>"
+        },
+        "get_program_financials": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<ProgramFinancials, ContractError>"
+        },
+        "get_program_ledger": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<ProgramLedger, ContractError>"
+        },
+        "get_receipt": {
+          "params": [
+            "receipt_id: BytesN<32>"
+          ],
+          "returns": "Result<PaymentReceipt, ContractError>"
+        },
+        "get_reconciliation": {
+          "params": [
+            "reconciliation_id: BytesN<32>"
+          ],
+          "returns": "Result<ReconciliationRecord, ContractError>"
+        },
+        "get_recovery": {
+          "params": [
+            "recovery_id: BytesN<32>"
+          ],
+          "returns": "Result<RecoveryRecord, ContractError>"
+        },
+        "get_refund": {
+          "params": [
+            "refund_id: BytesN<32>"
+          ],
+          "returns": "Result<RefundRecord, ContractError>"
+        },
+        "get_statement": {
+          "params": [
+            "statement_id: BytesN<32>"
+          ],
+          "returns": "Result<FinancialStatement, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address",
+            "network_id: BytesN<32>"
           ],
           "returns": "Result<(), ContractError>"
         },
-        "get_evidence": {
+        "initiate_recovery": {
           "params": [
+            "caller: Address",
             "program_id: BytesN<32>",
-            "milestone_id: u64",
-            "recipient: Address",
-            "version: u32"
+            "intent_id: BytesN<32>",
+            "recovery_amount: i128",
+            "reason: RecoveryReason",
+            "legal_basis: soroban_sdk::String"
           ],
-          "returns": "Result<EvidenceRecord, ContractError>"
+          "returns": "Result<RecoveryRecord, ContractError>"
         },
-        "get_milestone": {
+        "initiate_refund": {
           "params": [
+            "caller: Address",
             "program_id: BytesN<32>",
-            "milestone_id: u64"
+            "intent_id: BytesN<32>",
+            "refund_amount: i128",
+            "reason: RefundReason"
           ],
-          "returns": "Result<Milestone, ContractError>"
+          "returns": "Result<RefundRecord, ContractError>"
+        },
+        "reconcile_treasury": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<ReconciliationRecord, ContractError>"
+        },
+        "record_award": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "asset: BytesN<32>",
+            "amount: i128",
+            "reference_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "record_deposit": {
+          "params": [
+            "sponsor: Address",
+            "program_id: Option<BytesN<32>>",
+            "asset: BytesN<32>",
+            "amount: i128",
+            "tx_hash: BytesN<32>",
+            "funding_round_id: Option<BytesN<32>>"
+          ],
+          "returns": "Result<DepositRecord, ContractError>"
+        },
+        "record_disbursement": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "asset: BytesN<32>",
+            "amount: i128",
+            "reference_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "verify_receipt": {
+          "params": [
+            "receipt_id: BytesN<32>"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-fraud-signals": {
+      "events": {},
+      "functions": {
+        "file_appeal": {
+          "params": [
+            "caller: Address",
+            "app_id: String",
+            "appeal_statement: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_signal_full": {
+          "params": [
+            "app_id: String"
+          ],
+          "returns": "Result<FraudSignal, ContractError>"
+        },
+        "get_signal_summary": {
+          "params": [
+            "app_id: String"
+          ],
+          "returns": "Result<FraudSignalSummary, ContractError>"
+        },
+        "init": {
+          "params": [
+            "admin: Address",
+            "detector: Address",
+            "reviewer: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "pause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "paused": {
+          "params": [],
+          "returns": "bool"
+        },
+        "raise_signal": {
+          "params": [
+            "caller: Address",
+            "app_id: String",
+            "category: SignalCategory",
+            "description: String",
+            "evidence_ref: String",
+            "risk_score: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "resolve_signal": {
+          "params": [
+            "caller: Address",
+            "app_id: String",
+            "resolved_status: SignalStatus",
+            "notes: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_detector": {
+          "params": [
+            "caller: Address",
+            "new_detector: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_reviewer": {
+          "params": [
+            "caller: Address",
+            "new_reviewer: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "unpause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "update_signal": {
+          "params": [
+            "caller: Address",
+            "app_id: String",
+            "evidence_ref: String",
+            "risk_score: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "upgrade": {
+          "params": [
+            "caller: Address",
+            "new_wasm_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        }
+      }
+    },
+    "scholarship-idempotency": {
+      "events": {
+        "IDMPNEW": 3
+      },
+      "functions": {
+        "complete_failure": {
+          "params": [
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>",
+            "result_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "complete_success": {
+          "params": [
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>",
+            "result_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "create_key": {
+          "params": [
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>",
+            "ttl_seconds: u64"
+          ],
+          "returns": "Result<IdempotencyRecord, ContractError>"
+        },
+        "get_record": {
+          "params": [
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>"
+          ],
+          "returns": "Result<IdempotencyRecord, ContractError>"
         },
         "initialize": {
           "params": [
@@ -554,11 +2122,93 @@
           ],
           "returns": "Result<(), ContractError>"
         },
-        "is_authorized_submitter": {
+        "is_in_flight": {
           "params": [
-            "submitter: Address"
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>"
           ],
           "returns": "bool"
+        },
+        "is_succeeded": {
+          "params": [
+            "actor: Address",
+            "operation: Operation",
+            "key: BytesN<32>"
+          ],
+          "returns": "bool"
+        },
+        "transfer_admin": {
+          "params": [
+            "admin: Address",
+            "new_admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-identity": {
+      "events": {
+        "CLMISSUE": 4,
+        "CLMRVK": 4,
+        "CTYPEREQ": 1,
+        "PROVREG": 2,
+        "PROVRVK": 1,
+        "VRFYADD": 1,
+        "VRFYRVK": 1
+      },
+      "functions": {
+        "add_verifier": {
+          "params": [
+            "admin: Address",
+            "verifier: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "deregister_claim_type": {
+          "params": [
+            "admin: Address",
+            "claim_type: Symbol"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_claim": {
+          "params": [
+            "subject: Address",
+            "issuer: Address",
+            "scope: BytesN<32>",
+            "claim_type: Symbol"
+          ],
+          "returns": "Result<Claim, ContractError>"
+        },
+        "get_provider": {
+          "params": [
+            "provider_id: BytesN<32>"
+          ],
+          "returns": "Result<Provider, ContractError>"
+        },
+        "global_scope": {
+          "params": [],
+          "returns": "BytesN<32>"
+        },
+        "has_valid_claim": {
+          "params": [
+            "subject: Address",
+            "issuer: Address",
+            "scope: BytesN<32>",
+            "claim_type: Symbol"
+          ],
+          "returns": "bool"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
         },
         "is_authorized_verifier": {
           "params": [
@@ -566,18 +2216,54 @@
           ],
           "returns": "bool"
         },
-        "latest_evidence_version": {
+        "is_known_claim_type": {
           "params": [
-            "program_id: BytesN<32>",
-            "milestone_id: u64",
-            "recipient: Address"
+            "claim_type: Symbol"
           ],
-          "returns": "u32"
+          "returns": "bool"
         },
-        "remove_submitter": {
+        "is_verified": {
+          "params": [
+            "subject: Address",
+            "scope: BytesN<32>",
+            "claim_type: Symbol",
+            "issuers: soroban_sdk::Vec<Address>"
+          ],
+          "returns": "bool"
+        },
+        "issue_claim": {
+          "params": [
+            "issuer: Address",
+            "subject: Address",
+            "provider_id: BytesN<32>",
+            "scope: BytesN<32>",
+            "claim_type: Symbol",
+            "expiry: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "issue_manual_claim": {
+          "params": [
+            "verifier: Address",
+            "subject: Address",
+            "scope: BytesN<32>",
+            "claim_type: Symbol",
+            "expiry: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "register_claim_type": {
           "params": [
             "admin: Address",
-            "submitter: Address"
+            "claim_type: Symbol"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "register_provider": {
+          "params": [
+            "admin: Address",
+            "provider_id: BytesN<32>",
+            "label: Symbol"
           ],
           "returns": "Result<(), ContractError>"
         },
@@ -588,40 +2274,567 @@
           ],
           "returns": "Result<(), ContractError>"
         },
-        "set_milestone_status": {
+        "revoke_claim": {
           "params": [
-            "admin: Address",
-            "program_id: BytesN<32>",
-            "milestone_id: u64",
-            "status: MilestoneStatus"
+            "caller: Address",
+            "subject: Address",
+            "issuer: Address",
+            "scope: BytesN<32>",
+            "claim_type: Symbol"
           ],
           "returns": "Result<(), ContractError>"
         },
-        "submit_evidence": {
+        "revoke_provider": {
           "params": [
-            "submitter: Address",
-            "recipient: Address",
-            "program_id: BytesN<32>",
-            "milestone_id: u64",
-            "data_hash: BytesN<32>"
-          ],
-          "returns": "Result<u32, ContractError>"
-        },
-        "verify_evidence": {
-          "params": [
-            "verifier: Address",
-            "program_id: BytesN<32>",
-            "milestone_id: u64",
-            "recipient: Address",
-            "version: u32",
-            "decision: VerificationDecision",
-            "reason: ReasonCode"
+            "admin: Address",
+            "provider_id: BytesN<32>"
           ],
           "returns": "Result<(), ContractError>"
         },
         "version": {
           "params": [],
           "returns": "u32"
+        }
+      }
+    },
+    "scholarship-migration": {
+      "events": {},
+      "functions": {
+        "archive_record": {
+          "params": [
+            "operator: Address",
+            "legacy_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "begin_run": {
+          "params": [
+            "operator: Address",
+            "source_system: Symbol",
+            "dry_run: bool"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "get_record": {
+          "params": [
+            "legacy_id: BytesN<32>"
+          ],
+          "returns": "Result<LegacyRecord, ContractError>"
+        },
+        "get_reported": {
+          "params": [
+            "run_id: u64",
+            "index: u32"
+          ],
+          "returns": "Result<BytesN<32>, ContractError>"
+        },
+        "get_run": {
+          "params": [
+            "run_id: u64"
+          ],
+          "returns": "Result<MigrationRun, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "map_record": {
+          "params": [
+            "operator: Address",
+            "run_id: u64",
+            "legacy_id: BytesN<32>",
+            "source_system: Symbol",
+            "submitted_at: u64",
+            "payload_hash: BytesN<32>",
+            "program: BytesN<32>",
+            "correlation: BytesN<32>",
+            "legacy_cursor: u64"
+          ],
+          "returns": "Result<RecordState, ContractError>"
+        },
+        "record_state": {
+          "params": [
+            "legacy_id: BytesN<32>"
+          ],
+          "returns": "Result<RecordState, ContractError>"
+        },
+        "report_unmapped": {
+          "params": [
+            "operator: Address",
+            "run_id: u64",
+            "legacy_id: BytesN<32>",
+            "reason: UnmappableReason",
+            "legacy_cursor: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "run_summary": {
+          "params": [
+            "run_id: u64"
+          ],
+          "returns": "Result<RunSummary, ContractError>"
+        },
+        "seal_run": {
+          "params": [
+            "operator: Address",
+            "run_id: u64"
+          ],
+          "returns": "Result<RunSummary, ContractError>"
+        },
+        "tracked_records": {
+          "params": [],
+          "returns": "u64"
+        },
+        "unmapped_total": {
+          "params": [
+            "run_id: u64"
+          ],
+          "returns": "u64"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-milestones": {
+      "events": {
+        "MSACT": 1,
+        "MSAMD": 1,
+        "MSDEF": 1,
+        "MSREL": 2,
+        "MSVRF": 2
+      },
+      "functions": {
+        "activate_schedule": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "amend_schedule": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "total_amount: i128",
+            "currency: Symbol",
+            "inputs: Vec<MilestoneInput>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "define_schedule": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "total_amount: i128",
+            "currency: Symbol",
+            "inputs: Vec<MilestoneInput>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_milestone": {
+          "params": [
+            "award_id: BytesN<32>",
+            "index: u32"
+          ],
+          "returns": "Result<Milestone, ContractError>"
+        },
+        "get_schedule": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<MilestoneSchedule, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "release_milestone": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "index: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "released_total": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<i128, ContractError>"
+        },
+        "remaining_amount": {
+          "params": [
+            "award_id: BytesN<32>"
+          ],
+          "returns": "Result<i128, ContractError>"
+        },
+        "verify_milestone": {
+          "params": [
+            "admin: Address",
+            "award_id: BytesN<32>",
+            "index: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-outbox": {
+      "events": {
+        "ENQ": 3,
+        "PUB": 2
+      },
+      "functions": {
+        "acknowledge": {
+          "params": [
+            "consumer: Address",
+            "event_id: u64"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "acknowledge_delivery": {
+          "params": [
+            "owner: Address",
+            "endpoint_id: u64",
+            "sequence: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "alert_count": {
+          "params": [],
+          "returns": "u64"
+        },
+        "archive_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "deliverable": {
+          "params": [
+            "endpoint_id: u64",
+            "event_id: u64"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
+        "delivery_history_count": {
+          "params": [
+            "endpoint_id: u64"
+          ],
+          "returns": "u32"
+        },
+        "delivery_history_floor": {
+          "params": [
+            "endpoint_id: u64"
+          ],
+          "returns": "u64"
+        },
+        "delivery_payload": {
+          "params": [
+            "endpoint_id: u64",
+            "event_id: u64",
+            "sequence: u64",
+            "expires_at: u64"
+          ],
+          "returns": "Result<BytesN<32>, ContractError>"
+        },
+        "enqueue": {
+          "params": [
+            "operator: Address",
+            "source: Address",
+            "topic: Symbol",
+            "schema_version: u32",
+            "correlation_id: BytesN<32>",
+            "dedup_key: BytesN<32>",
+            "payload_hash: BytesN<32>"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "expire_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_acked_sequence": {
+          "params": [
+            "endpoint_id: u64"
+          ],
+          "returns": "u64"
+        },
+        "get_attempts": {
+          "params": [
+            "endpoint_id: u64",
+            "event_id: u64"
+          ],
+          "returns": "u32"
+        },
+        "get_by_dedup": {
+          "params": [
+            "dedup_key: BytesN<32>"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "get_cursor": {
+          "params": [
+            "consumer: Address"
+          ],
+          "returns": "u64"
+        },
+        "get_delivery": {
+          "params": [
+            "endpoint_id: u64",
+            "sequence: u64"
+          ],
+          "returns": "Result<DeliveryRecord, ContractError>"
+        },
+        "get_endpoint": {
+          "params": [
+            "endpoint_id: u64"
+          ],
+          "returns": "Result<WebhookEndpoint, ContractError>"
+        },
+        "get_event": {
+          "params": [
+            "event_id: u64"
+          ],
+          "returns": "Result<OutboxEvent, ContractError>"
+        },
+        "get_intent": {
+          "params": [
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<SettlementIntent, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "mark_published": {
+          "params": [
+            "relay: Address",
+            "event_id: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "observe_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>",
+            "tx_hash: BytesN<32>",
+            "tx_ledger: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "open_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>",
+            "source: Address",
+            "correlation_id: BytesN<32>",
+            "expected_amount: i128",
+            "required_finality: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "pending_count": {
+          "params": [],
+          "returns": "u64"
+        },
+        "prune": {
+          "params": [
+            "admin: Address",
+            "horizon: u64",
+            "limit: u32"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "reconcile_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>",
+            "observed_amount: i128"
+          ],
+          "returns": "Result<SettlementState, ContractError>"
+        },
+        "record_delivery": {
+          "params": [
+            "operator: Address",
+            "endpoint_id: u64",
+            "event_id: u64",
+            "sequence: u64",
+            "expires_at: u64",
+            "outcome: DeliveryOutcome"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "register_endpoint": {
+          "params": [
+            "operator: Address",
+            "owner: Address",
+            "url_hash: BytesN<32>",
+            "secret_hash: BytesN<32>",
+            "topics: Vec<Symbol>"
+          ],
+          "returns": "Result<u64, ContractError>"
+        },
+        "resolve_settlement": {
+          "params": [
+            "operator: Address",
+            "intent_id: BytesN<32>",
+            "resolution_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "rotate_secret": {
+          "params": [
+            "operator: Address",
+            "endpoint_id: u64",
+            "new_secret_hash: BytesN<32>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "set_endpoint_active": {
+          "params": [
+            "operator: Address",
+            "endpoint_id: u64",
+            "active: bool"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "settled_amount": {
+          "params": [
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<i128, ContractError>"
+        },
+        "settlement_status": {
+          "params": [
+            "intent_id: BytesN<32>"
+          ],
+          "returns": "Result<SettlementView, ContractError>"
+        },
+        "tracked_intents": {
+          "params": [],
+          "returns": "u64"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-payment-anomaly": {
+      "events": {},
+      "functions": {
+        "get_alert_full": {
+          "params": [
+            "payment_ref: String"
+          ],
+          "returns": "Result<PaymentAlert, ContractError>"
+        },
+        "get_alert_summary": {
+          "params": [
+            "payment_ref: String"
+          ],
+          "returns": "Result<AlertSummary, ContractError>"
+        },
+        "init": {
+          "params": [
+            "admin: Address",
+            "detector: Address",
+            "resolver: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "is_payment_paused": {
+          "params": [
+            "payment_ref: String"
+          ],
+          "returns": "bool"
+        },
+        "pause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "paused": {
+          "params": [],
+          "returns": "bool"
+        },
+        "raise_alert": {
+          "params": [
+            "caller: Address",
+            "payment_ref: String",
+            "category: AnomalyCategory",
+            "description: String",
+            "evidence_ref: String",
+            "amount: i128",
+            "destination: Address",
+            "pause_payment: bool",
+            "pause_duration_secs: u64",
+            "wallet_change_velocity: u32",
+            "retry_count: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "resolve_alert": {
+          "params": [
+            "caller: Address",
+            "payment_ref: String",
+            "resolution: AlertStatus",
+            "notes: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_detector": {
+          "params": [
+            "caller: Address",
+            "new_detector: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_resolver": {
+          "params": [
+            "caller: Address",
+            "new_resolver: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "total_alerts": {
+          "params": [],
+          "returns": "u64"
+        },
+        "total_paused_amount": {
+          "params": [],
+          "returns": "i128"
+        },
+        "unpause": {
+          "params": [
+            "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "upgrade": {
+          "params": [
+            "caller: Address",
+            "new_wasm_hash: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
         }
       }
     },
@@ -709,6 +2922,78 @@
         }
       }
     },
+    "scholarship-rate-limits": {
+      "events": {
+        "CFGSET": 4,
+        "RATELIM": 5,
+        "RATEOK": 4,
+        "SVAUREQ": 3,
+        "SVAUTGRT": 1,
+        "SVAUTRVK": 1
+      },
+      "functions": {
+        "check_and_record": {
+          "params": [
+            "actor: Address",
+            "action: Action"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "current_usage": {
+          "params": [
+            "actor: Address",
+            "action: Action"
+          ],
+          "returns": "(u32, u32, u64)"
+        },
+        "get_action_config": {
+          "params": [
+            "action: Action"
+          ],
+          "returns": "ActionConfig"
+        },
+        "grant_service_auth": {
+          "params": [
+            "admin: Address",
+            "service: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "has_service_auth": {
+          "params": [
+            "service: Address"
+          ],
+          "returns": "bool"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "revoke_service_auth": {
+          "params": [
+            "admin: Address",
+            "service: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_action_config": {
+          "params": [
+            "admin: Address",
+            "action: Action",
+            "risk_tier: RiskTier",
+            "window_seconds: u64",
+            "max_count: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
     "scholarship-registry": {
       "events": {
         "MODREG": 2,
@@ -771,6 +3056,256 @@
             "role: Role"
           ],
           "returns": "Result<(), ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-review-workflow": {
+      "events": {
+        "DRAFTSAV": 3,
+        "INFOREQ": 4,
+        "INFORESP": 3,
+        "REVAMND": 3,
+        "REVFIN": 2,
+        "REVSUB": 4,
+        "RUBRACT": 3,
+        "RUBRNEW": 3,
+        "RUBRUPD": 2
+      },
+      "functions": {
+        "activate_rubric": {
+          "params": [
+            "admin: Address",
+            "rubric_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "amend_review": {
+          "params": [
+            "reviewer: Address",
+            "review_id: BytesN<32>",
+            "new_scores: Vec<ReviewScore>",
+            "reason: String"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "create_rubric": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "name: String",
+            "criteria: Vec<RubricCriterion>"
+          ],
+          "returns": "Result<ScoringRubric, ContractError>"
+        },
+        "finalize_review": {
+          "params": [
+            "admin: Address",
+            "review_id: BytesN<32>"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "get_draft": {
+          "params": [
+            "reviewer: Address",
+            "application_id: BytesN<32>"
+          ],
+          "returns": "Result<ReviewDraft, ContractError>"
+        },
+        "get_info_request": {
+          "params": [
+            "request_id: BytesN<32>"
+          ],
+          "returns": "Result<InfoRequest, ContractError>"
+        },
+        "get_info_response": {
+          "params": [
+            "response_id: BytesN<32>"
+          ],
+          "returns": "Result<InfoResponse, ContractError>"
+        },
+        "get_review": {
+          "params": [
+            "review_id: BytesN<32>"
+          ],
+          "returns": "Result<Review, ContractError>"
+        },
+        "get_rubric": {
+          "params": [
+            "rubric_id: BytesN<32>"
+          ],
+          "returns": "Result<ScoringRubric, ContractError>"
+        },
+        "get_rubric_version": {
+          "params": [
+            "rubric_id: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<ScoringRubric, ContractError>"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "request_info": {
+          "params": [
+            "reviewer: Address",
+            "application_id: BytesN<32>",
+            "questions: Vec<String>",
+            "visible_fields: Vec<String>",
+            "deadline: u64"
+          ],
+          "returns": "Result<InfoRequest, ContractError>"
+        },
+        "respond_to_info_request": {
+          "params": [
+            "applicant: Address",
+            "request_id: BytesN<32>",
+            "responses: Vec<String>"
+          ],
+          "returns": "Result<InfoResponse, ContractError>"
+        },
+        "save_draft": {
+          "params": [
+            "reviewer: Address",
+            "application_id: BytesN<32>",
+            "rubric_id: BytesN<32>",
+            "scores: Vec<ReviewScore>",
+            "is_complete: bool"
+          ],
+          "returns": "Result<ReviewDraft, ContractError>"
+        },
+        "submit_review": {
+          "params": [
+            "reviewer: Address",
+            "application_id: BytesN<32>"
+          ],
+          "returns": "Result<Review, ContractError>"
+        },
+        "update_rubric": {
+          "params": [
+            "admin: Address",
+            "rubric_id: BytesN<32>",
+            "name: Option<String>",
+            "criteria: Option<Vec<RubricCriterion>>"
+          ],
+          "returns": "Result<ScoringRubric, ContractError>"
+        },
+        "version": {
+          "params": [],
+          "returns": "u32"
+        }
+      }
+    },
+    "scholarship-reviews": {
+      "events": {
+        "REVACT": 2,
+        "REVIEW": 4,
+        "REVPROG": 1,
+        "RUBPUB": 2
+      },
+      "functions": {
+        "aggregate_score": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "compare_applicants": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant_a: Address",
+            "applicant_b: Address"
+          ],
+          "returns": "Result<CompareOutcome, ContractError>"
+        },
+        "get_latest_rubric_version": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "get_program_config": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<ProgramConfig, ContractError>"
+        },
+        "get_review": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "reviewer: Address"
+          ],
+          "returns": "Result<Review, ContractError>"
+        },
+        "get_reviewer_count": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address"
+          ],
+          "returns": "u32"
+        },
+        "get_rubric": {
+          "params": [
+            "program_id: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<Rubric, ContractError>"
+        },
+        "has_review": {
+          "params": [
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "reviewer: Address"
+          ],
+          "returns": "bool"
+        },
+        "initialize": {
+          "params": [
+            "admin: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "publish_rubric": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "criteria: Vec<Criterion>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "register_program": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "min_reviews: u32",
+            "max_reviews: u32"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "set_program_active": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "active: bool"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "submit_review": {
+          "params": [
+            "reviewer: Address",
+            "program_id: BytesN<32>",
+            "applicant: Address",
+            "scores: Vec<u32>"
+          ],
+          "returns": "Result<u32, ContractError>"
         },
         "version": {
           "params": [],
