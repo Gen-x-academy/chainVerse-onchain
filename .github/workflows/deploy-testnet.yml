@@ -108,7 +108,7 @@ jobs:
           path: deployments
 
       - name: Open or update PR
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: update deployments/testnet.json [skip ci]"
