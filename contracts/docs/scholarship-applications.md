@@ -3,7 +3,8 @@
 - Status: Implemented (partial — see Scope)
 - Owner: Scholarships On-chain working group
 - Related issues: #1070 (form schema), #1073 (consent), #1074 (duplicate
-  prevention — foundation), #1075 (atomic submission — foundation), #1071
+  prevention — foundation), #1075 (atomic submission — foundation), #1133
+  (correction and erasure requests), #1071
   (answer validation — not yet implemented), #1072 (document upload — not
   yet implemented), #1076 (withdrawal — not yet implemented), #1077
   (tamper-evident receipts — not yet implemented)

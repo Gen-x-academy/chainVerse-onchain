@@ -108,6 +108,66 @@ pub enum ReviewDataKey {
     ReviewMode(BytesN<32>),
 }
 
+// -----------------------------------------------------------------------
+// Issue #1133 — applicant privacy correction and erasure requests
+//
+// Self-contained additions: own error enum, data keys, and state structures.
+// Keeps on-chain storage privacy-minimized: on-chain records hold only
+// integrity commitments (`BytesN<32>` hashes), request identifiers,
+// timestamps, and status transitions, while preserving lawful immutable
+// financial and audit records.
+// -----------------------------------------------------------------------
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PrivacyError {
+    NotAdmin = 1,
+    Unauthorized = 2,
+    ApplicationNotFound = 3,
+    RequestNotFound = 4,
+    RequestAlreadyProcessed = 5,
+    InvalidDenialReason = 6,
+    CounterOverflow = 7,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrivacyRequestType {
+    Correction,
+    Erasure,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrivacyRequestStatus {
+    Pending,
+    Approved,
+    Denied,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivacyRequest {
+    pub id: u32,
+    pub applicant: Address,
+    pub program_id: BytesN<32>,
+    pub request_type: PrivacyRequestType,
+    pub requested_at: u64,
+    pub target_data_hash: BytesN<32>,
+    pub status: PrivacyRequestStatus,
+    pub processed_at: u64,
+    pub denial_reason_hash: BytesN<32>,
+    pub downstream_addressed: bool,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum PrivacyDataKey {
+    RequestCounter,
+    Request(u32),
+    ApplicantRequest(Address, BytesN<32>),
+}
+
 const CONTRACT_VERSION: u32 = 1;
 
 // TTL constants: ~1 year at 6-second ledgers, matching course_registry's convention.
@@ -959,6 +1019,250 @@ impl ScholarshipApplicationsContract {
         }
         Ok(())
     }
+
+    // -------------------------------------------------------------------
+    // Issue #1133 — applicant privacy correction and erasure requests
+    // -------------------------------------------------------------------
+
+    /// Applicant-authenticated request to submit a corrected off-chain
+    /// answers commitment hash. An application must already exist.
+    pub fn request_correction(
+        env: Env,
+        applicant: Address,
+        program_id: BytesN<32>,
+        new_data_hash: BytesN<32>,
+    ) -> Result<u32, PrivacyError> {
+        applicant.require_auth();
+
+        let app_key = DataKey::Application(applicant.clone(), program_id.clone());
+        if !env.storage().persistent().has(&app_key) {
+            return Err(PrivacyError::ApplicationNotFound);
+        }
+
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&PrivacyDataKey::RequestCounter)
+            .unwrap_or(0);
+        let request_id = counter
+            .checked_add(1)
+            .ok_or(PrivacyError::CounterOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&PrivacyDataKey::RequestCounter, &request_id);
+
+        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let request = PrivacyRequest {
+            id: request_id,
+            applicant: applicant.clone(),
+            program_id: program_id.clone(),
+            request_type: PrivacyRequestType::Correction,
+            requested_at: env.ledger().timestamp(),
+            target_data_hash: new_data_hash,
+            status: PrivacyRequestStatus::Pending,
+            processed_at: 0,
+            denial_reason_hash: zero_hash,
+            downstream_addressed: false,
+        };
+
+        let req_key = PrivacyDataKey::Request(request_id);
+        env.storage().persistent().set(&req_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&req_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        let app_req_key = PrivacyDataKey::ApplicantRequest(applicant.clone(), program_id.clone());
+        env.storage().persistent().set(&app_req_key, &request_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&app_req_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("PRIVACY"),
+                soroban_sdk::symbol_short!("REQ_CORR"),
+            ),
+            (applicant, program_id, request_id),
+        );
+
+        Ok(request_id)
+    }
+
+    /// Applicant-authenticated request to erase off-chain application
+    /// answers commitment. An application must already exist.
+    pub fn request_erasure(
+        env: Env,
+        applicant: Address,
+        program_id: BytesN<32>,
+    ) -> Result<u32, PrivacyError> {
+        applicant.require_auth();
+
+        let app_key = DataKey::Application(applicant.clone(), program_id.clone());
+        if !env.storage().persistent().has(&app_key) {
+            return Err(PrivacyError::ApplicationNotFound);
+        }
+
+        let counter: u32 = env
+            .storage()
+            .persistent()
+            .get(&PrivacyDataKey::RequestCounter)
+            .unwrap_or(0);
+        let request_id = counter
+            .checked_add(1)
+            .ok_or(PrivacyError::CounterOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&PrivacyDataKey::RequestCounter, &request_id);
+
+        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let request = PrivacyRequest {
+            id: request_id,
+            applicant: applicant.clone(),
+            program_id: program_id.clone(),
+            request_type: PrivacyRequestType::Erasure,
+            requested_at: env.ledger().timestamp(),
+            target_data_hash: zero_hash.clone(),
+            status: PrivacyRequestStatus::Pending,
+            processed_at: 0,
+            denial_reason_hash: zero_hash,
+            downstream_addressed: false,
+        };
+
+        let req_key = PrivacyDataKey::Request(request_id);
+        env.storage().persistent().set(&req_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&req_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        let app_req_key = PrivacyDataKey::ApplicantRequest(applicant.clone(), program_id.clone());
+        env.storage().persistent().set(&app_req_key, &request_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&app_req_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("PRIVACY"),
+                soroban_sdk::symbol_short!("REQ_ERAS"),
+            ),
+            (applicant, program_id, request_id),
+        );
+
+        Ok(request_id)
+    }
+
+    /// Admin-authenticated processing of a privacy request (approve or deny).
+    /// If approved:
+    /// - Correction updates the application's answers commitment while
+    ///   preserving timestamp, program, and consent version history.
+    /// - Erasure replaces the answers commitment with zero hash (tombstone)
+    ///   while preserving immutable application and financial linkage records.
+    /// If denied:
+    /// - Records the explicit denial reason hash commitment (e.g. legal audit hold).
+    /// Tracks whether downstream copies/caches have been addressed.
+    pub fn process_privacy_request(
+        env: Env,
+        admin: Address,
+        request_id: u32,
+        approve: bool,
+        denial_reason_hash: BytesN<32>,
+        downstream_addressed: bool,
+    ) -> Result<(), PrivacyError> {
+        Self::require_privacy_admin(&env, &admin)?;
+
+        let req_key = PrivacyDataKey::Request(request_id);
+        let mut request: PrivacyRequest = env
+            .storage()
+            .persistent()
+            .get(&req_key)
+            .ok_or(PrivacyError::RequestNotFound)?;
+
+        if request.status != PrivacyRequestStatus::Pending {
+            return Err(PrivacyError::RequestAlreadyProcessed);
+        }
+
+        if approve {
+            request.status = PrivacyRequestStatus::Approved;
+            let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+            request.denial_reason_hash = zero_hash;
+
+            let app_key = DataKey::Application(request.applicant.clone(), request.program_id.clone());
+            if let Some(mut app) = env.storage().persistent().get::<_, Application>(&app_key) {
+                match request.request_type {
+                    PrivacyRequestType::Correction => {
+                        app.data_hash = request.target_data_hash.clone();
+                    }
+                    PrivacyRequestType::Erasure => {
+                        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+                        app.data_hash = zero_hash;
+                    }
+                }
+                env.storage().persistent().set(&app_key, &app);
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&app_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+            }
+        } else {
+            request.status = PrivacyRequestStatus::Denied;
+            request.denial_reason_hash = denial_reason_hash;
+        }
+
+        request.processed_at = env.ledger().timestamp();
+        request.downstream_addressed = downstream_addressed;
+
+        env.storage().persistent().set(&req_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&req_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("PRIVACY"),
+                soroban_sdk::symbol_short!("RESOLVE"),
+            ),
+            (request_id, approve, downstream_addressed),
+        );
+
+        Ok(())
+    }
+
+    /// Retrieve a privacy request record by its unique identifier.
+    pub fn get_privacy_request(env: Env, request_id: u32) -> Result<PrivacyRequest, PrivacyError> {
+        let key = PrivacyDataKey::Request(request_id);
+        let req = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(PrivacyError::RequestNotFound)?;
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        Ok(req)
+    }
+
+    /// Retrieve the most recent privacy request ID for an (applicant, program) pair.
+    pub fn get_latest_privacy_request_id(
+        env: Env,
+        applicant: Address,
+        program_id: BytesN<32>,
+    ) -> Option<u32> {
+        env.storage()
+            .persistent()
+            .get(&PrivacyDataKey::ApplicantRequest(applicant, program_id))
+    }
+
+    fn require_privacy_admin(env: &Env, caller: &Address) -> Result<(), PrivacyError> {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(PrivacyError::NotAdmin)?;
+        if admin != *caller {
+            return Err(PrivacyError::Unauthorized);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -967,3 +1271,7 @@ mod tests;
 // Issue #1146 — error-path coverage.
 #[cfg(test)]
 mod error_tests;
+
+// Issue #1133 — applicant privacy correction and erasure requests.
+#[cfg(test)]
+mod privacy_tests;
