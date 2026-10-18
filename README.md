@@ -28,6 +28,10 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive), derived access grants, and rendition migration policies |
 | `library-rights` | `contracts/library-rights` | E-Library content integrity states, emergency quarantine, and pseudonymous membership attestations |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying the above contracts together |
+| `mentorship-conduct` | `contracts/mentorship-conduct` | Versioned mentorship code-of-conduct policies, provable acceptance, engagement activation gate, and breach references |
+| `mentorship-availability` | `contracts/mentorship-availability` | Recurring weekly participant availability with explicit DST offset transitions, exceptions, lead time, buffers, and booking horizon |
+| `mentorship-calendar` | `contracts/mentorship-calendar` | Scoped, revocable external-calendar connections that import free/busy windows only |
+| `mentorship-slots` | `contracts/mentorship-slots` | Deterministic mutually available session-slot search with capacity, blackouts, pagination, and revalidated booking |
 
 `contracts/common` and `contracts/shared` are internal Rust libraries (not deployable contracts) used by the crates above.
 
