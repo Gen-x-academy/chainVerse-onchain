@@ -27,6 +27,10 @@ members = [
     "contracts/scholarship-applications",
     "contracts/scholarship-awards",
     "contracts/scholarship-milestones",
+    "contracts/mentorship-core",
+    "contracts/mentorship-capacity",
+    "contracts/mentorship-conflicts",
+    "contracts/mentorship-eligibility",
 ]
 
 [workspace.dependencies]
