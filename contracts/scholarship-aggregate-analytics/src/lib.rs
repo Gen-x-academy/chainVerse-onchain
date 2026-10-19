@@ -8,20 +8,22 @@ mod test;
 
 pub use errors::ContractError;
 pub use types::{
-    CohortMetrics, CohortResult, DisbursementBatch, MetricDefinition, MetricField,
-    SuppressedResult,
+    CohortMetrics, CohortResult, DisbursementBatch, ImpactInterpretation, MetricDefinition,
+    MetricField, SponsorImpactReport, SponsorImpactSubmission, SuppressedResult,
 };
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
 
 use storage::{
     assert_not_paused, bump_instance, cohort_exists, get_cohort, get_k_threshold,
-    get_metric_definition, require_admin, require_recorder, save_cohort,
-    save_metric_definition, set_admin, set_k_threshold, set_paused, set_recorder,
+    get_metric_definition, get_sponsor_impact, require_admin, require_recorder,
+    save_cohort, save_metric_definition, save_sponsor_impact, set_admin,
+    set_k_threshold, set_paused, set_recorder, sponsor_impact_exists,
 };
 use types::{
     CohortMetrics as CM, CohortResult as CR, DisbursementBatch as DB, MetricDefinition as MD,
-    MetricField as MF, SuppressedResult as SR,
+    ImpactInterpretation as II, MetricField as MF, SponsorImpactReport as SIR,
+    SponsorImpactSubmission as SIS, SuppressedResult as SR,
 };
 
 /// Minimum k-anonymity threshold that the admin may configure.
@@ -218,6 +220,80 @@ impl ScholarshipAggregateAnalytics {
         Ok(())
     }
 
+    /// Publish a one-time sponsor impact snapshot for a cohort.
+    ///
+    /// The trusted recorder must deduplicate recipients and suppress small
+    /// subgroups off-chain before calling this method. Transaction input is
+    /// public, so rejected submissions are not a privacy boundary. The on-chain
+    /// checks are defense in depth, not a substitute for pre-submission
+    /// suppression. Reports are immutable to prevent differencing through
+    /// repeated snapshots.
+    pub fn publish_sponsor_impact(
+        env: Env,
+        caller: Address,
+        submission: SponsorImpactSubmission,
+    ) -> Result<(), ContractError> {
+        bump_instance(&env);
+        assert_not_paused(&env)?;
+        require_recorder(&env, &caller)?;
+
+        if submission.cohort_tag.len() > MAX_COHORT_TAG_BYTES {
+            return Err(ContractError::CohortTagTooLong);
+        }
+        if !cohort_exists(&env, &submission.cohort_tag) {
+            return Err(ContractError::CohortNotFound);
+        }
+        if sponsor_impact_exists(&env, &submission.cohort_tag) {
+            return Err(ContractError::ImpactReportAlreadyPublished);
+        }
+        if submission.total_funded_amount < 0
+            || (submission.total_funded_amount > 0 && submission.funded_award_count == 0)
+        {
+            return Err(ContractError::InvalidImpactReport);
+        }
+
+        let k = get_k_threshold(&env);
+        if submission.recipient_count < k
+            || !release_count(submission.funded_learning_count, k)
+            || !release_count(submission.completed_count, k)
+            || !release_count(submission.credentials_issued_count, k)
+            || !release_count(submission.funded_award_count, k)
+        {
+            return Err(ContractError::CohortSuppressed);
+        }
+
+        let report = SIR {
+            cohort_tag: submission.cohort_tag.clone(),
+            recipient_count: submission.recipient_count,
+            funded_learning_count: submission.funded_learning_count,
+            completed_count: submission.completed_count,
+            credentials_issued_count: submission.credentials_issued_count,
+            funded_award_count: submission.funded_award_count,
+            total_funded_amount: submission.total_funded_amount,
+            interpretation: II::DescriptiveAssociationOnly,
+            published_at: env.ledger().timestamp(),
+        };
+        save_sponsor_impact(&env, &report);
+
+        // Report values are stored on-chain, but omitted from the notification event.
+        env.events().publish(
+            (symbol_short!("AA_IMPT"),),
+            (submission.cohort_tag, report.published_at),
+        );
+        Ok(())
+    }
+
+    /// Return the immutable sponsor impact report, if one has been published.
+    pub fn get_sponsor_impact(env: Env, cohort_tag: String) -> Option<SponsorImpactReport> {
+        bump_instance(&env);
+        let report = get_sponsor_impact(&env, &cohort_tag)?;
+        if report_is_releasable(&report, get_k_threshold(&env)) {
+            Some(report)
+        } else {
+            None
+        }
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     /// Return cohort metrics or a suppression notice.
@@ -232,7 +308,7 @@ impl ScholarshipAggregateAnalytics {
         bump_instance(&env);
         let cm = get_cohort(&env, &cohort_tag).ok_or(ContractError::CohortNotFound)?;
         let k = get_k_threshold(&env);
-        if cm.total_applicants < k {
+        if cm.total_applicants < k || !cohort_metrics_are_releasable(&cm, k) {
             return Ok(CR::Suppressed(SR {
                 cohort_tag,
                 k_threshold: k,
@@ -396,3 +472,25 @@ impl ScholarshipAggregateAnalytics {
         }
     }
 }
+
+fn release_count(count: u64, k: u64) -> bool {
+    count == 0 || count >= k
+}
+
+fn report_is_releasable(report: &SIR, k: u64) -> bool {
+    report.recipient_count >= k
+        && release_count(report.funded_learning_count, k)
+        && release_count(report.completed_count, k)
+        && release_count(report.credentials_issued_count, k)
+        && release_count(report.funded_award_count, k)
+}
+
+    fn cohort_metrics_are_releasable(metrics: &CM, k: u64) -> bool {
+        release_count(metrics.eligible_count, k)
+        && release_count(metrics.review_completed_count, k)
+        && release_count(metrics.approved_count, k)
+        && release_count(metrics.rejected_count, k)
+        && release_count(metrics.withdrawn_count, k)
+        && release_count(metrics.disbursed_count, k)
+        && (metrics.disbursed_count >= k || metrics.total_disbursed_amount == 0)
+    }

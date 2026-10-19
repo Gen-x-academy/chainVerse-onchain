@@ -22,4 +22,8 @@ pub enum ContractError {
     CounterUnderflow = 10,
     /// Metric definition string exceeds 512-byte limit.
     MetricDefinitionTooLong = 11,
+    /// A sponsor impact report has already been published for this cohort.
+    ImpactReportAlreadyPublished = 12,
+    /// A report contains an invalid amount or count combination.
+    InvalidImpactReport = 13,
 }
