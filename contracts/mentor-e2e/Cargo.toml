@@ -1,0 +1,19 @@
+[package]
+name = "mentor-e2e"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic synthetic mentorship journey fixtures for contract tests."
+
+[lib]
+name = "mentor_e2e"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+mentor-delivery = { path = "../mentor-delivery" }
+mentor-expertise = { path = "../mentor-expertise" }
+mentor-profiles = { path = "../mentor-profiles" }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
