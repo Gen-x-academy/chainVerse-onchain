@@ -99,6 +99,38 @@ otherwise) — the admin flow is: `register_program` →
   #1076 (withdrawal — not yet implemented), #1077 (tamper-evident receipts —
   not yet implemented)
 
+## Applicant data access and export
+
+`request_data_export(applicant, program_id)` requires the applicant's
+authorization and an existing application or consent record. Only one export
+request may be pending for an applicant/program pair. Applicants may cancel a
+pending request; the configured privacy admin completes it with separate
+`export_hash` and `consent_history_hash` commitments. The status, timestamps,
+applicant, program, and hashes are available through
+`get_data_export_request(request_id)`; `get_latest_data_export_request_id`
+provides discovery by applicant and program. `DATAEXP/REQUEST`,
+`DATAEXP/CANCEL`, and `DATAEXP/COMPLETE` events provide an indexable request
+lifecycle.
+
+Consent acceptance is recorded by `CONSENT` events and revocation by
+`CONSRVK`; indexers use these events to reconstruct the history because the
+on-chain `ConsentRecord` is only the latest state. The consent-history hash
+commits to the machine-readable history included in the export.
+
+### Off-chain trust boundary
+
+The contract does not store or return application answers, identity records,
+uploaded documents, or a serialized export. An authenticated off-chain export
+service must verify the applicant, retrieve only that applicant's data for the
+requested program, include the consent event history, serialize a documented
+machine-readable format, compute the two commitments, and deliver the package
+through a secure applicant-authenticated channel. The privacy admin's
+completion transaction attests to those commitments; it does not prove that
+the service delivered the package or that the package is complete. The
+applicant should verify both hashes against the received package. Service
+access logging, encryption, retention, and delivery authorization remain
+off-chain responsibilities.
+
 ## Scope
 
 This contract (`contracts/scholarship-applications`) implements two of the

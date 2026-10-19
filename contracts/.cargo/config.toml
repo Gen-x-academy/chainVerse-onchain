@@ -1,6 +1,8 @@
-[build]
-target = "wasm32-unknown-unknown"
-
+# NOTE: no `[build] target` default here. Forcing wasm32 as the default
+# target made every plain `cargo test` compile test-only code (soroban-sdk
+# testutils) for wasm, where those dependencies do not exist. WASM builds
+# pass `--target wasm32-unknown-unknown` explicitly (see CI and
+# `stellar contract build`).
 [profile.release]
 opt-level = "z"
 overflow-checks = true
