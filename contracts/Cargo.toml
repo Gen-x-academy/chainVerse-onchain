@@ -36,6 +36,9 @@ members = [
     "scholarship-aggregate-analytics",
     "scholarship-fraud-signals",
     "scholarship-payment-anomaly",
+    "mentorship-scheduling",
+    "mentorship-agreement-export",
+    "mentorship-rematch",
 ]
 
 [workspace.dependencies]
