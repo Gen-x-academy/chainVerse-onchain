@@ -1,5 +1,7 @@
 #![cfg(test)]
-use crate::{ContractError, ScholarshipEligibilityContract};
+use crate::{
+    ContractError, MentorshipCriterion, ScholarshipEligibilityContract,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     vec, Address, BytesN, Env, Symbol,
@@ -299,6 +301,188 @@ fn test_evaluate_eligibility_accepts_globally_scoped_attestation() {
     client.issue_attestation(&issuer, &subject, &global, &identity, &10_000u64);
 
     assert!(client.evaluate_eligibility(&pid, &subject));
+}
+
+#[test]
+fn test_mentorship_rule_composes_all_requested_criteria_privately() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipEligibilityContractClient::new(&env, &contract_id);
+    let issuer = Address::generate(&env);
+    client.add_issuer(&admin, &issuer);
+
+    let pid = program_id(&env, 21);
+    let subject = Address::generate(&env);
+    let criteria = vec![
+        &env,
+        MentorshipCriterion::Role(BytesN::from_array(&env, &[1; 32])),
+        MentorshipCriterion::Organization(BytesN::from_array(&env, &[2; 32])),
+        MentorshipCriterion::CourseProgress(BytesN::from_array(&env, &[3; 32]), 8_000),
+        MentorshipCriterion::Skill(BytesN::from_array(&env, &[4; 32]), 2),
+        MentorshipCriterion::GeographyPolicy(BytesN::from_array(&env, &[5; 32])),
+        MentorshipCriterion::AgeGuardian(18, true),
+        MentorshipCriterion::Prerequisite(program_id(&env, 22)),
+    ];
+    let no_alternatives = soroban_sdk::Vec::new(&env);
+    assert_eq!(
+        client.publish_mentorship_eligibility_rule(&admin, &pid, &criteria, &no_alternatives),
+        1
+    );
+
+    let evidence_hash = BytesN::from_array(&env, &[99; 32]);
+    for criterion in criteria.iter() {
+        client.issue_criterion_attestation(
+            &issuer,
+            &subject,
+            &pid,
+            &criterion,
+            &evidence_hash,
+            &10_000,
+        );
+    }
+    assert!(client.evaluate_mentorship_eligibility(&pid, &subject));
+
+    client.revoke_criterion_attestation(
+        &issuer,
+        &subject,
+        &pid,
+        &MentorshipCriterion::AgeGuardian(18, true),
+    );
+    assert!(!client.evaluate_mentorship_eligibility(&pid, &subject));
+}
+
+#[test]
+fn test_mentorship_rule_supports_any_of_and_requires_authorized_criterion() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipEligibilityContractClient::new(&env, &contract_id);
+    let issuer = Address::generate(&env);
+    client.add_issuer(&admin, &issuer);
+
+    let pid = program_id(&env, 23);
+    let subject = Address::generate(&env);
+    let role = MentorshipCriterion::Role(BytesN::from_array(&env, &[1; 32]));
+    let skill = MentorshipCriterion::Skill(BytesN::from_array(&env, &[2; 32]), 3);
+    let course = MentorshipCriterion::CourseProgress(BytesN::from_array(&env, &[3; 32]), 7_500);
+    let required = vec![&env, role.clone()];
+    let alternatives = vec![&env, skill.clone(), course.clone()];
+    client.publish_mentorship_eligibility_rule(&admin, &pid, &required, &alternatives);
+
+    let evidence_hash = BytesN::from_array(&env, &[88; 32]);
+    client.issue_criterion_attestation(
+        &issuer,
+        &subject,
+        &pid,
+        &role,
+        &evidence_hash,
+        &10_000,
+    );
+    assert!(!client.evaluate_mentorship_eligibility(&pid, &subject));
+
+    client.issue_criterion_attestation(
+        &issuer,
+        &subject,
+        &pid,
+        &course,
+        &evidence_hash,
+        &10_000,
+    );
+    assert!(client.evaluate_mentorship_eligibility(&pid, &subject));
+
+    let unrelated = MentorshipCriterion::GeographyPolicy(BytesN::from_array(&env, &[4; 32]));
+    assert_eq!(
+        client.try_issue_criterion_attestation(
+            &issuer,
+            &subject,
+            &pid,
+            &unrelated,
+            &evidence_hash,
+            &10_000,
+        ),
+        Err(Ok(ContractError::CriterionNotInRule))
+    );
+}
+
+#[test]
+fn test_mentorship_rule_rejects_empty_and_invalid_criteria() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipEligibilityContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 24);
+    let empty = soroban_sdk::Vec::new(&env);
+    assert_eq!(
+        client.try_publish_mentorship_eligibility_rule(&admin, &pid, &empty, &empty),
+        Err(Ok(ContractError::EmptyMentorshipRule))
+    );
+
+    let invalid = vec![
+        &env,
+        MentorshipCriterion::CourseProgress(BytesN::from_array(&env, &[1; 32]), 10_001),
+    ];
+    assert_eq!(
+        client.try_publish_mentorship_eligibility_rule(&admin, &pid, &invalid, &empty),
+        Err(Ok(ContractError::InvalidCriterion))
+    );
+
+    let mut oversized = soroban_sdk::Vec::new(&env);
+    for index in 0..21 {
+        oversized.push_back(MentorshipCriterion::Role(BytesN::from_array(
+            &env,
+            &[index; 32],
+        )));
+    }
+    assert_eq!(
+        client.try_publish_mentorship_eligibility_rule(&admin, &pid, &oversized, &empty),
+        Err(Ok(ContractError::MentorshipRuleTooLarge))
+    );
+}
+
+#[test]
+fn test_mentorship_rule_lookup_reports_missing_rule_and_attestation() {
+    let (env, contract_id, _admin) = setup();
+    let client = crate::ScholarshipEligibilityContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 25);
+    let subject = Address::generate(&env);
+    let criterion = MentorshipCriterion::Role(BytesN::from_array(&env, &[7; 32]));
+
+    assert_eq!(
+        client.try_get_latest_mentorship_rule_version(&pid),
+        Err(Ok(ContractError::NoMentorshipRulePublished))
+    );
+    assert_eq!(
+        client.try_get_mentorship_eligibility_rule(&pid, &1),
+        Err(Ok(ContractError::MentorshipRuleNotFound))
+    );
+    assert_eq!(
+        client.try_get_criterion_attestation(&subject, &pid, &criterion),
+        Err(Ok(ContractError::CriterionAttestationNotFound))
+    );
+}
+
+#[test]
+fn test_only_criterion_issuer_or_admin_can_revoke() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipEligibilityContractClient::new(&env, &contract_id);
+    let issuer = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.add_issuer(&admin, &issuer);
+
+    let pid = program_id(&env, 26);
+    let subject = Address::generate(&env);
+    let criterion = MentorshipCriterion::GeographyPolicy(BytesN::from_array(&env, &[8; 32]));
+    let all_of = vec![&env, criterion.clone()];
+    let any_of = soroban_sdk::Vec::new(&env);
+    client.publish_mentorship_eligibility_rule(&admin, &pid, &all_of, &any_of);
+    client.issue_criterion_attestation(
+        &issuer,
+        &subject,
+        &pid,
+        &criterion,
+        &BytesN::from_array(&env, &[9; 32]),
+        &10_000,
+    );
+
+    assert_eq!(
+        client.try_revoke_criterion_attestation(&stranger, &subject, &pid, &criterion),
+        Err(Ok(ContractError::NotCriterionAttestationIssuer))
+    );
 }
 
 #[test]

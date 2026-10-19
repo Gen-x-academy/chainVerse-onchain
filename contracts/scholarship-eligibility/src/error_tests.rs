@@ -316,6 +316,14 @@ const DECLARED: &[&str] = &[
     "EmptyRule",
     "RuleTooLarge",
     "NoRulePublished",
+    "EmptyMentorshipRule",
+    "MentorshipRuleTooLarge",
+    "InvalidCriterion",
+    "NoMentorshipRulePublished",
+    "MentorshipRuleNotFound",
+    "CriterionNotInRule",
+    "CriterionAttestationNotFound",
+    "NotCriterionAttestationIssuer",
 ];
 
 const COVERED_ELSEWHERE: &[&str] = &[
@@ -326,6 +334,11 @@ const COVERED_ELSEWHERE: &[&str] = &[
     "EmptyRule",
     "RuleTooLarge",
     "NoRulePublished",
+    "EmptyMentorshipRule",
+    "MentorshipRuleTooLarge",
+    "InvalidCriterion",
+    "CriterionNotInRule",
+    "NotCriterionAttestationIssuer",
 ];
 
 const COVERED_HERE: &[&str] = &[
@@ -334,6 +347,9 @@ const COVERED_HERE: &[&str] = &[
     "RuleNotFound",
     "AttestationNotFound",
     "VersionOverflow",
+    "NoMentorshipRulePublished",
+    "MentorshipRuleNotFound",
+    "CriterionAttestationNotFound",
 ];
 
 #[test]

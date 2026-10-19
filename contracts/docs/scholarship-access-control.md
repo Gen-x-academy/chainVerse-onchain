@@ -1,16 +1,16 @@
 # scholarship-access-control
 
 Contract: `scholarship-access-control`  
-Version: 1  
+Version: 2
 Audited against: `Gen-x-academy/chainVerse-onchain` `origin/main` commit `82c681a1fbdf5984b4b6adaee50c053af21bbe09`
 
 ---
 
 ## Purpose
 
-Enforces the seven actor roles — Student, Sponsor, Reviewer, Verifier, Finance,
-Auditor, and Administrator — on every scholarship resource, with program-scoped
-bindings so cross-tenant access fails structurally rather than by policy.
+Enforces scholarship actor roles with program-scoped bindings so cross-tenant
+access fails structurally rather than by policy. Staffing roles can be assigned
+for explicit ledger-time intervals.
 
 ---
 
@@ -25,6 +25,10 @@ bindings so cross-tenant access fails structurally rather than by policy.
 | Finance | Per-program | Payout executor |
 | Auditor | Global (`[0x00;32]`) | Compliance/audit team |
 | Administrator | Global | Contract deployer / ops |
+| Coordinator | Per-program | Program coordinator |
+| ApplicationReviewer | Per-program | Application reviewer |
+| SafeguardingContact | Per-program | Safeguarding contact |
+| FinanceApprover | Per-program | Finance approver |
 
 Global roles (Auditor, Administrator) are stored under the all-zero scope and
 are visible for every `has_role` / `authorize` call regardless of the
@@ -40,8 +44,15 @@ with `set_permission(admin, resource, role, operation, allowed)`.
 The seven operations are: Read, Write, Approve, Reject, Disburse, Audit, Revoke.  
 The eight resources are: Program, Application, Document, Decision, Disbursement, Report, Identity, Communication.
 
-Defaults follow least-privilege (e.g. Students cannot Disburse; Reviewers cannot
-Disburse; only Finance and Administrator hold Disburse on Disbursement).
+Defaults follow least-privilege (e.g. Students cannot Disburse; reviewers
+cannot Disburse; FinanceApprover may Approve but cannot Disburse).
+
+`grant_role_with_tenure(admin, account, program_id, role, starts_at, expires_at)`
+assigns a role for the half-open ledger timestamp interval
+`[starts_at, expires_at)`. The start cannot be in the past, and the expiry must
+be later than the start. Existing `grant_role` remains an indefinite grant.
+`has_role`, `require_role`, and `authorize` enforce the interval. Tenure grants
+are program-scoped; global role checks continue to work as before.
 
 ---
 
@@ -54,6 +65,7 @@ Disburse; only Finance and Administrator hold Disburse on Disbursement).
 | `TotalGrantCount` | Instance | Contract lifetime |
 | `Role(account, program_id, role)` | Persistent | ~1–2 years |
 | `ProgramGrantCount(program_id)` | Persistent | ~1–2 years |
+| `RoleTenure(account, program_id, role)` | Persistent | ~1–2 years, timed grants only |
 
 Revoked grants are tombstoned to `false` rather than deleted, so the event
 log remains the authoritative audit trail.
@@ -73,6 +85,7 @@ log remains the authoritative audit trail.
 | Symbol | Payload | When |
 |---|---|---|
 | `ROLEGRT` | `(account, program_id, role)` | Role granted |
+| `ROLETEN` | `(account, program_id, role, starts_at, expires_at)` | Time-bounded role granted |
 | `ROLERVK` | `(account, program_id, role)` | Role revoked |
 | `PERMSET` | `(resource, role, op, allowed)` | Permission table updated |
 
@@ -80,8 +93,9 @@ log remains the authoritative audit trail.
 
 ## Privacy
 
-Only `Address` (Stellar public key) and `BytesN<32>` program identifiers are
-stored. No names, grades, or PII are ever written. Revocation is immediate.
+Only `Address` (Stellar public key), `BytesN<32>` program identifiers, role
+identifiers, and public ledger timestamps are stored. No names, private
+application content, grades, or PII are ever written. Revocation is immediate.
 
 ---
 

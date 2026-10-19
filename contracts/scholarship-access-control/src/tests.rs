@@ -100,6 +100,120 @@ fn test_revoke_role_removes_access_immediately() {
 }
 
 #[test]
+fn test_tenured_role_is_scoped_and_expires() {
+    let (env, _, client) = setup();
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let coordinator = Address::generate(&env);
+    let pid = program_id(&env);
+    env.ledger().set_timestamp(100);
+
+    client.grant_role_with_tenure(
+        &admin,
+        &coordinator,
+        &pid,
+        &Role::Coordinator,
+        &120,
+        &200,
+    );
+    assert!(!client.has_role(&coordinator, &pid, &Role::Coordinator));
+    assert_eq!(
+        client.get_role_tenure(&coordinator, &pid, &Role::Coordinator),
+        Some(crate::RoleTenure {
+            starts_at: 120,
+            expires_at: 200,
+        })
+    );
+
+    env.ledger().set_timestamp(120);
+    assert!(client.has_role(&coordinator, &pid, &Role::Coordinator));
+    assert!(client.can(&Resource::Program, &Role::Coordinator, &Operation::Write));
+
+    env.ledger().set_timestamp(200);
+    assert!(!client.has_role(&coordinator, &pid, &Role::Coordinator));
+    let expired = client
+        .try_require_role(&coordinator, &pid, &Role::Coordinator)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(expired, ContractError::Unauthorized);
+    let other_program = other_program_id(&env);
+    assert!(!client.has_role(&coordinator, &other_program, &Role::Coordinator));
+}
+
+#[test]
+fn test_tenure_rejects_past_or_empty_intervals() {
+    let (env, _, client) = setup();
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let reviewer = Address::generate(&env);
+    let pid = program_id(&env);
+    env.ledger().set_timestamp(100);
+
+    let past_start = client
+        .try_grant_role_with_tenure(
+            &admin,
+            &reviewer,
+            &pid,
+            &Role::ApplicationReviewer,
+            &99,
+            &200,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(past_start, ContractError::InvalidTenure);
+
+    let empty_interval = client
+        .try_grant_role_with_tenure(
+            &admin,
+            &reviewer,
+            &pid,
+            &Role::ApplicationReviewer,
+            &150,
+            &150,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(empty_interval, ContractError::InvalidTenure);
+}
+
+#[test]
+fn test_tenured_finance_approver_can_approve_but_not_disburse() {
+    let (env, _, client) = setup();
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let approver = Address::generate(&env);
+    let pid = program_id(&env);
+    env.ledger().set_timestamp(100);
+
+    client.grant_role_with_tenure(
+        &admin,
+        &approver,
+        &pid,
+        &Role::FinanceApprover,
+        &100,
+        &200,
+    );
+    client.authorize(
+        &approver,
+        &pid,
+        &Role::FinanceApprover,
+        &Resource::Disbursement,
+        &Operation::Approve,
+    );
+    let err = client
+        .try_authorize(
+            &approver,
+            &pid,
+            &Role::FinanceApprover,
+            &Resource::Disbursement,
+            &Operation::Disburse,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, ContractError::OperationNotPermitted);
+}
+
+#[test]
 fn test_non_admin_cannot_grant_role() {
     let (env, _, client) = setup();
     let admin = Address::generate(&env);

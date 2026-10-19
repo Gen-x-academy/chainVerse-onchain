@@ -51,7 +51,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
 };
 
-const CONTRACT_VERSION: u32 = 1;
+const CONTRACT_VERSION: u32 = 2;
 
 /// ~1 year at 5-second ledgers.
 const RECORD_MIN_TTL: u32 = 3_110_400;
@@ -95,6 +95,8 @@ pub enum ContractError {
     UnknownResource = 9,
     /// The requested operation is unknown to this build.
     UnknownOperation = 10,
+    /// The role tenure must start now or later and end after it starts.
+    InvalidTenure = 11,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,18 @@ pub enum Role {
     Finance = 5,
     Auditor = 6,
     Administrator = 7,
+    Coordinator = 8,
+    ApplicationReviewer = 9,
+    SafeguardingContact = 10,
+    FinanceApprover = 11,
+}
+
+/// A program-scoped role assignment active on `[starts_at, expires_at)`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoleTenure {
+    pub starts_at: u64,
+    pub expires_at: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +177,8 @@ pub enum DataKey {
     ProgramGrantCount(BytesN<32>),
     /// Total grant counter stored in instance storage (survives upgrades).
     TotalGrantCount,
+    /// Optional start and expiry timestamps for a time-bounded role grant.
+    RoleTenure(Address, BytesN<32>, Role),
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +203,7 @@ impl ScholarshipAccessControlContract {
             &admin,
             &global_scope(&env),
             Role::Administrator,
+            None,
         )?;
         // Seed the default permission table.
         Self::init_permissions(&env);
@@ -221,7 +238,37 @@ impl ScholarshipAccessControlContract {
         role: Role,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
-        Self::_grant_internal(&env, &account, &program_id, role)
+        Self::_grant_internal(&env, &account, &program_id, role, None)
+    }
+
+    /// Admin-only: assign a program-scoped role during `[starts_at, expires_at)`.
+    /// The tenure is measured in ledger timestamp seconds and cannot be backdated.
+    pub fn grant_role_with_tenure(
+        env: Env,
+        admin: Address,
+        account: Address,
+        program_id: BytesN<32>,
+        role: Role,
+        starts_at: u64,
+        expires_at: u64,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env, &admin)?;
+        if program_id == global_scope(&env)
+            || starts_at < env.ledger().timestamp()
+            || expires_at <= starts_at
+        {
+            return Err(ContractError::InvalidTenure);
+        }
+        Self::_grant_internal(
+            &env,
+            &account,
+            &program_id,
+            role,
+            Some(RoleTenure {
+                starts_at,
+                expires_at,
+            }),
+        )
     }
 
     fn _grant_internal(
@@ -229,6 +276,7 @@ impl ScholarshipAccessControlContract {
         account: &Address,
         program_id: &BytesN<32>,
         role: Role,
+        tenure: Option<RoleTenure>,
     ) -> Result<(), ContractError> {
         // Check per-program ceiling.
         let prog_key = DataKey::ProgramGrantCount(program_id.clone());
@@ -273,11 +321,61 @@ impl ScholarshipAccessControlContract {
             .persistent()
             .extend_ttl(&role_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
 
-        env.events().publish(
-            (symbol_short!("ROLEGRT"),),
-            (account.clone(), program_id.clone(), role),
-        );
+        let tenure_key = DataKey::RoleTenure(account.clone(), program_id.clone(), role);
+        if let Some(tenure) = tenure {
+            env.storage().persistent().set(&tenure_key, &tenure);
+            env.storage()
+                .persistent()
+                .extend_ttl(&tenure_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+            env.events().publish(
+                (symbol_short!("ROLETEN"),),
+                (
+                    account.clone(),
+                    program_id.clone(),
+                    role,
+                    tenure.starts_at,
+                    tenure.expires_at,
+                ),
+            );
+        } else {
+            env.storage().persistent().remove(&tenure_key);
+            env.events().publish(
+                (symbol_short!("ROLEGRT"),),
+                (account.clone(), program_id.clone(), role),
+            );
+        }
         Ok(())
+    }
+
+    fn role_is_active(
+        env: &Env,
+        account: &Address,
+        program_id: &BytesN<32>,
+        role: Role,
+    ) -> bool {
+        let granted: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Role(account.clone(), program_id.clone(), role))
+            .unwrap_or(false);
+        if !granted {
+            return false;
+        }
+        match env
+            .storage()
+            .persistent()
+            .get::<DataKey, RoleTenure>(&DataKey::RoleTenure(
+                account.clone(),
+                program_id.clone(),
+                role,
+            ))
+        {
+            Some(tenure) => {
+                let now = env.ledger().timestamp();
+                now >= tenure.starts_at && now < tenure.expires_at
+            }
+            None => true,
+        }
     }
 
     /// Admin-only: revoke `role` from `account` for `program_id`.
@@ -303,6 +401,9 @@ impl ScholarshipAccessControlContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RoleTenure(account.clone(), program_id.clone(), role));
 
         if was_active {
             let prog_key = DataKey::ProgramGrantCount(program_id.clone());
@@ -344,19 +445,25 @@ impl ScholarshipAccessControlContract {
         role: Role,
     ) -> bool {
         // Check program-scoped grant.
-        let scoped: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Role(account.clone(), program_id, role))
-            .unwrap_or(false);
-        if scoped {
+        if Self::role_is_active(&env, &account, &program_id, role) {
             return true;
         }
         // Fallback: check global grant (all-zero scope).
-        env.storage()
-            .persistent()
-            .get(&DataKey::Role(account, global_scope(&env), role))
-            .unwrap_or(false)
+        Self::role_is_active(&env, &account, &global_scope(&env), role)
+    }
+
+    /// Return the stored tenure for a scoped role grant, if it is time-bounded.
+    pub fn get_role_tenure(
+        env: Env,
+        account: Address,
+        program_id: BytesN<32>,
+        role: Role,
+    ) -> Option<RoleTenure> {
+        env.storage().persistent().get(&DataKey::RoleTenure(
+            account,
+            program_id,
+            role,
+        ))
     }
 
     /// Require `account` to hold `role` on `program_id` and call
@@ -474,6 +581,18 @@ impl ScholarshipAccessControlContract {
             (Document, Reviewer, Read, true),
             (Decision, Reviewer, Read, true),
             (Decision, Reviewer, Write, true),
+            // Program staffing roles
+            (Program, Coordinator, Read, true),
+            (Program, Coordinator, Write, true),
+            (Application, ApplicationReviewer, Read, true),
+            (Document, ApplicationReviewer, Read, true),
+            (Decision, ApplicationReviewer, Read, true),
+            (Decision, ApplicationReviewer, Write, true),
+            (Communication, SafeguardingContact, Read, true),
+            (Communication, SafeguardingContact, Write, true),
+            (Disbursement, FinanceApprover, Read, true),
+            (Disbursement, FinanceApprover, Approve, true),
+            (Report, FinanceApprover, Read, true),
             // Verifier
             (Identity, Verifier, Read, true),
             (Identity, Verifier, Write, true),
