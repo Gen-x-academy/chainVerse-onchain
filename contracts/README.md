@@ -8,6 +8,7 @@
 - [Mentorship Public Identifiers](./docs/mentorship-identifiers.md)
 - [Mentorship Cohorts](./docs/mentorship-cohorts.md)
 - [Scholarship Service-Level Indicators](./docs/scholarship-sli.md)
+- [Mentor Credential Claims](./docs/mentor-credentials.md)
 - [Developer Setup Guide](./docs/setup.md)
 ## Requirements
 

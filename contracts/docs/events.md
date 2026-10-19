@@ -82,3 +82,38 @@ The system emits various events useful for indexing. This documents standard eve
 - **Topics**: `(program_id: BytesN<32>, metric: SliMetric, day: u64)`
 - **Payload**: `SliAggregate` (sample count, failures, duration totals/maxima, reconciliation drift totals/maxima, and update time).
 - **Privacy**: Individual sample IDs and participant or payment references are omitted.
+### MentorshipTermsPublished
+
+- **Contract topic**: `TERMPUB`
+- **Payload**: `(program_id: BytesN<32>, version: u32, hashes: TermsHashes, expires_at: u64)`
+- **Privacy**: Contains only public commitments and the expiry timestamp. See [MENTOR-016 versioned terms](./mentorship-terms.md).
+
+### MentorshipProgramRegistered
+
+- **Contract topic**: `PROGREG`
+- **Payload**: `(program_id: BytesN<32>, owner: Address)`
+- **Privacy**: Both values are public; use an opaque program commitment.
+
+### MentorshipTermsAccepted
+
+- **Contract topic**: `TERMACK`
+- **Payload**: `(program_id: BytesN<32>, application_ref: BytesN<32>, mentee: Address, version: u32, accepted_at: u64)`
+- **Privacy**: The mentee address and acceptance activity are public. `application_ref` must be an opaque commitment, never a direct identifier.
+
+### MentorCredentialClaimSubmitted
+
+- **Contract topic**: `CLMSUB`
+- **Payload**: `(mentor: Address, claim_id: BytesN<32>, category_code: u32, experience_years: u32)`
+- **Privacy**: Use opaque claim IDs and category codes. Claim details and evidence remain off-chain.
+
+### MentorCredentialReviewDecision
+
+- **Contract topics**: `CLMAPR`, `CLMREJ`, `CLMEXP`, `CLMRVK`
+- **Payload**: Approval `(mentor, claim_id, reviewer, reviewed_at)`; rejection, expiration, and revocation `(mentor, claim_id, reviewer, reason_code, reviewed_at)`
+- **Privacy**: Reviewer identity and public decision metadata are exposed. Reason-code descriptions and supporting evidence remain off-chain.
+
+### MentorCredentialReviewerAccess
+
+- **Contract topics**: `REVGRNT`, `REVRVK`
+- **Payload**: `(reviewer: Address, admin: Address)`
+- **Privacy**: Reviewer and admin addresses are public.

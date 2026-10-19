@@ -259,6 +259,12 @@
           ],
           "returns": "Option<MetricDefinition>"
         },
+        "get_sponsor_impact": {
+          "params": [
+            "cohort_tag: String"
+          ],
+          "returns": "Option<SponsorImpactReport>"
+        },
         "increment": {
           "params": [
             "caller: Address",
@@ -283,6 +289,13 @@
         "pause": {
           "params": [
             "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "publish_sponsor_impact": {
+          "params": [
+            "caller: Address",
+            "submission: SponsorImpactSubmission"
           ],
           "returns": "Result<(), ContractError>"
         },
@@ -1540,6 +1553,9 @@
     "scholarship-eligibility": {
       "events": {
         "ATTEST": 3,
+        "CRITATST": 5,
+        "CRITRVK": 4,
+        "MRULEPUB": 2,
         "RULEPUB": 2
       },
       "functions": {
@@ -1557,6 +1573,13 @@
           ],
           "returns": "Result<bool, ContractError>"
         },
+        "evaluate_mentorship_eligibility": {
+          "params": [
+            "program_id: BytesN<32>",
+            "subject: Address"
+          ],
+          "returns": "Result<bool, ContractError>"
+        },
         "get_attestation": {
           "params": [
             "subject: Address",
@@ -1564,6 +1587,14 @@
             "attestation_type: Symbol"
           ],
           "returns": "Result<Attestation, ContractError>"
+        },
+        "get_criterion_attestation": {
+          "params": [
+            "subject: Address",
+            "program_id: BytesN<32>",
+            "criterion: MentorshipCriterion"
+          ],
+          "returns": "Result<CriterionAttestation, ContractError>"
         },
         "get_eligibility_rule": {
           "params": [
@@ -1577,6 +1608,19 @@
             "program_id: BytesN<32>"
           ],
           "returns": "Result<u32, ContractError>"
+        },
+        "get_latest_mentorship_rule_version": {
+          "params": [
+            "program_id: BytesN<32>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "get_mentorship_eligibility_rule": {
+          "params": [
+            "program_id: BytesN<32>",
+            "version: u32"
+          ],
+          "returns": "Result<MentorshipEligibilityRule, ContractError>"
         },
         "global_scope": {
           "params": [],
@@ -1612,11 +1656,31 @@
           ],
           "returns": "Result<(), ContractError>"
         },
+        "issue_criterion_attestation": {
+          "params": [
+            "issuer: Address",
+            "subject: Address",
+            "program_id: BytesN<32>",
+            "criterion: MentorshipCriterion",
+            "evidence_hash: BytesN<32>",
+            "expiry: u64"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
         "publish_eligibility_rule": {
           "params": [
             "admin: Address",
             "program_id: BytesN<32>",
             "required_types: Vec<Symbol>"
+          ],
+          "returns": "Result<u32, ContractError>"
+        },
+        "publish_mentorship_eligibility_rule": {
+          "params": [
+            "admin: Address",
+            "program_id: BytesN<32>",
+            "all_of: Vec<MentorshipCriterion>",
+            "any_of: Vec<MentorshipCriterion>"
           ],
           "returns": "Result<u32, ContractError>"
         },
@@ -1633,6 +1697,15 @@
             "subject: Address",
             "scope: BytesN<32>",
             "attestation_type: Symbol"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "revoke_criterion_attestation": {
+          "params": [
+            "caller: Address",
+            "subject: Address",
+            "program_id: BytesN<32>",
+            "criterion: MentorshipCriterion"
           ],
           "returns": "Result<(), ContractError>"
         },
