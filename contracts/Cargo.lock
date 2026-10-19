@@ -864,6 +864,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "mentorship-availability"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "mentorship-calendar"
+
+[[package]]
+name = "mentorship-applications"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "mentorship-conduct"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+name = "mentorship-matching"
+
+[[package]]
+name = "mentorship-slots"
+version = "0.1.0"
+dependencies = [
+ "mentorship-availability",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "mentorship-applications"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1075,6 +1115,173 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "scholarship-admin"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-aggregate-analytics"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-applications"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-communications"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "scholarship-applications",
+ "scholarship-core",
+ "scholarship-milestones",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-core"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-dashboards"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "scholarship-core",
+ "scholarship-disbursements",
+ "scholarship-finance",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-disbursement-enhancements"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "scholarship-core",
+ "scholarship-disbursements",
+ "scholarship-finance",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-disbursements"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-discovery-notifications"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "scholarship-applications",
+ "scholarship-communications",
+ "scholarship-core",
+ "scholarship-eligibility",
+ "scholarship-milestones",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-eligibility"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-fairness-review"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-finance"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "ed25519-dalek",
+ "scholarship-core",
+ "scholarship-disbursements",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-fraud-signals"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-milestones"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-payment-anomaly"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-programs"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-registry"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "scholarship-review-workflow"
+version = "0.1.0"
+dependencies = [
+ "chainverse-types",
+ "scholarship-applications",
+ "scholarship-core",
+ "scholarship-disbursements",
+ "scholarship-eligibility",
+ "scholarship-programs",
+ "shared",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "scholarship-admin"

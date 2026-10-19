@@ -125,6 +125,24 @@ fn cohort_visible_at_or_above_threshold() {
 }
 
 #[test]
+fn cohort_suppressed_when_positive_outcome_subgroup_is_below_threshold() {
+    let (env, _admin, recorder, client) = setup();
+    let t = tag(&env, "small-outcome-subgroup");
+    client.create_cohort(&recorder, &t).unwrap();
+    client
+        .increment(&recorder, &t, &MetricField::TotalApplicants, &10)
+        .unwrap();
+    client
+        .increment(&recorder, &t, &MetricField::ApprovedCount, &4)
+        .unwrap();
+
+    assert!(matches!(
+        client.get_cohort_metrics(&t).unwrap(),
+        CohortResult::Suppressed(_)
+    ));
+}
+
+#[test]
 fn raising_k_threshold_hides_previously_visible_cohort() {
     let (env, admin, recorder, client) = setup();
     let t = tag(&env, "threshold-test");
@@ -165,10 +183,10 @@ fn increment_all_fields() {
         .increment(&recorder, &t, &MetricField::ApprovedCount, &10)
         .unwrap();
     client
-        .increment(&recorder, &t, &MetricField::RejectedCount, &5)
+        .increment(&recorder, &t, &MetricField::RejectedCount, &10)
         .unwrap();
     client
-        .increment(&recorder, &t, &MetricField::WithdrawnCount, &3)
+        .increment(&recorder, &t, &MetricField::WithdrawnCount, &10)
         .unwrap();
     client
         .increment(&recorder, &t, &MetricField::DisbursedCount, &10)
@@ -180,8 +198,8 @@ fn increment_all_fields() {
         assert_eq!(m.eligible_count, 18);
         assert_eq!(m.review_completed_count, 15);
         assert_eq!(m.approved_count, 10);
-        assert_eq!(m.rejected_count, 5);
-        assert_eq!(m.withdrawn_count, 3);
+        assert_eq!(m.rejected_count, 10);
+        assert_eq!(m.withdrawn_count, 10);
         assert_eq!(m.disbursed_count, 10);
     } else {
         panic!("expected Metrics variant");
@@ -247,13 +265,16 @@ fn record_disbursements_accumulates_total() {
 
     let batch = DisbursementBatch {
         cohort_tag: t.clone(),
-        amounts: vec![&env, 1_000_i128, 2_000_i128, 3_000_i128],
+        amounts: vec![
+            &env, 1_000_i128, 1_000_i128, 1_000_i128, 1_000_i128, 1_000_i128, 1_000_i128,
+            1_000_i128, 1_000_i128, 1_000_i128, 1_000_i128,
+        ],
     };
     client.record_disbursements(&recorder, &batch).unwrap();
 
     if let CohortResult::Metrics(m) = client.get_cohort_metrics(&t).unwrap() {
-        assert_eq!(m.disbursed_count, 3);
-        assert_eq!(m.total_disbursed_amount, 6_000);
+        assert_eq!(m.disbursed_count, 10);
+        assert_eq!(m.total_disbursed_amount, 10_000);
     } else {
         panic!("expected Metrics");
     }
