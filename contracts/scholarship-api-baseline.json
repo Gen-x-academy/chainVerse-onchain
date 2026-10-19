@@ -259,6 +259,12 @@
           ],
           "returns": "Option<MetricDefinition>"
         },
+        "get_sponsor_impact": {
+          "params": [
+            "cohort_tag: String"
+          ],
+          "returns": "Option<SponsorImpactReport>"
+        },
         "increment": {
           "params": [
             "caller: Address",
@@ -283,6 +289,13 @@
         "pause": {
           "params": [
             "caller: Address"
+          ],
+          "returns": "Result<(), ContractError>"
+        },
+        "publish_sponsor_impact": {
+          "params": [
+            "caller: Address",
+            "submission: SponsorImpactSubmission"
           ],
           "returns": "Result<(), ContractError>"
         },

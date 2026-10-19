@@ -5,6 +5,7 @@
 - [Architecture Diagram](./docs/architecture.md)
 - [Escrow Lifecycle](./docs/escrow_lifecycle.md)
 - [Contract Events](./docs/events.md)
+- [Mentor Credential Claims](./docs/mentor-credentials.md)
 - [Developer Setup Guide](./docs/setup.md)
 ## Requirements
 

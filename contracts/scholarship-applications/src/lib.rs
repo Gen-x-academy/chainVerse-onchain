@@ -128,6 +128,11 @@ pub enum PrivacyError {
     RequestAlreadyProcessed = 5,
     InvalidDenialReason = 6,
     CounterOverflow = 7,
+    NoExportableData = 8,
+    ExportAlreadyPending = 9,
+    ExportRequestNotFound = 10,
+    ExportRequestAlreadyResolved = 11,
+    InvalidExportHash = 12,
 }
 
 #[contracttype]
@@ -161,11 +166,37 @@ pub struct PrivacyRequest {
 }
 
 #[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DataExportStatus {
+    Pending,
+    Completed,
+    Cancelled,
+}
+
+/// On-chain export metadata only. The export itself and consent history stay
+/// off-chain; these commitments let the applicant verify the delivered files.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DataExportRequest {
+    pub id: u32,
+    pub applicant: Address,
+    pub program_id: BytesN<32>,
+    pub requested_at: u64,
+    pub status: DataExportStatus,
+    pub resolved_at: u64,
+    pub export_hash: BytesN<32>,
+    pub consent_history_hash: BytesN<32>,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum PrivacyDataKey {
     RequestCounter,
     Request(u32),
     ApplicantRequest(Address, BytesN<32>),
+    ExportRequestCounter,
+    ExportRequest(u32),
+    ApplicantExportRequest(Address, BytesN<32>),
 }
 
 const CONTRACT_VERSION: u32 = 1;
@@ -576,7 +607,7 @@ impl ScholarshipApplicationsContract {
     ) -> Result<(), ContractError> {
         applicant.require_auth();
 
-        let key = DataKey::Consent(applicant, program_id);
+        let key = DataKey::Consent(applicant.clone(), program_id.clone());
         let mut record: ConsentRecord = env
             .storage()
             .persistent()
@@ -590,6 +621,10 @@ impl ScholarshipApplicationsContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("CONSRVK"),),
+            (applicant, program_id, record.version),
+        );
         Ok(())
     }
 
@@ -1149,6 +1184,190 @@ impl ScholarshipApplicationsContract {
         );
 
         Ok(request_id)
+    }
+
+    /// Applicant-authenticated request for an off-chain machine-readable
+    /// export of application data and the consent event history. The contract
+    /// stores only request metadata and later receives opaque commitments.
+    pub fn request_data_export(
+        env: Env,
+        applicant: Address,
+        program_id: BytesN<32>,
+    ) -> Result<u32, PrivacyError> {
+        applicant.require_auth();
+
+        let has_application = env
+            .storage()
+            .persistent()
+            .has(&DataKey::Application(applicant.clone(), program_id.clone()));
+        let has_consent = env
+            .storage()
+            .persistent()
+            .has(&DataKey::Consent(applicant.clone(), program_id.clone()));
+        if !has_application && !has_consent {
+            return Err(PrivacyError::NoExportableData);
+        }
+
+        let applicant_key =
+            PrivacyDataKey::ApplicantExportRequest(applicant.clone(), program_id.clone());
+        if let Some(previous_id) = env.storage().persistent().get::<_, u32>(&applicant_key) {
+            if let Some(previous) = env
+                .storage()
+                .persistent()
+                .get::<_, DataExportRequest>(&PrivacyDataKey::ExportRequest(previous_id))
+            {
+                if previous.status == DataExportStatus::Pending {
+                    return Err(PrivacyError::ExportAlreadyPending);
+                }
+            }
+        }
+
+        let counter_key = PrivacyDataKey::ExportRequestCounter;
+        let counter: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
+        let request_id = counter
+            .checked_add(1)
+            .ok_or(PrivacyError::CounterOverflow)?;
+        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+        let request = DataExportRequest {
+            id: request_id,
+            applicant: applicant.clone(),
+            program_id: program_id.clone(),
+            requested_at: env.ledger().timestamp(),
+            status: DataExportStatus::Pending,
+            resolved_at: 0,
+            export_hash: zero_hash.clone(),
+            consent_history_hash: zero_hash,
+        };
+
+        let request_key = PrivacyDataKey::ExportRequest(request_id);
+        env.storage().persistent().set(&request_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&request_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.storage().persistent().set(&counter_key, &request_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&counter_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.storage()
+            .persistent()
+            .set(&applicant_key, &request_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&applicant_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("DATAEXP"),
+                soroban_sdk::symbol_short!("REQUEST"),
+            ),
+            (applicant, program_id, request_id),
+        );
+        Ok(request_id)
+    }
+
+    /// Applicant-authenticated cancellation of an unfulfilled export request.
+    pub fn cancel_data_export(
+        env: Env,
+        applicant: Address,
+        request_id: u32,
+    ) -> Result<(), PrivacyError> {
+        applicant.require_auth();
+        let request_key = PrivacyDataKey::ExportRequest(request_id);
+        let mut request: DataExportRequest = env
+            .storage()
+            .persistent()
+            .get(&request_key)
+            .ok_or(PrivacyError::ExportRequestNotFound)?;
+        if request.applicant != applicant {
+            return Err(PrivacyError::Unauthorized);
+        }
+        if request.status != DataExportStatus::Pending {
+            return Err(PrivacyError::ExportRequestAlreadyResolved);
+        }
+
+        request.status = DataExportStatus::Cancelled;
+        request.resolved_at = env.ledger().timestamp();
+        env.storage().persistent().set(&request_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&request_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("DATAEXP"),
+                soroban_sdk::symbol_short!("CANCEL"),
+            ),
+            (request_id, applicant),
+        );
+        Ok(())
+    }
+
+    /// Admin-authenticated completion attestation. The off-chain export
+    /// worker supplies commitments to the data package and consent history.
+    pub fn complete_data_export(
+        env: Env,
+        admin: Address,
+        request_id: u32,
+        export_hash: BytesN<32>,
+        consent_history_hash: BytesN<32>,
+    ) -> Result<(), PrivacyError> {
+        Self::require_privacy_admin(&env, &admin)?;
+        let zero_hash = BytesN::from_array(&env, &[0u8; 32]);
+        if export_hash == zero_hash || consent_history_hash == zero_hash {
+            return Err(PrivacyError::InvalidExportHash);
+        }
+
+        let request_key = PrivacyDataKey::ExportRequest(request_id);
+        let mut request: DataExportRequest = env
+            .storage()
+            .persistent()
+            .get(&request_key)
+            .ok_or(PrivacyError::ExportRequestNotFound)?;
+        if request.status != DataExportStatus::Pending {
+            return Err(PrivacyError::ExportRequestAlreadyResolved);
+        }
+
+        request.status = DataExportStatus::Completed;
+        request.resolved_at = env.ledger().timestamp();
+        request.export_hash = export_hash.clone();
+        request.consent_history_hash = consent_history_hash.clone();
+        env.storage().persistent().set(&request_key, &request);
+        env.storage()
+            .persistent()
+            .extend_ttl(&request_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("DATAEXP"),
+                soroban_sdk::symbol_short!("COMPLETE"),
+            ),
+            (request_id, export_hash, consent_history_hash),
+        );
+        Ok(())
+    }
+
+    /// Retrieve an export request's public status and integrity commitments.
+    pub fn get_data_export_request(
+        env: Env,
+        request_id: u32,
+    ) -> Result<DataExportRequest, PrivacyError> {
+        let key = PrivacyDataKey::ExportRequest(request_id);
+        let request = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(PrivacyError::ExportRequestNotFound)?;
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        Ok(request)
+    }
+
+    /// Retrieve the latest export request ID for an applicant/program pair.
+    pub fn get_latest_data_export_request_id(
+        env: Env,
+        applicant: Address,
+        program_id: BytesN<32>,
+    ) -> Option<u32> {
+        env.storage().persistent().get(&PrivacyDataKey::ApplicantExportRequest(applicant, program_id))
     }
 
     /// Admin-authenticated processing of a privacy request (approve or deny).

@@ -1,0 +1,17 @@
+[package]
+name = "mentorship-slots"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+# Dev-only: the contracts must not link each other's WASM exports, so the
+# availability crate is used to run a real instance under test while the
+# contract itself talks to it over the mirrored ABI below.
+mentorship-availability = { path = "../mentorship-availability" }
