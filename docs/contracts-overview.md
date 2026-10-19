@@ -30,6 +30,7 @@ CHV storage is currently schema version `1`; unversioned legacy storage is sourc
 | `staking` | `contracts/staking` | Tiered token staking with lock periods and emergency unstake |
 | `token` | `contracts/token` | Generic token with royalty support |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying contracts together |
+| `mentorship-applications` | `contracts/mentorship-applications` | Mentorship application intake: versioned forms, autosaved drafts, atomic submission, scoped reviewer queues |
 
 ## Key Flows
 

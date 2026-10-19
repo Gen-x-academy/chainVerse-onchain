@@ -18,6 +18,7 @@ members = [
     "token",
     "library-rights",
     "library_licensing",
+    "mentorship-applications",
     "scholarship-admin",
     "scholarship-applications",
     "scholarship-core",
