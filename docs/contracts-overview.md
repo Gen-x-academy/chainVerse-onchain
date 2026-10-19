@@ -32,6 +32,7 @@ CHV storage is currently schema version `1`; unversioned legacy storage is sourc
 | `mentorship-applications` | `contracts/mentorship-applications` | Mentorship application decisions, withdrawal, and reapplication (MENTOR-035/036) |
 | `mentorship-matching` | `contracts/mentorship-matching` | Mentor match proposals, participant consent, and coordinator-assisted matching (MENTOR-037/039) |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying contracts together |
+| `mentorship-applications` | `contracts/mentorship-applications` | Mentorship application intake: versioned forms, autosaved drafts, atomic submission, scoped reviewer queues |
 
 ## Key Flows
 
