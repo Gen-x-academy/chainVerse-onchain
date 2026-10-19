@@ -1,11 +1,11 @@
 #![cfg(test)]
 use crate::{
-    PrivacyError, PrivacyRequestStatus, PrivacyRequestType, ScholarshipApplicationsContract,
-    ScholarshipApplicationsContractClient,
+    DataExportStatus, PrivacyError, PrivacyRequestStatus, PrivacyRequestType,
+    ScholarshipApplicationsContract, ScholarshipApplicationsContractClient,
 };
 use soroban_sdk::{
-    testutils::Address as _,
-    Address, BytesN, Env,
+    testutils::{Address as _, Events as _},
+    symbol_short, Address, BytesN, Env, Symbol, TryFromVal, TryIntoVal,
 };
 
 fn setup() -> (Env, Address, Address) {
@@ -216,4 +216,136 @@ fn test_get_non_existent_request_fails() {
 
     let res = client.try_get_privacy_request(&999);
     assert_eq!(res, Err(Ok(PrivacyError::RequestNotFound)));
+}
+
+#[test]
+fn test_data_export_request_is_completed_with_content_and_consent_commitments() {
+    let (env, contract_id, admin) = setup();
+    let client = ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 1);
+    let applicant = Address::generate(&env);
+    submit_sample_application(&env, &client, &admin, &applicant, &pid, &hash(&env, 1));
+
+    let request_id = client.request_data_export(&applicant, &pid);
+    assert_eq!(
+        client.get_latest_data_export_request_id(&applicant, &pid),
+        Some(request_id)
+    );
+    let pending = client.get_data_export_request(&request_id);
+    assert_eq!(pending.status, DataExportStatus::Pending);
+    assert_eq!(pending.applicant, applicant);
+    assert_eq!(pending.program_id, pid);
+    assert_eq!(pending.export_hash, hash(&env, 0));
+
+    assert_eq!(
+        client.try_request_data_export(&applicant, &pid),
+        Err(Ok(PrivacyError::ExportAlreadyPending))
+    );
+
+    let export_hash = hash(&env, 30);
+    let consent_history_hash = hash(&env, 31);
+    client.complete_data_export(&admin, &request_id, &export_hash, &consent_history_hash);
+
+    let completed = client.get_data_export_request(&request_id);
+    assert_eq!(completed.status, DataExportStatus::Completed);
+    assert_eq!(completed.export_hash, export_hash);
+    assert_eq!(completed.consent_history_hash, consent_history_hash);
+    assert_eq!(completed.resolved_at, env.ledger().timestamp());
+    assert_eq!(
+        client.try_complete_data_export(
+            &admin,
+            &request_id,
+            &export_hash,
+            &consent_history_hash,
+        ),
+        Err(Ok(PrivacyError::ExportRequestAlreadyResolved))
+    );
+}
+
+#[test]
+fn test_export_requires_owned_request_and_applicant_can_cancel() {
+    let (env, contract_id, admin) = setup();
+    let client = ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 1);
+    let applicant = Address::generate(&env);
+    submit_sample_application(&env, &client, &admin, &applicant, &pid, &hash(&env, 1));
+    let request_id = client.request_data_export(&applicant, &pid);
+
+    let other_applicant = Address::generate(&env);
+    assert_eq!(
+        client.try_cancel_data_export(&other_applicant, &request_id),
+        Err(Ok(PrivacyError::Unauthorized))
+    );
+
+    client.cancel_data_export(&applicant, &request_id);
+    assert_eq!(
+        client.get_data_export_request(&request_id).status,
+        DataExportStatus::Cancelled
+    );
+    let another_request = client.request_data_export(&applicant, &pid);
+    assert_ne!(another_request, request_id);
+}
+
+#[test]
+fn test_data_export_requires_an_application_or_consent_record() {
+    let (env, contract_id, admin) = setup();
+    let client = ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    let applicant = Address::generate(&env);
+    let pid = program_id(&env, 1);
+
+    assert_eq!(
+        client.try_request_data_export(&applicant, &pid),
+        Err(Ok(PrivacyError::NoExportableData))
+    );
+}
+
+#[test]
+fn test_only_admin_can_complete_data_export() {
+    let (env, contract_id, admin) = setup();
+    let client = ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 1);
+    let applicant = Address::generate(&env);
+    submit_sample_application(&env, &client, &admin, &applicant, &pid, &hash(&env, 1));
+    let request_id = client.request_data_export(&applicant, &pid);
+    let unauthorized = Address::generate(&env);
+
+    assert_eq!(
+        client.try_complete_data_export(
+            &unauthorized,
+            &request_id,
+            &hash(&env, 30),
+            &hash(&env, 31),
+        ),
+        Err(Ok(PrivacyError::Unauthorized))
+    );
+    assert_eq!(
+        client.get_data_export_request(&request_id).status,
+        DataExportStatus::Pending
+    );
+}
+
+#[test]
+fn test_consent_revocation_emits_history_event() {
+    let (env, contract_id, admin) = setup();
+    let client = ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    let pid = program_id(&env, 1);
+    let applicant = Address::generate(&env);
+    client.initialize(&admin);
+    client.register_program(&admin, &pid, &1_000_000);
+    client.publish_consent_terms(&admin, &pid, &hash(&env, 20));
+    let consent_version = client.record_consent(&applicant, &pid);
+
+    client.revoke_consent(&applicant, &pid);
+
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+    let (_, topics, data) = events.get(0).unwrap();
+    let topic = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+    assert_eq!(topic, symbol_short!("CONSRVK"));
+    let (event_applicant, event_program, event_version): (Address, BytesN<32>, u32) =
+        data.try_into_val(&env).unwrap();
+    assert_eq!(event_applicant, applicant);
+    assert_eq!(event_program, pid);
+    assert_eq!(event_version, consent_version);
 }
