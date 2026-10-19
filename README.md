@@ -28,6 +28,8 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive) and derived access grants |
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive), derived access grants, and rendition migration policies |
 | `library-rights` | `contracts/library-rights` | E-Library content integrity states, emergency quarantine, and pseudonymous membership attestations |
+| `mentorship-applications` | `contracts/mentorship-applications` | Mentorship application history: structured decisions with public/internal reason separation, plus withdrawal and replay-safe reapplication with fresh consent |
+| `mentorship-matching` | `contracts/mentorship-matching` | Mentor match proposals with symmetric block/eligibility checks, versioned participant consent, and reportable coordinator-assisted matching |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying the above contracts together |
 
 `contracts/common` and `contracts/shared` are internal Rust libraries (not deployable contracts) used by the crates above.
