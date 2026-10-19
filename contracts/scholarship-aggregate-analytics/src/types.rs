@@ -3,8 +3,8 @@ use soroban_sdk::{contracttype, String, Vec};
 /// Aggregate counters for one cohort bucket.
 ///
 /// # Privacy invariant
-/// Results are only returned when `total_applicants >= k_threshold`.
-/// Individual applicant identifiers are **never** stored; only counts.
+/// Results are returned only when the cohort size and every positive
+/// outcome subgroup meet `k_threshold`. Individual identifiers are never stored.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct CohortMetrics {
@@ -49,8 +49,8 @@ pub struct MetricDefinition {
     pub updated_at: u64,
 }
 
-/// Suppressed placeholder returned instead of real metrics when the cohort
-/// is below the k-anonymity threshold.
+/// Suppressed placeholder returned instead of metrics when the cohort or an
+/// outcome subgroup is below the k-anonymity threshold.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct SuppressedResult {
@@ -89,4 +89,46 @@ pub enum MetricField {
 pub struct DisbursementBatch {
     pub cohort_tag: String,
     pub amounts: Vec<i128>,
+}
+
+/// Aggregate-only input for a sponsor report. The recorder must apply
+/// suppression off-chain before submitting; contract calldata is public.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SponsorImpactSubmission {
+    pub cohort_tag: String,
+        /// Distinct recipients, deduplicated by the trusted off-chain recorder.
+    pub recipient_count: u64,
+    /// Count of learning enrollments or funded learning opportunities.
+    pub funded_learning_count: u64,
+    /// Count of learning opportunities with completion attestations.
+    pub completed_count: u64,
+    /// Count of credentials issued to recipients in this cohort.
+    pub credentials_issued_count: u64,
+    /// Distinct awards included in the total funding amount.
+    pub funded_award_count: u64,
+    /// Aggregate amount in the smallest token unit.
+    pub total_funded_amount: i128,
+}
+
+/// How consumers must interpret the reported outcomes.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImpactInterpretation {
+    DescriptiveAssociationOnly,
+}
+
+/// Immutable, public sponsor impact snapshot for one cohort.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SponsorImpactReport {
+    pub cohort_tag: String,
+    pub recipient_count: u64,
+    pub funded_learning_count: u64,
+    pub completed_count: u64,
+    pub credentials_issued_count: u64,
+    pub funded_award_count: u64,
+    pub total_funded_amount: i128,
+    pub interpretation: ImpactInterpretation,
+    pub published_at: u64,
 }
