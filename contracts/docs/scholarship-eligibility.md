@@ -3,9 +3,9 @@
 - Status: Implemented (partial — see Scope)
 - Owner: Scholarships On-chain working group
 - Related issues: #1066 (composable eligibility rules), #1068 (eligibility
-  attestations with expiry), #1067 (prerequisite/exclusion rules — not yet
-  implemented), #1069 (application drafts — not yet implemented, separate
-  contract)
+  attestations with expiry), MENTOR-018 (mentorship program eligibility),
+  #1067 (prerequisite/exclusion graphs — not implemented), #1069 (application
+  drafts — not implemented, separate contract)
 
 ## Scope
 
@@ -42,6 +42,31 @@ graph of program relationships is materially more complex than a flat
 per-program requirement list, and application drafts (#1069), which belong
 to a different contract (`scholarship-applications`) and lifecycle.
 
+### MENTOR-018 — mentorship program criteria
+
+`publish_mentorship_eligibility_rule()` publishes an immutable, versioned
+policy with an `all_of` group and an optional `any_of` group. The supported
+typed criteria are role, organization, minimum course progress, skill level,
+geography policy, minimum age/guardian policy, and prerequisite program.
+At most 20 criteria may appear across both groups. Course progress is in
+basis points (1–10,000), skill levels must be positive, and age is bounded at
+130. A non-empty `all_of` is not required if at least one `any_of` criterion
+is present.
+
+An authorized issuer can attest to a criterion only if it is present in the
+program's latest rule. Criterion identifiers are domain-separated SHA-256
+hashes of the typed XDR value. `evaluate_mentorship_eligibility()` requires
+every `all_of` attestation and at least one valid `any_of` attestation when
+that group is non-empty. Attestations expire by ledger timestamp and can be
+revoked immediately by their issuer or the admin. Existing `publish_eligibility_rule()`
+and scholarship attestation entry points are unchanged.
+
+Prerequisite criteria are opaque attestations that a prerequisite is met;
+this contract does not inspect cross-program graphs or detect cycles. Age,
+guardian status, organization, course progress, skill evidence, and geography
+remain private off-chain. On-chain state stores the public typed policy, the
+issuer and subject addresses, expiry, and an evidence digest only.
+
 ## Privacy
 
 This contract never stores the evidence behind a claim — no grades, income
@@ -54,18 +79,19 @@ keeps it from needing to reason about sensitive categories at all.
 
 ## Ownership
 
-The admin (`initialize`) exclusively controls the issuer allowlist and rule
-publication. Only an allowlisted issuer can create attestations, and only
-that same issuer (or the admin) can revoke one — a subject cannot revoke
-their own attestation, and a non-issuing third party cannot revoke someone
-else's.
+The admin (`initialize`) exclusively controls the issuer allowlist and both
+rule publication APIs. Only an allowlisted issuer can create attestations,
+and only that same issuer (or the admin) can revoke one — a subject cannot
+revoke their own attestation, and a non-issuing third party cannot revoke
+someone else's.
 
 ## Migration
 
-New contract, no prior on-chain state. Setup order: `initialize` →
-`add_issuer` (one or more) → `publish_eligibility_rule` per program →
-issuers can then `issue_attestation`. `evaluate_eligibility` fails with
-`NoRulePublished` until a program has a rule.
+The mentorship rule and criterion-attestation storage keys are additive;
+existing scholarship rule and attestation keys and methods are unchanged.
+Setup order: `initialize` → `add_issuer` (one or more) → publish a rule for
+the relevant domain → issuers submit matching attestations. Evaluators fail
+with the corresponding no-rule error until a policy is published.
 
 ## Operational impact
 

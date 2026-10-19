@@ -21,10 +21,11 @@
 //! separately and are not implemented here.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, xdr::ToXdr, Address, Bytes, BytesN, Env,
+    Symbol, Vec,
 };
 
-const CONTRACT_VERSION: u32 = 1;
+const CONTRACT_VERSION: u32 = 2;
 
 // TTL constants: ~1 year at 6-second ledgers, matching course_registry's convention.
 const RECORD_MIN_TTL: u32 = 3_110_400;
@@ -33,6 +34,7 @@ const RECORD_MAX_TTL: u32 = 6_220_800;
 /// #1066 — bounded storage: a rule may require at most this many
 /// attestation types, so evaluation cost and storage size stay predictable.
 const MAX_RULE_REQUIREMENTS: u32 = 10;
+const MAX_MENTORSHIP_CRITERIA: u32 = 20;
 
 /// An attestation scoped to this value applies to every program, not just
 /// one — e.g. a platform-wide "identity verified" claim.
@@ -60,6 +62,14 @@ pub enum ContractError {
     /// may revoke it.
     NotAttestationIssuer = 11,
     VersionOverflow = 12,
+    EmptyMentorshipRule = 13,
+    MentorshipRuleTooLarge = 14,
+    InvalidCriterion = 15,
+    NoMentorshipRulePublished = 16,
+    MentorshipRuleNotFound = 17,
+    CriterionNotInRule = 18,
+    CriterionAttestationNotFound = 19,
+    NotCriterionAttestationIssuer = 20,
 }
 
 #[contracttype]
@@ -74,6 +84,12 @@ pub enum DataKey {
     Rule(BytesN<32>, u32),
     /// #1068 — an attestation for (subject, scope, attestation_type).
     Attestation(Address, BytesN<32>, Symbol),
+    /// #MENTOR-018 — latest mentorship eligibility rule version per program.
+    MentorshipRuleVersion(BytesN<32>),
+    /// #MENTOR-018 — immutable mentorship eligibility rule version.
+    MentorshipRule(BytesN<32>, u32),
+    /// #MENTOR-018 — issuer attestation keyed by subject, program, criterion hash.
+    CriterionAttestation(Address, BytesN<32>, BytesN<32>),
 }
 
 /// #1066 — a program's eligibility rule: the subject must hold a valid
@@ -93,6 +109,43 @@ pub struct EligibilityRule {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Attestation {
     pub issuer: Address,
+    pub expiry: u64,
+    pub issued_at: u64,
+    pub revoked: bool,
+}
+
+/// A public, typed eligibility predicate. Thresholds and policy identifiers
+/// are public; the applicant's underlying attributes remain off-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MentorshipCriterion {
+    Role(BytesN<32>),
+    Organization(BytesN<32>),
+    CourseProgress(BytesN<32>, u32),
+    Skill(BytesN<32>, u32),
+    GeographyPolicy(BytesN<32>),
+    AgeGuardian(u32, bool),
+    Prerequisite(BytesN<32>),
+}
+
+/// Each `all_of` predicate must be attested; if `any_of` is non-empty, at
+/// least one predicate in it must also be attested.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MentorshipEligibilityRule {
+    pub version: u32,
+    pub all_of: Vec<MentorshipCriterion>,
+    pub any_of: Vec<MentorshipCriterion>,
+    pub published_at: u64,
+}
+
+/// An issuer's privacy-minimized attestation to a criterion. Only the
+/// evidence digest is on-chain; the evidence itself and its locator stay off-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CriterionAttestation {
+    pub issuer: Address,
+    pub evidence_hash: BytesN<32>,
     pub expiry: u64,
     pub issued_at: u64,
     pub revoked: bool,
@@ -231,6 +284,305 @@ impl ScholarshipEligibilityContract {
             .persistent()
             .get(&DataKey::Rule(program_id, version))
             .ok_or(ContractError::RuleNotFound)
+    }
+
+    // ── #MENTOR-018 — mentorship-specific composable eligibility ─────────
+
+    /// Admin-only: publish an immutable version of a typed mentorship
+    /// eligibility policy. The all-of group is conjunctive; a nonempty
+    /// any-of group adds an alternative requirement.
+    pub fn publish_mentorship_eligibility_rule(
+        env: Env,
+        admin: Address,
+        program_id: BytesN<32>,
+        all_of: Vec<MentorshipCriterion>,
+        any_of: Vec<MentorshipCriterion>,
+    ) -> Result<u32, ContractError> {
+        Self::require_admin(&env, &admin)?;
+        let criterion_count = all_of
+            .len()
+            .checked_add(any_of.len())
+            .ok_or(ContractError::MentorshipRuleTooLarge)?;
+        if criterion_count == 0 {
+            return Err(ContractError::EmptyMentorshipRule);
+        }
+        if criterion_count > MAX_MENTORSHIP_CRITERIA {
+            return Err(ContractError::MentorshipRuleTooLarge);
+        }
+        for criterion in all_of.iter().chain(any_of.iter()) {
+            if !Self::is_valid_criterion(&criterion) {
+                return Err(ContractError::InvalidCriterion);
+            }
+        }
+        for (index, criterion) in all_of.iter().enumerate() {
+            let criterion_hash = Self::criterion_hash(&env, &criterion);
+            if all_of
+                .iter()
+                .skip(index + 1)
+                .chain(any_of.iter())
+                .any(|other| criterion_hash == Self::criterion_hash(&env, &other))
+            {
+                return Err(ContractError::InvalidCriterion);
+            }
+        }
+        for (index, criterion) in any_of.iter().enumerate() {
+            let criterion_hash = Self::criterion_hash(&env, &criterion);
+            if any_of
+                .iter()
+                .skip(index + 1)
+                .any(|other| criterion_hash == Self::criterion_hash(&env, &other))
+            {
+                return Err(ContractError::InvalidCriterion);
+            }
+        }
+
+        let version_key = DataKey::MentorshipRuleVersion(program_id.clone());
+        let next_version: u32 = env
+            .storage()
+            .persistent()
+            .get(&version_key)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
+        let rule = MentorshipEligibilityRule {
+            version: next_version,
+            all_of,
+            any_of,
+            published_at: env.ledger().timestamp(),
+        };
+        let rule_key = DataKey::MentorshipRule(program_id.clone(), next_version);
+        env.storage().persistent().set(&rule_key, &rule);
+        env.storage()
+            .persistent()
+            .extend_ttl(&rule_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.storage()
+            .persistent()
+            .set(&version_key, &next_version);
+        env.storage()
+            .persistent()
+            .extend_ttl(&version_key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("MRULEPUB"),),
+            (program_id, next_version),
+        );
+        Ok(next_version)
+    }
+
+    pub fn get_latest_mentorship_rule_version(
+        env: Env,
+        program_id: BytesN<32>,
+    ) -> Result<u32, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MentorshipRuleVersion(program_id))
+            .ok_or(ContractError::NoMentorshipRulePublished)
+    }
+
+    pub fn get_mentorship_eligibility_rule(
+        env: Env,
+        program_id: BytesN<32>,
+        version: u32,
+    ) -> Result<MentorshipEligibilityRule, ContractError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MentorshipRule(program_id, version))
+            .ok_or(ContractError::MentorshipRuleNotFound)
+    }
+
+    /// An allowlisted issuer attests that the subject satisfies a criterion
+    /// in the latest published policy. Private evidence remains off-chain.
+    pub fn issue_criterion_attestation(
+        env: Env,
+        issuer: Address,
+        subject: Address,
+        program_id: BytesN<32>,
+        criterion: MentorshipCriterion,
+        evidence_hash: BytesN<32>,
+        expiry: u64,
+    ) -> Result<(), ContractError> {
+        issuer.require_auth();
+        if !Self::is_authorized_issuer(env.clone(), issuer.clone()) {
+            return Err(ContractError::NotAuthorizedIssuer);
+        }
+        if expiry <= env.ledger().timestamp() {
+            return Err(ContractError::InvalidExpiry);
+        }
+        if !Self::is_valid_criterion(&criterion) {
+            return Err(ContractError::InvalidCriterion);
+        }
+        let latest_version = Self::get_latest_mentorship_rule_version(
+            env.clone(),
+            program_id.clone(),
+        )?;
+        let rule = Self::get_mentorship_eligibility_rule(
+            env.clone(),
+            program_id.clone(),
+            latest_version,
+        )?;
+        let criterion_hash = Self::criterion_hash(&env, &criterion);
+        if !rule
+            .all_of
+            .iter()
+            .chain(rule.any_of.iter())
+            .any(|required| criterion_hash == Self::criterion_hash(&env, &required))
+        {
+            return Err(ContractError::CriterionNotInRule);
+        }
+
+        let record = CriterionAttestation {
+            issuer: issuer.clone(),
+            evidence_hash,
+            expiry,
+            issued_at: env.ledger().timestamp(),
+            revoked: false,
+        };
+        let key = DataKey::CriterionAttestation(
+            subject.clone(),
+            program_id.clone(),
+            criterion_hash.clone(),
+        );
+        env.storage().persistent().set(&key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("CRITATST"),),
+            (issuer, subject, program_id, criterion_hash, expiry),
+        );
+        Ok(())
+    }
+
+    pub fn get_criterion_attestation(
+        env: Env,
+        subject: Address,
+        program_id: BytesN<32>,
+        criterion: MentorshipCriterion,
+    ) -> Result<CriterionAttestation, ContractError> {
+        let criterion_hash = Self::criterion_hash(&env, &criterion);
+        env.storage()
+            .persistent()
+            .get(&DataKey::CriterionAttestation(
+                subject,
+                program_id,
+                criterion_hash,
+            ))
+            .ok_or(ContractError::CriterionAttestationNotFound)
+    }
+
+    pub fn revoke_criterion_attestation(
+        env: Env,
+        caller: Address,
+        subject: Address,
+        program_id: BytesN<32>,
+        criterion: MentorshipCriterion,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        let criterion_hash = Self::criterion_hash(&env, &criterion);
+        let key = DataKey::CriterionAttestation(
+            subject.clone(),
+            program_id.clone(),
+            criterion_hash.clone(),
+        );
+        let mut record: CriterionAttestation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(ContractError::CriterionAttestationNotFound)?;
+        let admin: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+        if caller != record.issuer && admin.as_ref() != Some(&caller) {
+            return Err(ContractError::NotCriterionAttestationIssuer);
+        }
+        record.revoked = true;
+        env.storage().persistent().set(&key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("CRITRVK"),),
+            (caller, subject, program_id, criterion_hash),
+        );
+        Ok(())
+    }
+
+    /// Evaluate the latest policy. All `all_of` criteria are mandatory; if
+    /// `any_of` is populated, at least one criterion in that group is needed.
+    pub fn evaluate_mentorship_eligibility(
+        env: Env,
+        program_id: BytesN<32>,
+        subject: Address,
+    ) -> Result<bool, ContractError> {
+        let latest_version = Self::get_latest_mentorship_rule_version(
+            env.clone(),
+            program_id.clone(),
+        )?;
+        let rule = Self::get_mentorship_eligibility_rule(
+            env.clone(),
+            program_id.clone(),
+            latest_version,
+        )?;
+        for criterion in rule.all_of.iter() {
+            if !Self::has_valid_criterion_attestation(
+                &env,
+                &subject,
+                &program_id,
+                &criterion,
+            ) {
+                return Ok(false);
+            }
+        }
+        if !rule.any_of.is_empty()
+            && !rule.any_of.iter().any(|criterion| {
+                Self::has_valid_criterion_attestation(
+                    &env,
+                    &subject,
+                    &program_id,
+                    &criterion,
+                )
+            })
+        {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn is_valid_criterion(criterion: &MentorshipCriterion) -> bool {
+        match criterion {
+            MentorshipCriterion::Role(_)
+            | MentorshipCriterion::Organization(_)
+            | MentorshipCriterion::GeographyPolicy(_)
+            | MentorshipCriterion::Prerequisite(_) => true,
+            MentorshipCriterion::CourseProgress(_, progress_bps) => {
+                *progress_bps > 0 && *progress_bps <= 10_000
+            }
+            MentorshipCriterion::Skill(_, minimum_level) => *minimum_level > 0,
+            MentorshipCriterion::AgeGuardian(minimum_age, _) => *minimum_age <= 130,
+        }
+    }
+
+    fn criterion_hash(env: &Env, criterion: &MentorshipCriterion) -> BytesN<32> {
+        let mut preimage = Bytes::from_slice(env, b"CHAINVERSE_MENTORSHIP_ELIGIBILITY_V1");
+        preimage.append(&criterion.to_xdr(env));
+        env.crypto().sha256(&preimage).into()
+    }
+
+    fn has_valid_criterion_attestation(
+        env: &Env,
+        subject: &Address,
+        program_id: &BytesN<32>,
+        criterion: &MentorshipCriterion,
+    ) -> bool {
+        let criterion_hash = Self::criterion_hash(env, criterion);
+        let record: Option<CriterionAttestation> = env.storage().persistent().get(
+            &DataKey::CriterionAttestation(
+                subject.clone(),
+                program_id.clone(),
+                criterion_hash,
+            ),
+        );
+        match record {
+            Some(record) => !record.revoked && record.expiry > env.ledger().timestamp(),
+            None => false,
+        }
     }
 
     // ── #1068 — attestations ──────────────────────────────────────────────
