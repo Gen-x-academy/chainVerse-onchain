@@ -16,6 +16,8 @@ members = [
     "common",
     "staking",
     "token",
+    "mentorship-programs",
+    "mentorship-identity",
     "library-rights",
     "library_licensing",
     "mentorship-applications",
