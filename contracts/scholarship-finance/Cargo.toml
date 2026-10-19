@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+soroban-sdk = { version = "22.0.11" }
 soroban-sdk = { workspace = true }
 shared = { path = "../shared" }
 chainverse-types = { path = "../chainverse-types" }
@@ -16,6 +17,7 @@ scholarship-disbursements = { path = "../scholarship-disbursements" }
 ed25519-dalek = { version = "2.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+soroban-sdk = { version = "22.0.11", features = ["testutils"] }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 shared = { path = "../shared" }
 chainverse-types = { path = "../chainverse-types" }
