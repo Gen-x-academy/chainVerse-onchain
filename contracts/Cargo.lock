@@ -817,6 +817,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "mentorship-availability"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "mentorship-calendar"
+
+[[package]]
 name = "mentorship-applications"
 version = "0.1.0"
 dependencies = [
@@ -824,13 +834,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mentorship-conduct"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 name = "mentorship-matching"
 
 [[package]]
-name = "log"
-version = "0.4.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+name = "mentorship-slots"
+version = "0.1.0"
+dependencies = [
+ "mentorship-availability",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "mentorship-applications"
