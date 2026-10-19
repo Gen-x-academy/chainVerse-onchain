@@ -38,6 +38,7 @@ members = [
     "scholarship-aggregate-analytics",
     "scholarship-fraud-signals",
     "scholarship-payment-anomaly",
+    "mentorship-agreements",
     "mentorship-conduct",
     "mentorship-availability",
     "mentorship-calendar",
