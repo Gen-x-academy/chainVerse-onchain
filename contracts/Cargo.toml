@@ -21,6 +21,7 @@ members = [
     "mentorship-identity",
     "library-rights",
     "library_licensing",
+    "mentorship",
     "mentorship-applications",
     "mentorship-matching",
     "scholarship-admin",
