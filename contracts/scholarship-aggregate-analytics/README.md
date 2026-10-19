@@ -1,7 +1,7 @@
 # scholarship-aggregate-analytics
 
-Soroban smart contract for privacy-safe aggregate analysis of scholarship
-eligibility, completion, review, decision, and award outcomes.
+Soroban smart contract for aggregate analysis of scholarship eligibility,
+completion, review, decision, award, and sponsor impact outcomes.
 
 Audited against **Gen-x-academy/chainVerse-onchain origin/main commit 82c681a1**.
 
@@ -33,8 +33,11 @@ definitions and caveats so consumers understand exactly what each number means.
 
 The contract stores a configurable `k_threshold` (minimum 5, enforced on-chain).
 `get_cohort_metrics` returns `CohortResult::Suppressed` whenever
-`total_applicants < k_threshold`. The suppression response includes the current
-threshold and a plain-language reason, but **zero** underlying metric values.
+`total_applicants < k_threshold` or any positive outcome subgroup is smaller
+than the threshold. The suppression response includes the current threshold
+and a plain-language reason, but **zero** underlying metric values. A
+disbursement total is released only when the disbursed count meets the threshold
+(or the amount is zero).
 
 The admin may raise the threshold at any time — this immediately suppresses
 previously visible cohorts that no longer meet the new threshold.
@@ -51,6 +54,25 @@ Every metric exposed by the contract may be accompanied by a `MetricDefinition`
 record (upsertable by admin) that describes what the number means, how it was
 counted, and any applicable caveats (e.g. snapshot date, exclusion criteria).
 Consumers of the API should always check for and display these definitions.
+
+### Sponsor impact reports
+
+`publish_sponsor_impact` stores one immutable, aggregate-only report per cohort:
+distinct recipients, funded learning opportunities, completions, credentials,
+award count, and total funded amount. The report marks its interpretation as
+`DescriptiveAssociationOnly`. It describes outcomes observed in a funded cohort;
+it does not establish that sponsorship caused those outcomes.
+
+Every positive count in a report must be zero or at least `k_threshold`, and
+the recipient count must meet the threshold. Reports cannot be overwritten,
+preventing repeated snapshots from exposing small changes through differencing.
+The current threshold is rechecked on every read, so raising `k_threshold`
+suppresses previously published reports that no longer qualify.
+The recorder must apply suppression before submitting: Soroban transaction
+inputs, events, and contract storage are public, so a rejected call cannot hide
+small values. The contract's checks are defense in depth, not a substitute for
+off-chain suppression. Cohort tags must not encode recipient identity or
+sensitive characteristics.
 
 ---
 
@@ -71,12 +93,14 @@ Consumers of the API should always check for and display these definitions.
 | `increment(caller, cohort_tag, field, delta)` | `recorder` | Increment a counter field by `delta`. Checked arithmetic — returns `ArithmeticOverflow` rather than wrapping. |
 | `decrement(caller, cohort_tag, field, delta)` | `recorder` | Correct an over-count. Returns `CounterUnderflow` if result would go below zero. |
 | `record_disbursements(caller, batch)` | `recorder` | Atomically add a batch of disbursement amounts. Accumulates `disbursed_count` and `total_disbursed_amount`. |
+| `publish_sponsor_impact(caller, submission)` | `recorder` | Publish one immutable sponsor impact report after off-chain aggregation and suppression. |
 
 ### Queries
 
 | Function | Returns |
 |---|---|
 | `get_cohort_metrics(cohort_tag)` | `CohortResult::Metrics(CohortMetrics)` or `CohortResult::Suppressed(SuppressedResult)` |
+| `get_sponsor_impact(cohort_tag)` | `Option<SponsorImpactReport>` |
 | `k_threshold()` | `u64` |
 | `get_metric_definition(key)` | `Option<MetricDefinition>` |
 
@@ -151,6 +175,7 @@ Callers **must** match on the variant before using data. Treating
 | `AA_INCR` | `(cohort_tag, field, delta)` | `increment` |
 | `AA_DECR` | `(cohort_tag, field, delta)` | `decrement` |
 | `AA_DISB` | `(cohort_tag, count, new_total)` | `record_disbursements` |
+| `AA_IMPT` | `(cohort_tag, published_at)` | `publish_sponsor_impact` |
 | `AA_MDEF` | `(key, caller)` | `upsert_metric_definition` |
 | `AA_SETK` | `(caller, new_k)` | `set_k_threshold` |
 | `AA_SREC` | `(caller, new_recorder)` | `set_recorder` |
@@ -173,6 +198,13 @@ pushed by the `recorder` are accurate. The off-chain recorder must:
 
 The `recorder` key should be rotated on a schedule and should never be an
 externally-owned account.
+
+For sponsor impact publication, the recorder is additionally responsible for
+deduplicating recipient counts, excluding suppressed subgroups before creating
+the transaction, and retaining the source definitions and audit evidence
+off-chain. The on-chain contract authenticates the recorder and validates
+release thresholds; it cannot verify recipient uniqueness, completion
+attestations, credential issuance, or causal attribution.
 
 ---
 

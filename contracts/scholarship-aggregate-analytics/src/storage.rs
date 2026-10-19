@@ -1,7 +1,7 @@
 use soroban_sdk::{contracttype, Address, Env, String};
 
 use crate::errors::ContractError;
-use crate::types::{CohortMetrics, MetricDefinition};
+use crate::types::{CohortMetrics, MetricDefinition, SponsorImpactReport};
 
 pub const MIN_TTL: u32 = 3_110_400;
 pub const MAX_TTL: u32 = 6_220_800;
@@ -19,6 +19,8 @@ pub enum DataKey {
     CohortMetrics(String),
     /// Per-metric definition record (persistent).
     MetricDefinition(String),
+    /// Immutable aggregate-only sponsor impact report (persistent).
+    SponsorImpact(String),
 }
 
 // ── TTL ───────────────────────────────────────────────────────────────────────
@@ -126,6 +128,27 @@ pub fn cohort_exists(env: &Env, tag: &String) -> bool {
     env.storage()
         .persistent()
         .has(&DataKey::CohortMetrics(tag.clone()))
+}
+
+pub fn get_sponsor_impact(env: &Env, tag: &String) -> Option<SponsorImpactReport> {
+    let key = DataKey::SponsorImpact(tag.clone());
+    let report: Option<SponsorImpactReport> = env.storage().persistent().get(&key);
+    if report.is_some() {
+        bump_persistent(env, &key);
+    }
+    report
+}
+
+pub fn sponsor_impact_exists(env: &Env, tag: &String) -> bool {
+    env.storage()
+        .persistent()
+        .has(&DataKey::SponsorImpact(tag.clone()))
+}
+
+pub fn save_sponsor_impact(env: &Env, report: &SponsorImpactReport) {
+    let key = DataKey::SponsorImpact(report.cohort_tag.clone());
+    env.storage().persistent().set(&key, report);
+    bump_persistent(env, &key);
 }
 
 // ── MetricDefinition ─────────────────────────────────────────────────────────
