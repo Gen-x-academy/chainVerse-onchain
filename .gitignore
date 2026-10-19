@@ -42,3 +42,7 @@ Cargo.lock
 *.scratch.rs
 .codex
 scratch/
+
+# Soroban test snapshots are regenerated on every cargo test run
+contracts/mentorship-applications/test_snapshots/
+contracts/mentorship-matching/test_snapshots/

@@ -21,12 +21,15 @@ New to the project? [docs/testnet-setup.md](docs/testnet-setup.md) walks through
 | `payout-automation` | `contracts/payout-automation` | Batches token payouts to multiple instructor recipients |
 | `reward` | `contracts/reward` | Issues one-time learner rewards via signed backend proofs |
 | `staking` | `contracts/staking` | Tiered CHV staking with lock periods and emergency unstake |
+| `mentorship-applications` | `contracts/mentorship-applications` | Mentorship intake: configurable form versions, autosaved drafts, atomic applications, and scoped reviewer queues |
 | `library-rights` | `contracts/library-rights` | E-Library registry foundation: four-role governance, work records (hash + custodian only), classification commitments, and acquisition/donation provenance by hash |
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive), derived access grants, per-format entitlements, and concurrent digital-seat accounting |
 | `library-rights` | `contracts/library-rights` | E-Library registry: four-role governance, canonical work/edition/rendition catalog with bounded metadata URI commitments, algorithm-tagged content hashes, and versioned immutable snapshots |
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive) and derived access grants |
 | `library_licensing` | `contracts/library_licensing` | E-Library licenses with enforced validity windows (`not_before` inclusive, `expires_at` exclusive), derived access grants, and rendition migration policies |
 | `library-rights` | `contracts/library-rights` | E-Library content integrity states, emergency quarantine, and pseudonymous membership attestations |
+| `mentorship-applications` | `contracts/mentorship-applications` | Mentorship application history: structured decisions with public/internal reason separation, plus withdrawal and replay-safe reapplication with fresh consent |
+| `mentorship-matching` | `contracts/mentorship-matching` | Mentor match proposals with symmetric block/eligibility checks, versioned participant consent, and reportable coordinator-assisted matching |
 | `chainverse-core` | `contracts/chainverse-core` | Integration layer tying the above contracts together |
 | `mentorship-conduct` | `contracts/mentorship-conduct` | Versioned mentorship code-of-conduct policies, provable acceptance, engagement activation gate, and breach references |
 | `mentorship-availability` | `contracts/mentorship-availability` | Recurring weekly participant availability with explicit DST offset transitions, exceptions, lead time, buffers, and booking horizon |

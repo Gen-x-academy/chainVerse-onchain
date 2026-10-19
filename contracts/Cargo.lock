@@ -825,6 +825,9 @@ dependencies = [
 
 [[package]]
 name = "mentorship-calendar"
+
+[[package]]
+name = "mentorship-applications"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
@@ -836,12 +839,20 @@ version = "0.1.0"
 dependencies = [
  "soroban-sdk",
 ]
+name = "mentorship-matching"
 
 [[package]]
 name = "mentorship-slots"
 version = "0.1.0"
 dependencies = [
  "mentorship-availability",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "mentorship-applications"
+version = "0.1.0"
+dependencies = [
  "soroban-sdk",
 ]
 
