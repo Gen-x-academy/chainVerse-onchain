@@ -5,6 +5,9 @@
 - [Architecture Diagram](./docs/architecture.md)
 - [Escrow Lifecycle](./docs/escrow_lifecycle.md)
 - [Contract Events](./docs/events.md)
+- [Mentorship Public Identifiers](./docs/mentorship-identifiers.md)
+- [Mentorship Cohorts](./docs/mentorship-cohorts.md)
+- [Scholarship Service-Level Indicators](./docs/scholarship-sli.md)
 - [Developer Setup Guide](./docs/setup.md)
 ## Requirements
 
