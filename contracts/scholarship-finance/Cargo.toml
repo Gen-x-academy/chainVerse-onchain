@@ -3,8 +3,11 @@ name = "scholarship-finance"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
-soroban-sdk = { version = "22.0.11", features = ["contract"] }
+soroban-sdk = { workspace = true }
 shared = { path = "../shared" }
 chainverse-types = { path = "../chainverse-types" }
 scholarship-core = { path = "../scholarship-core" }
@@ -13,14 +16,10 @@ scholarship-disbursements = { path = "../scholarship-disbursements" }
 ed25519-dalek = { version = "2.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "22.0.11", features = ["contract", "testutils"] }
-soroban-sdk = { version = "20.0.4", features = ["contract"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
 shared = { path = "../shared" }
 chainverse-types = { path = "../chainverse-types" }
 scholarship-core = { path = "../scholarship-core" }
 scholarship-disbursements = { path = "../scholarship-disbursements" }
 scholarship-programs = { path = "../scholarship-programs" }
 ed25519-dalek = { version = "2.0", default-features = false, features = ["std"] }
-
-[dev-dependencies]
-soroban-sdk = { version = "20.0.4", features = ["contract", "testutils"] }
