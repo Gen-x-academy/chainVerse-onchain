@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-soroban-sdk = { version = "20.0.4", features = ["contract"] }
+soroban-sdk = { workspace = true }
 shared = { path = "../shared" }
 chainverse-types = { path = "../chainverse-types" }
 scholarship-core = { path = "../scholarship-core" }
@@ -15,4 +15,4 @@ scholarship-milestones = { path = "../scholarship-milestones" }
 scholarship-communications = { path = "../scholarship-communications" }
 
 [dev-dependencies]
-soroban-sdk = { version = "20.0.4", features = ["contract", "testutils"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
