@@ -21,6 +21,7 @@ All operations are privacy-minimized: no PII is stored on-chain. Only addresses,
 ## Data Model
 
 ### FeeConfig
+
 ```rust
 pub struct FeeConfig {
     pub program_id: BytesN<32>,
@@ -33,7 +34,23 @@ pub struct FeeConfig {
 }
 ```
 
+`configure_fees` takes `expected_version` (`0` for the first configuration)
+and returns the incremented version. A stale write returns `VersionConflict`;
+reload `get_fee_config` and compare before retrying.
+
+Program ledger writes (`record_deposit`, `record_award`, and
+`record_disbursement`) take `expected_ledger_version`. The ledger version
+advances on every successful append. `MAX_LEDGER_ENTRIES` bounds each ledger
+to 128 entries; a stale revision or full ledger is rejected before the
+associated financial record is written.
+
+`RefundRecord` and `RecoveryRecord` carry revisions as well. Their completion
+calls require the observed revision and return `VersionConflict` if another
+completion changed the record. `ProgramFinancials.version` advances with
+refund/recovery aggregate updates so indexers can compare snapshots.
+
 ### FeeBasis (versioned, supports preview)
+
 ```rust
 pub enum FeeBasis {
     Percentage(u32),                    // basis points, e.g., 250 = 2.5%
@@ -43,6 +60,7 @@ pub enum FeeBasis {
 ```
 
 ### RefundRecord
+
 ```rust
 pub struct RefundRecord {
     pub id: BytesN<32>,
@@ -62,6 +80,7 @@ pub struct RefundRecord {
 ```
 
 ### RecoveryRecord
+
 ```rust
 pub struct RecoveryRecord {
     pub id: BytesN<32>,
@@ -81,6 +100,7 @@ pub struct RecoveryRecord {
 ```
 
 ### FinancialStatement
+
 ```rust
 pub struct FinancialStatement {
     pub id: BytesN<32>,
@@ -104,18 +124,19 @@ pub struct FinancialStatement {
 
 ## Events
 
-| Event | Topic | Data |
-|-------|-------|------|
-| Fee configuration | `FEECFG` | `(program_id, version)` |
-| Refund initiated | `REFUNDNW` | `(refund_id, program_id, intent_id, amount, reason)` |
-| Refund completed | `REFUNDCM` | `(refund_id, tx_hash)` |
-| Recovery initiated | `RECVRYNW` | `(recovery_id, program_id, intent_id, amount, reason)` |
-| Recovery completed | `RECVRYCM` | `(recovery_id, tx_hash)` |
-| Statement generated | `STMTGEN` | `(statement_id, program_id, period_start, period_end)` |
+| Event               | Topic      | Data                                                   |
+| ------------------- | ---------- | ------------------------------------------------------ |
+| Fee configuration   | `FEECFG`   | `(program_id, version)`                                |
+| Refund initiated    | `REFUNDNW` | `(refund_id, program_id, intent_id, amount, reason)`   |
+| Refund completed    | `REFUNDCM` | `(refund_id, tx_hash)`                                 |
+| Recovery initiated  | `RECVRYNW` | `(recovery_id, program_id, intent_id, amount, reason)` |
+| Recovery completed  | `RECVRYCM` | `(recovery_id, tx_hash)`                               |
+| Statement generated | `STMTGEN`  | `(statement_id, program_id, period_start, period_end)` |
 
 ## TTL Policy
 
 All persistent records use:
+
 - `RECORD_MIN_TTL = 3,110,400` ledgers (~1 year at 6s ledgers)
 - `RECORD_MAX_TTL = 6,220,800` ledgers (~2 years)
 
@@ -128,6 +149,7 @@ All persistent records use:
 ## Fee Calculation (#1106)
 
 Fees are configured per-program with versioning. The `calculate_fees` function is a pure preview:
+
 - Input: `program_id`, `gross_amount`
 - Output: `(platform_fee, network_fee, total_fee, net_amount)`
 - No state changes; safe for UI previews
@@ -135,24 +157,28 @@ Fees are configured per-program with versioning. The `calculate_fees` function i
 - Fee revenue is separately accounted in `ProgramFinancials.total_fees_collected`
 
 ### Rounding Behavior
+
 - Percentage fees: `floor(gross_amount * basis_points / 10000)`
 - Proportional fee refunds: same formula applied to refund amount
 
 ## Refunds (#1107)
 
 Refunds are initiated by authorized callers and require:
+
 - Valid executed `DisbursementIntent`
 - Refund amount ≤ original payment
 - Proportional fee refund calculation
 - Original entries reversed, not deleted
 
 ### Refund Flow
+
 1. `initiate_refund()` → creates `RefundRecord` with `status = Pending`
 2. Off-chain execution (Stellar payment)
-2. `complete_refund(tx_hash)` → marks `Completed`, records tx hash
-3. `ProgramFinancials` updated: `total_refunded += amount`, `total_fees_collected -= fee_refunded`
+3. `complete_refund(tx_hash)` → marks `Completed`, records tx hash
+4. `ProgramFinancials` updated: `total_refunded += amount`, `total_fees_collected -= fee_refunded`
 
 ### Refund Reasons
+
 ```rust
 enum RefundReason {
     Overpayment,
@@ -167,17 +193,20 @@ enum RefundReason {
 ## Recoveries & Clawbacks (#1108)
 
 Recoveries are initiated for specific reasons with recorded legal basis:
+
 - Never silently debits a wallet
 - Reason and legal basis are mandatory
 - Collected amounts reconcile to open claims
 
 ### Recovery Flow
+
 1. `initiate_recovery()` → creates `RecoveryRecord` with `status = Pending`
 2. Off-chain execution
-2. `complete_recovery(tx_hash)` → marks `Completed`
-3. `ProgramFinancials` updated: `total_recovered += amount`
+3. `complete_recovery(tx_hash)` → marks `Completed`
+4. `ProgramFinancials` updated: `total_recovered += amount`
 
 ### Recovery Reasons
+
 ```rust
 enum RecoveryReason {
     Fraud,
@@ -191,24 +220,35 @@ enum RecoveryReason {
 ## Financial Statements (#1109)
 
 Statements are generated per-program, per-period:
+
 - Reconcile to ledger entries via event log
 - Use consistent currency metadata from program
 - Large exports: statement generation is a single contract call; bulk export runs off-chain by paginating statements
 
 ### Statement Fields
-| Field | Source |
-|-------|--------|
-| `contributions` | Total funded to program |
-| `commitments` | Pending disbursements |
-| `payments` | Executed disbursements |
-| `fees` | Platform fees collected |
-| `refunds` | Refunded amounts |
-| `recoveries` | Clawback amounts |
+
+| Field               | Source                                                   |
+| ------------------- | -------------------------------------------------------- |
+| `contributions`     | Total funded to program                                  |
+| `commitments`       | Pending disbursements                                    |
+| `payments`          | Executed disbursements                                   |
+| `fees`              | Platform fees collected                                  |
+| `refunds`           | Refunded amounts                                         |
+| `recoveries`        | Clawback amounts                                         |
 | `remaining_balance` | `contributions - payments - fees + refunds + recoveries` |
 
 ## Migration & Upgrades
 
 - `FeeConfig.version` increments on each update for audit trail
+- `ProgramLedger.version` increments on each successful append. Existing
+  deployments must migrate ledgers and fee configurations to known revisions
+  before using the changed ABI; missing legacy fields must not be assumed to
+  mean a safe revision of zero.
+- Refund/recovery records and program financial aggregates also gain revision
+  fields. Migrate these records before deploying the revised completion ABI.
+- Clients reload ledger/configuration state after `VersionConflict`, compare
+  it with the intended operation, and require an authorized operator to
+  resolve semantic conflicts. Blind retry is not a merge policy.
 - `FinancialStatement.version` tracks schema version
 - Adding new fee types: extend `FeeBasis` enum, update `calculate_fees`
 - Adding new statement fields: increment `FinancialStatement.version`, handle missing fields in indexer
@@ -228,3 +268,8 @@ Statements are generated per-program, per-period:
 - Fee configuration validated at write time (basis points ≤ 10000, caps ≥ 0)
 - Refund/recovery amounts validated against original intent amounts
 - Network ID bound at initialization prevents testnet/mainnet replay
+- Revision checks occur before writes and events; Soroban invocation rollback
+  protects associated records if a later checked operation fails. Revision
+  metadata adds no applicant data. Existing admin/sponsor authorization and
+  persistent TTL policy remain in force; operators must plan archival for the
+  new 128-entry ledger bound.

@@ -59,6 +59,7 @@ fn test_record_deposit_unrestricted() {
         env.clone(),
         sponsor.clone(),
         None,
+        0,
         asset.clone(),
         1000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -82,6 +83,7 @@ fn test_record_deposit_program_specific() {
         env.clone(),
         sponsor.clone(),
         Some(program_id.clone()),
+        0,
         asset.clone(),
         5000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -126,6 +128,7 @@ fn test_record_award() {
         env.clone(),
         Address::generate(&env),
         Some(program_id.clone()),
+        0,
         asset.clone(),
         10000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -136,6 +139,7 @@ fn test_record_award() {
         env.clone(),
         admin.clone(),
         program_id.clone(),
+        1,
         asset.clone(),
         1000,
         reference_id.clone(),
@@ -146,6 +150,44 @@ fn test_record_award() {
     let ledger = ScholarshipFinanceContract::get_program_ledger(env, program_id).unwrap();
     assert_eq!(ledger.total_awards, 1000);
     assert_eq!(ledger.reserved_balance, 1000);
+}
+
+#[test]
+fn test_stale_ledger_write_leaves_financial_state_unchanged() {
+    let env = create_test_env();
+    let admin = setup_contract(&env);
+    let program_id = create_program_id(&env);
+    let asset = BytesN::from_array(&env, &[4u8; 32]);
+
+    ScholarshipFinanceContract::record_deposit(
+        env.clone(),
+        Address::generate(&env),
+        Some(program_id.clone()),
+        0,
+        asset.clone(),
+        10_000,
+        BytesN::from_array(&env, &[5u8; 32]),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ScholarshipFinanceContract::record_award(
+            env.clone(),
+            admin,
+            program_id.clone(),
+            0,
+            asset,
+            1_000,
+            BytesN::from_array(&env, &[6u8; 32]),
+        ),
+        Err(ContractError::VersionConflict)
+    );
+    let ledger = ScholarshipFinanceContract::get_program_ledger(env, program_id).unwrap();
+    assert_eq!(ledger.version, 1);
+    assert_eq!(ledger.total_awards, 0);
+    assert_eq!(ledger.reserved_balance, 0);
+    assert_eq!(ledger.entries.len(), 1);
 }
 
 #[test]
@@ -161,6 +203,7 @@ fn test_record_disbursement() {
         env.clone(),
         Address::generate(&env),
         Some(program_id.clone()),
+        0,
         asset.clone(),
         10000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -171,6 +214,7 @@ fn test_record_disbursement() {
         env.clone(),
         admin.clone(),
         program_id.clone(),
+        1,
         asset.clone(),
         1000,
         BytesN::from_array(&env, &[6u8; 32]),
@@ -180,6 +224,7 @@ fn test_record_disbursement() {
         env.clone(),
         admin.clone(),
         program_id.clone(),
+        2,
         asset.clone(),
         1000,
         reference_id.clone(),
@@ -204,6 +249,7 @@ fn test_reconcile_treasury_balanced() {
         env.clone(),
         Address::generate(&env),
         Some(program_id.clone()),
+        0,
         asset.clone(),
         10000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -233,6 +279,7 @@ fn test_create_receipt() {
         env.clone(),
         Address::generate(&env),
         Some(program_id.clone()),
+        0,
         asset.clone(),
         10000,
         BytesN::from_array(&env, &[5u8; 32]),
@@ -243,6 +290,7 @@ fn test_create_receipt() {
         env.clone(),
         admin.clone(),
         program_id.clone(),
+        1,
         asset.clone(),
         1000,
         BytesN::from_array(&env, &[6u8; 32]),
@@ -252,6 +300,7 @@ fn test_create_receipt() {
         env.clone(),
         admin.clone(),
         program_id.clone(),
+        2,
         asset.clone(),
         1000,
         BytesN::from_array(&env, &[6u8; 32]),
@@ -281,6 +330,7 @@ fn test_configure_fees_percentage() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::Percentage(250), // 2.5%
         1000, // network fee estimate
         Symbol::new(&env, "XLM"),
@@ -289,6 +339,40 @@ fn test_configure_fees_percentage() {
     assert_eq!(config.platform_fee, FeeBasis::Percentage(250));
     assert_eq!(config.network_fee_estimate, 1000);
     assert_eq!(config.version, 1);
+}
+
+#[test]
+fn test_stale_fee_configuration_preserves_newer_schedule() {
+    let env = create_test_env();
+    let (admin, _) = setup_contract(&env);
+    let program_id = create_program_id(&env);
+    ScholarshipFinanceContract::configure_fees(
+        env.clone(),
+        admin.clone(),
+        program_id.clone(),
+        0,
+        FeeBasis::Percentage(250),
+        100,
+        Symbol::new(&env, "XLM"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        ScholarshipFinanceContract::configure_fees(
+            env.clone(),
+            admin,
+            program_id.clone(),
+            0,
+            FeeBasis::Fixed(500),
+            200,
+            Symbol::new(&env, "XLM"),
+        ),
+        Err(ContractError::VersionConflict)
+    );
+    let config = ScholarshipFinanceContract::get_fee_config(env, program_id).unwrap();
+    assert_eq!(config.version, 1);
+    assert_eq!(config.platform_fee, FeeBasis::Percentage(250));
+    assert_eq!(config.network_fee_estimate, 100);
 }
 
 #[test]
@@ -301,6 +385,7 @@ fn test_configure_fees_fixed() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::Fixed(500),
         1000,
         Symbol::new(&env, "XLM"),
@@ -319,6 +404,7 @@ fn test_configure_fees_percentage_with_cap() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::PercentageWithCap { basis_points: 500, cap: 10000 },
         1000,
         Symbol::new(&env, "XLM"),
@@ -338,6 +424,7 @@ fn test_fee_config_validation_rejects_invalid_percentage() {
             env,
             admin,
             program_id,
+            0,
             FeeBasis::Percentage(15000), // > 100%
             1000,
             Symbol::new(&env, "XLM"),
@@ -356,6 +443,7 @@ fn test_calculate_fees_percentage() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::Percentage(250), // 2.5%
         1000,
         Symbol::new(&env, "XLM"),
@@ -383,6 +471,7 @@ fn test_calculate_fees_fixed() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::Fixed(500),
         1000,
         Symbol::new(&env, "XLM"),
@@ -410,6 +499,7 @@ fn test_calculate_fees_percentage_with_cap() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::PercentageWithCap { basis_points: 1000, cap: 500 }, // 10% capped at 500
         1000,
         Symbol::new(&env, "XLM"),
@@ -434,6 +524,7 @@ fn test_calculate_fees_rejects_negative_net() {
         env.clone(),
         admin,
         program_id.clone(),
+        0,
         FeeBasis::Fixed(20000), // fee > amount
         1000,
         Symbol::new(&env, "XLM"),

@@ -231,9 +231,9 @@ impl World {
 
         let closes_at = opens_at + 100_000;
         self.programs
-            .set_program_window(admin, &pid, &opens_at, &closes_at, &0, &0);
+            .set_program_window(admin, &pid, &0, &opens_at, &closes_at, &0, &0);
         self.programs
-            .configure_award_budget(admin, &pid, &4, &1_000, &4_000);
+            .configure_award_budget(admin, &pid, &0, &4, &1_000, &4_000);
         self.applications.register_program(admin, &pid, &closes_at);
         self.applications
             .publish_form_schema(admin, &pid, &BytesN::from_array(env, &[seed; 32]));

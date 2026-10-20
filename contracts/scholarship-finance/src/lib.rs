@@ -39,6 +39,7 @@ const CONTRACT_VERSION: u32 = 1;
 
 const RECORD_MIN_TTL: u32 = 3_110_400;
 const RECORD_MAX_TTL: u32 = 6_220_800;
+const MAX_LEDGER_ENTRIES: u32 = 128;
 
 const MAX_CHALLENGE_TTL_SECONDS: u64 = 86_400;
 
@@ -85,6 +86,8 @@ pub enum ContractError {
     ReconciliationFailed = 29,
     ReceiptNotFound = 30,
     InvalidReceiptData = 31,
+    VersionConflict = 32,
+    LedgerCapacityExceeded = 33,
 }
 
 #[contracttype]
@@ -212,6 +215,7 @@ pub struct LedgerEntry {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramLedger {
+    pub version: u32,
     pub program_id: BytesN<32>,
     pub sponsor_id: BytesN<32>,
     pub currency: soroban_sdk::Symbol,
@@ -228,6 +232,7 @@ pub struct ProgramLedger {
     pub available_balance: i128,
     pub last_updated: u64,
 pub struct RefundRecord {
+    pub version: u32,
     pub id: BytesN<32>,
     pub program_id: BytesN<32>,
     pub intent_id: BytesN<32>,
@@ -279,6 +284,7 @@ pub struct ReconciliationRecord {
     pub reconciled_at: u64,
     pub reconciled_by: Address,
 pub struct RecoveryRecord {
+    pub version: u32,
     pub id: BytesN<32>,
     pub program_id: BytesN<32>,
     pub intent_id: BytesN<32>,
@@ -312,6 +318,7 @@ pub struct Discrepancy {
     pub actual: i128,
     pub description: soroban_sdk::String,
 pub struct ProgramFinancials {
+    pub version: u32,
     pub program_id: BytesN<32>,
     pub sponsor_id: BytesN<32>,
     pub currency: soroban_sdk::Symbol,
@@ -415,6 +422,29 @@ impl ScholarshipFinanceContract {
         env.crypto().sha256(&input).into()
     }
 
+    fn check_ledger_version(
+        env: &Env,
+        program_id: &BytesN<32>,
+        expected_version: u32,
+    ) -> Result<(), ContractError> {
+        let ledger: Option<ProgramLedger> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ProgramLedger(program_id.clone()));
+        let current_version = ledger.as_ref().map(|value| value.version).unwrap_or(0);
+        if current_version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        if ledger
+            .as_ref()
+            .map(|value| value.entries.len() >= MAX_LEDGER_ENTRIES)
+            .unwrap_or(false)
+        {
+            return Err(ContractError::LedgerCapacityExceeded);
+        }
+        Ok(())
+    }
+
     // ── #1105 — Sponsor Deposits and Funding Rounds ────────────────────────
 
     /// Record a sponsor deposit to a program or unrestricted pool.
@@ -422,6 +452,7 @@ impl ScholarshipFinanceContract {
         env: Env,
         sponsor: Address,
         program_id: Option<BytesN<32>>,
+        expected_ledger_version: u32,
         asset: BytesN<32>,
         amount: i128,
         tx_hash: BytesN<32>,
@@ -439,6 +470,7 @@ impl ScholarshipFinanceContract {
         };
 
         if let Some(program_id) = program_id {
+            Self::check_ledger_version(&env, &program_id, expected_ledger_version)?;
             let program: scholarship_core::Program = scholarship_core::ScholarshipCoreContract::get_program(
                 env.clone(),
                 program_id.clone(),
@@ -485,7 +517,13 @@ impl ScholarshipFinanceContract {
 
         // Update program ledger if program-specific
         if let Some(program_id) = program_id {
-            Self::update_ledger_on_deposit(&env, &program_id, &asset, amount)?;
+            Self::update_ledger_on_deposit(
+                &env,
+                &program_id,
+                expected_ledger_version,
+                &asset,
+                amount,
+            )?;
         }
 
         env.events().publish(
@@ -564,6 +602,7 @@ impl ScholarshipFinanceContract {
     fn update_ledger_on_deposit(
         env: &Env,
         program_id: &BytesN<32>,
+        expected_version: u32,
         asset: &BytesN<32>,
         amount: i128,
     ) -> Result<(), ContractError> {
@@ -572,6 +611,7 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramLedger(program_id.clone()))
             .unwrap_or(ProgramLedger {
+                version: 0,
                 program_id: program_id.clone(),
                 sponsor_id: BytesN::from_array(env, &[0u8; 32]),
                 currency: soroban_sdk::Symbol::new(env, "XLM"),
@@ -588,6 +628,12 @@ impl ScholarshipFinanceContract {
                 available_balance: 0,
                 last_updated: 0,
             });
+
+        Self::check_ledger_version(env, program_id, expected_version)?;
+        ledger.version = ledger
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         let entry_id = Self::next_id(env);
         let entry = LedgerEntry {
@@ -622,6 +668,7 @@ impl ScholarshipFinanceContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_ledger_version: u32,
         asset: BytesN<32>,
         amount: i128,
         reference_id: BytesN<32>,
@@ -637,6 +684,7 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramLedger(program_id.clone()))
             .unwrap_or(ProgramLedger {
+                version: 0,
                 program_id: program_id.clone(),
                 sponsor_id: BytesN::from_array(&env, &[0u8; 32]),
                 currency: soroban_sdk::Symbol::new(env, "XLM"),
@@ -653,6 +701,12 @@ impl ScholarshipFinanceContract {
                 available_balance: 0,
                 last_updated: 0,
             });
+
+        Self::check_ledger_version(&env, &program_id, expected_ledger_version)?;
+        ledger.version = ledger
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         let entry_id = Self::next_id(&env);
         let new_reserved = ledger.reserved_balance.checked_add(amount).ok_or(ContractError::ArithmeticOverflow)?;
@@ -695,6 +749,7 @@ impl ScholarshipFinanceContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_ledger_version: u32,
         asset: BytesN<32>,
         amount: i128,
         reference_id: BytesN<32>,
@@ -710,6 +765,12 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramLedger(program_id.clone()))
             .ok_or(ContractError::LedgerNotFound)?;
+
+        Self::check_ledger_version(&env, &program_id, expected_ledger_version)?;
+        ledger.version = ledger
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         if ledger.reserved_balance < amount {
             return Err(ContractError::InvalidAmount);
@@ -753,11 +814,21 @@ impl ScholarshipFinanceContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         platform_fee: FeeBasis,
         network_fee_estimate: i128,
         fee_currency: soroban_sdk::Symbol,
     ) -> Result<FeeConfig, ContractError> {
         Self::require_admin(&env, &admin)?;
+
+        let existing: Option<FeeConfig> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::FeeConfig(program_id.clone()));
+        let current_version = existing.as_ref().map(|config| config.version).unwrap_or(0);
+        if current_version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
 
         // Validate fee configuration
         match platform_fee {
@@ -782,12 +853,9 @@ impl ScholarshipFinanceContract {
             return Err(ContractError::InvalidFeeConfig);
         }
 
-        let existing: Option<FeeConfig> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::FeeConfig(program_id.clone()));
-
-        let version = existing.map(|c| c.version).unwrap_or(0).checked_add(1).ok_or(ContractError::ArithmeticOverflow)?;
+        let version = current_version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         let config = FeeConfig {
             program_id: program_id.clone(),
@@ -947,6 +1015,7 @@ impl ScholarshipFinanceContract {
         let now = env.ledger().timestamp();
 
         let refund = RefundRecord {
+            version: 1,
             id: refund_id.clone(),
             program_id: program_id.clone(),
             intent_id: intent_id.clone(),
@@ -985,6 +1054,7 @@ impl ScholarshipFinanceContract {
         env: Env,
         caller: Address,
         refund_id: BytesN<32>,
+        expected_version: u32,
         tx_hash: BytesN<32>,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &caller)?;
@@ -994,6 +1064,14 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::Refund(refund_id.clone()))
             .ok_or(ContractError::StatementNotFound)?;
+
+        if refund.version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        refund.version = refund
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         if refund.status == RefundStatus::Completed {
             return Err(ContractError::RefundAlreadyProcessed);
@@ -1260,6 +1338,7 @@ impl ScholarshipFinanceContract {
         let now = env.ledger().timestamp();
 
         let recovery = RecoveryRecord {
+            version: 1,
             id: recovery_id.clone(),
             program_id: program_id.clone(),
             intent_id: intent_id.clone(),
@@ -1298,6 +1377,7 @@ impl ScholarshipFinanceContract {
         env: Env,
         caller: Address,
         recovery_id: BytesN<32>,
+        expected_version: u32,
         tx_hash: BytesN<32>,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &caller)?;
@@ -1307,6 +1387,14 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::Recovery(recovery_id.clone()))
             .ok_or(ContractError::StatementNotFound)?;
+
+        if recovery.version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        recovery.version = recovery
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
 
         if recovery.status == RecoveryStatus::Completed {
             return Err(ContractError::RecoveryAlreadyProcessed);
@@ -1364,6 +1452,7 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramFinancials(program_id.clone()))
             .unwrap_or(ProgramFinancials {
+                version: 0,
                 program_id: program_id.clone(),
                 sponsor_id: sponsor_id.clone(),
                 currency: soroban_sdk::Symbol::new(&env, "XLM"),
@@ -1453,6 +1542,7 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramFinancials(program_id.clone()))
             .unwrap_or(ProgramFinancials {
+                version: 0,
                 program_id: program_id.clone(),
                 sponsor_id: BytesN::from_array(env, &[0u8; 32]),
                 currency: soroban_sdk::Symbol::new(env, "XLM"),
@@ -1476,6 +1566,10 @@ impl ScholarshipFinanceContract {
         financials.pending_refunds = financials.pending_refunds
             .checked_sub(refund_amount)
             .ok_or(ContractError::ArithmeticOverflow)?;
+        financials.version = financials
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
         financials.last_updated = env.ledger().timestamp();
 
         env.storage()
@@ -1498,6 +1592,7 @@ impl ScholarshipFinanceContract {
             .persistent()
             .get(&DataKey::ProgramFinancials(program_id.clone()))
             .unwrap_or(ProgramFinancials {
+                version: 0,
                 program_id: program_id.clone(),
                 sponsor_id: BytesN::from_array(env, &[0u8; 32]),
                 currency: soroban_sdk::Symbol::new(env, "XLM"),
@@ -1517,6 +1612,10 @@ impl ScholarshipFinanceContract {
             .ok_or(ContractError::ArithmeticOverflow)?;
         financials.pending_recoveries = financials.pending_recoveries
             .checked_sub(recovery_amount)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        financials.version = financials
+            .version
+            .checked_add(1)
             .ok_or(ContractError::ArithmeticOverflow)?;
         financials.last_updated = env.ledger().timestamp();
 

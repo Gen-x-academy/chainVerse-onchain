@@ -66,9 +66,9 @@ fn a_program_goes_from_draft_to_final_payment() {
     // 2. The admin opens the window, funds the inventory, and publishes the
     //    form and the terms applicants will be held to.
     w.programs
-        .set_program_window(&admin, &pid, &START, &(START + WINDOW), &0, &0);
+        .set_program_window(&admin, &pid, &0, &START, &(START + WINDOW), &0, &0);
     w.programs
-        .configure_award_budget(&admin, &pid, &2, &1_000, &2_000);
+        .configure_award_budget(&admin, &pid, &0, &2, &1_000, &2_000);
     w.applications
         .register_program(&admin, &pid, &(START + WINDOW));
     w.applications.publish_form_schema(&admin, &pid, &h(&w, 1));
@@ -115,7 +115,7 @@ fn a_program_goes_from_draft_to_final_payment() {
         .transition_program(&sponsor, &pid, &ProgramStatus::Closed);
     w.programs.release_award(&admin, &pid);
     assert_eq!(w.programs.remaining_capacity(&pid), 2);
-    w.applications.set_program_active(&admin, &pid, &false);
+    w.applications.set_program_active(&admin, &pid, &1, &false);
     assert_eq!(
         w.applications
             .try_submit_application(&w.actors.reviewer, &pid, &h(&w, 4), &1),
@@ -226,7 +226,7 @@ fn a_reviewer_cannot_act_as_the_sponsor_or_as_finance() {
     // admin-only today (ADR 0002, Actors).
     assert_eq!(
         w.programs
-            .try_configure_award_budget(&reviewer, &pid, &9, &9, &9),
+            .try_configure_award_budget(&reviewer, &pid, &0, &9, &9, &9),
         Err(Ok(ProgError::NotAdmin))
     );
     assert_eq!(

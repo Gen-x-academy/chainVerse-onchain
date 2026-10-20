@@ -12,6 +12,9 @@ This contract (`contracts/scholarship-programs`) implements two of the
 "Scholarships On-chain/Programs" epic's behaviors:
 
 - **#1062 — Application opening and deadline windows.** `set_program_window()`
+  requires `expected_version` (`0` when creating) and returns the new revision.
+  A mismatch returns `VersionConflict`; clients should reload the window and
+  compare the newer values before retrying.
   stores `opens_at`/`closes_at` as UTC ledger timestamps (the only
   representation the chain can compare deterministically),
   `timezone_offset_minutes` as display-only metadata for off-chain UIs, and
@@ -23,6 +26,9 @@ This contract (`contracts/scholarship-programs`) implements two of the
   elsewhere, because this contract holds no application records at all —
   see Migration/Operational notes.
 - **#1064 — Award inventory and budget ceilings.** `configure_award_budget()`
+  uses the same compare-and-swap revision. `AwardBudget.version` advances on
+  configuration, reservation, and release, so a stale configuration cannot
+  reset newer counters. Version arithmetic is checked.
   sets `max_recipients`, `per_award_amount`, and `total_budget`, rejecting
   any configuration where the stated budget couldn't even cover
   `max_recipients` awards at that rate. `reserve_award()`/`release_award()`
@@ -60,11 +66,16 @@ credential as configuring the budget in the first place.
 
 New contract, no prior on-chain state. `configure_award_budget` may be
 called again for the same program before any award has been reserved to
-replace its configuration; the acceptance criteria for "concurrent
-decisions remain safe" is satisfied structurally, since every
+replace its configuration, but only with the latest `AwardBudget.version`.
+`set_program_window` similarly requires the latest `ProgramWindow.version`.
+The acceptance criteria for "concurrent decisions remain safe" is satisfied
+structurally, since every
 `reserve_award`/`release_award` call is a single atomic read-check-write
 within one Soroban invocation — there is no cross-call window where two
 concurrent reservations could both observe stale remaining capacity.
+Existing deployments require an explicit migration that initializes missing
+revision fields before using the changed ABI; legacy records must not be
+silently treated as revision zero.
 
 ## Operational impact
 
@@ -76,11 +87,11 @@ concurrent reservations could both observe stale remaining capacity.
   window closes elsewhere; wiring window/capacity enforcement into the
   submission flow itself is a follow-up integration, not something this
   pass does.
-- `configure_award_budget` can currently be called again after reservations
-  have already been made, which would silently reset `awarded_count`/
-  `committed_amount` to 0 while real reservations still "exist" in the
-  caller's mental model. Recommend adding an explicit guard (reject
-  reconfiguration once `awarded_count > 0`, or require an explicit
-  "reset" action) before this contract is used against a live budget.
+- Clients must retain and submit the revision returned by writes or read from
+  `get_program_window`/`get_award_budget`. On `VersionConflict`, reload and
+  compare; do not automatically retry the old payload.
+- Revision metadata adds no applicant data. Admin ownership, persistent
+  storage, and the existing approximately one-year TTL policy are unchanged;
+  deployment operators must account for the ABI and stored-field schema.
 - Storage/TTL/events follow the same conventions as the sibling scholarship
   contracts (persistent storage, ~1-year TTL bump on write).

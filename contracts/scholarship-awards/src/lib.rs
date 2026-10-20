@@ -89,6 +89,9 @@ pub enum ContractError {
     OfferNotExpired = 19,
     /// #1091 — no acceptance has been captured for this award yet.
     AcceptanceNotFound = 20,
+    /// The award changed since the caller last read it; reload and retry.
+    VersionConflict = 21,
+    VersionOverflow = 22,
 }
 
 #[contracttype]
@@ -132,6 +135,7 @@ pub enum AwardStatus {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Award {
+    pub version: u32,
     pub id: BytesN<32>,
     pub program_id: BytesN<32>,
     pub recipient: Address,
@@ -239,6 +243,20 @@ impl ScholarshipAwardsContract {
             .ok_or(ContractError::AwardNotFound)
     }
 
+    fn advance_award_version(
+        award: &mut Award,
+        expected_version: u32,
+    ) -> Result<(), ContractError> {
+        if award.version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        award.version = award
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
+        Ok(())
+    }
+
     /// Hold a reservation (one per active award) for a program.
     fn reserve(env: &Env, program_id: &BytesN<32>) -> Result<(), ContractError> {
         let key = DataKey::Reservation(program_id.clone());
@@ -314,6 +332,7 @@ impl ScholarshipAwardsContract {
         }
 
         let award = Award {
+            version: 1,
             id: award_id.clone(),
             program_id: program_id.clone(),
             recipient: recipient.clone(),
@@ -396,6 +415,7 @@ impl ScholarshipAwardsContract {
         env: Env,
         recipient: Address,
         award_id: BytesN<32>,
+        expected_version: u32,
         declarations_hash: BytesN<32>,
     ) -> Result<(), ContractError> {
         recipient.require_auth();
@@ -404,6 +424,7 @@ impl ScholarshipAwardsContract {
         if award.recipient != recipient {
             return Err(ContractError::NotRecipient);
         }
+        Self::advance_award_version(&mut award, expected_version)?;
         if award.status != AwardStatus::Offered {
             return Err(ContractError::OfferNotActive);
         }
@@ -415,7 +436,6 @@ impl ScholarshipAwardsContract {
         if !Self::is_legal_transition(award.status, AwardStatus::Accepted) {
             return Err(ContractError::InvalidTransition);
         }
-
         let acceptance = AgreementAcceptance {
             award_id: award_id.clone(),
             terms_version: award.terms_version,
@@ -474,6 +494,7 @@ impl ScholarshipAwardsContract {
         env: Env,
         recipient: Address,
         award_id: BytesN<32>,
+        expected_version: u32,
     ) -> Result<(), ContractError> {
         recipient.require_auth();
 
@@ -481,6 +502,7 @@ impl ScholarshipAwardsContract {
         if award.recipient != recipient {
             return Err(ContractError::NotRecipient);
         }
+        Self::advance_award_version(&mut award, expected_version)?;
         if !Self::is_legal_transition(award.status, AwardStatus::Declined) {
             return Err(ContractError::InvalidTransition);
         }
@@ -503,15 +525,19 @@ impl ScholarshipAwardsContract {
     /// passed, anyone may move an unanswered `Offered` award to `Expired`,
     /// releasing its reservation. Cannot be called before the deadline, and
     /// has no effect on a decided award.
-    pub fn expire_award(env: Env, award_id: BytesN<32>) -> Result<(), ContractError> {
+    pub fn expire_award(
+        env: Env,
+        award_id: BytesN<32>,
+        expected_version: u32,
+    ) -> Result<(), ContractError> {
         let mut award = Self::load_award(&env, &award_id)?;
+        Self::advance_award_version(&mut award, expected_version)?;
         if award.status != AwardStatus::Offered {
             return Err(ContractError::InvalidTransition);
         }
         if env.ledger().timestamp() <= award.acceptance_deadline {
             return Err(ContractError::OfferNotExpired);
         }
-
         award.status = AwardStatus::Expired;
         award.decided_at = env.ledger().timestamp();
         award.reserved = false;
@@ -534,18 +560,19 @@ impl ScholarshipAwardsContract {
         env: Env,
         admin: Address,
         award_id: BytesN<32>,
+        expected_version: u32,
         reason_code: u32,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
 
         let mut award = Self::load_award(&env, &award_id)?;
+        Self::advance_award_version(&mut award, expected_version)?;
         if award.paid_amount > 0 {
             return Err(ContractError::PaymentAlreadyMade);
         }
         if !Self::is_legal_transition(award.status, AwardStatus::Cancelled) {
             return Err(ContractError::InvalidTransition);
         }
-
         award.status = AwardStatus::Cancelled;
         award.decided_at = env.ledger().timestamp();
         award.reason_code = reason_code;
@@ -568,12 +595,14 @@ impl ScholarshipAwardsContract {
         env: Env,
         admin: Address,
         award_id: BytesN<32>,
+        expected_version: u32,
         reason_code: u32,
         recovery_amount: i128,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
 
         let mut award = Self::load_award(&env, &award_id)?;
+        Self::advance_award_version(&mut award, expected_version)?;
         if award.paid_amount == 0 {
             return Err(ContractError::NoPaymentMade);
         }
@@ -583,7 +612,6 @@ impl ScholarshipAwardsContract {
         if !Self::is_legal_transition(award.status, AwardStatus::Terminated) {
             return Err(ContractError::InvalidTransition);
         }
-
         award.status = AwardStatus::Terminated;
         award.decided_at = env.ledger().timestamp();
         award.reason_code = reason_code;
@@ -625,6 +653,7 @@ impl ScholarshipAwardsContract {
         env: Env,
         admin: Address,
         award_id: BytesN<32>,
+        expected_version: u32,
         amount: i128,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
@@ -633,6 +662,7 @@ impl ScholarshipAwardsContract {
             return Err(ContractError::InvalidAmount);
         }
         let mut award = Self::load_award(&env, &award_id)?;
+        Self::advance_award_version(&mut award, expected_version)?;
         if award.status != AwardStatus::Accepted {
             return Err(ContractError::AwardNotDisburseable);
         }

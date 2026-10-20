@@ -192,6 +192,7 @@ proptest! {
         w.programs.configure_award_budget(
             &admin,
             &pid,
+            &0,
             &max_recipients,
             &1_000,
             &(i128::from(max_recipients) * 1_000),
@@ -340,6 +341,7 @@ proptest! {
         w.programs.configure_award_budget(
             &w.actors.admin.clone(),
             &pid,
+            &0,
             &max_recipients,
             &1_000,
             &(i128::from(max_recipients) * 1_000),

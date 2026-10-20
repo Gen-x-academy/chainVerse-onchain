@@ -173,11 +173,11 @@ fn window_and_budget_changes_are_each_announced() {
     let pid = w.publish_program(4, "Announced Program");
 
     w.programs
-        .set_program_window(&w.actors.admin, &pid, &2_000, &9_000, &0, &0);
+        .set_program_window(&w.actors.admin, &pid, &0, &2_000, &9_000, &0, &0);
     expect_one(&w, &w.programs_id, "WINSET", 1);
 
     w.programs
-        .configure_award_budget(&w.actors.admin, &pid, &4, &1_000, &4_000);
+        .configure_award_budget(&w.actors.admin, &pid, &0, &4, &1_000, &4_000);
     expect_one(&w, &w.programs_id, "BUDGSET", 1);
 }
 

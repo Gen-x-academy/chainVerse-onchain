@@ -36,7 +36,7 @@ This contract (`contracts/scholarship-applications`) implements four of the
   applicant withdraw consent (it does not retroactively invalidate a
   submission already made under it — see Migration/Operational notes
   below); and `has_valid_consent()`/`submit_application()` require the
-  applicant's consent to match the program's *current* terms version, so
+  applicant's consent to match the program's _current_ terms version, so
   publishing new terms automatically forces re-consent before any further
   submission.
 
@@ -65,6 +65,11 @@ programs and publish form-schema/consent-terms versions. Applicants require
 their own signature to record or revoke consent and to submit — no admin or
 relayer can do either on an applicant's behalf.
 
+The mutable `Program` record carries a checked revision. Admin
+`set_program_active` calls must supply the revision they read and return the
+new one; a stale revision returns `VersionConflict` before storage or events
+change. Application submissions remain immutable and applicant-authorized.
+
 ## Migration
 
 New contract, no prior on-chain state. A program must have both a
@@ -74,6 +79,10 @@ successfully submit against it (`submit_application` fails with
 otherwise) — the admin flow is: `register_program` →
 `publish_form_schema` → `publish_consent_terms` → applicants can then
 `record_consent` and `submit_application`.
+Existing deployments must migrate program records to a revision baseline
+before enabling the changed ABI. Clients read the current program and pass
+its revision to `set_program_active`; after `VersionConflict`, reload and
+reconcile rather than replaying stale state.
 
 ## Operational impact
 
@@ -85,16 +94,20 @@ otherwise) — the admin flow is: `register_program` →
   submission for anyone who consented earlier, until they return and
   re-consent — plan terms changes accordingly, and consider notifying
   affected applicants off-chain when this happens.
-- Consent revocation only affects *future* submissions; it intentionally
+- Consent revocation only affects _future_ submissions; it intentionally
   does not touch or invalidate an `Application` record that already exists
   (submissions are immutable once made, consistent with "cannot erase
   review history" elsewhere in this epic). An applicant who revokes after
-  submitting has revoked consent for any *next* action requiring fresh
+  submitting has revoked consent for any _next_ action requiring fresh
   consent, not for the completed submission itself — this asymmetry should
   be surfaced clearly in any UI built on this contract.
 - Storage/TTL/events follow the same conventions as the previous pass on
   this contract (persistent storage, ~1-year TTL bump, no
   upgrade/pause admin function yet — see the prior PR's note on that).
+- Revision metadata is not applicant data and does not change the off-chain
+  trust boundary: answers, identity, and documents remain outside the
+  contract. Admin authorization and persistent-record TTL policy are
+  unchanged; deployment tooling must account for the ABI/schema migration.
 - Related issues: #1074 (duplicate prevention), #1075 (atomic submission),
   #1076 (withdrawal — not yet implemented), #1077 (tamper-evident receipts —
   not yet implemented)

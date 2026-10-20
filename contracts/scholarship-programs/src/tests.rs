@@ -26,7 +26,7 @@ fn test_set_program_window_rejects_inverted_range() {
     client.initialize(&admin);
     let pid = program_id(&env, 1);
 
-    let result = client.try_set_program_window(&admin, &pid, &1000u64, &500u64, &0i32, &0u64);
+    let result = client.try_set_program_window(&admin, &pid, &0, &1000u64, &500u64, &0i32, &0u64);
     assert_eq!(result, Err(Ok(ContractError::InvalidWindow)));
 }
 
@@ -38,7 +38,7 @@ fn test_non_admin_cannot_set_window() {
     let pid = program_id(&env, 1);
     let attacker = Address::generate(&env);
 
-    let result = client.try_set_program_window(&attacker, &pid, &0u64, &1000u64, &0i32, &0u64);
+    let result = client.try_set_program_window(&attacker, &pid, &0, &0u64, &1000u64, &0i32, &0u64);
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
@@ -48,7 +48,7 @@ fn test_is_open_true_within_window() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &0u64);
 
     env.ledger().set_timestamp(150);
     assert!(client.is_open(&pid));
@@ -60,7 +60,7 @@ fn test_is_open_false_before_opening() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &0u64);
 
     env.ledger().set_timestamp(50);
     assert!(!client.is_open(&pid));
@@ -72,7 +72,7 @@ fn test_is_open_false_after_closing() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &0u64);
 
     env.ledger().set_timestamp(201);
     assert!(!client.is_open(&pid));
@@ -84,7 +84,7 @@ fn test_is_within_grace_true_during_grace_period() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &50u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &50u64);
 
     env.ledger().set_timestamp(220); // after close, within +50 grace
     assert!(!client.is_open(&pid));
@@ -97,7 +97,7 @@ fn test_is_within_grace_false_after_grace_expires() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &50u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &50u64);
 
     env.ledger().set_timestamp(300); // well past close + grace
     assert!(!client.is_within_grace(&pid));
@@ -109,7 +109,7 @@ fn test_is_within_grace_false_during_open_window() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &50u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &50u64);
 
     env.ledger().set_timestamp(150);
     assert!(!client.is_within_grace(&pid));
@@ -123,12 +123,50 @@ fn test_updating_window_replaces_prior_config() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.set_program_window(&admin, &pid, &100u64, &200u64, &0i32, &0u64);
-    client.set_program_window(&admin, &pid, &300u64, &400u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &1, &300u64, &400u64, &0i32, &0u64);
 
     let window = client.get_program_window(&pid);
     assert_eq!(window.opens_at, 300);
     assert_eq!(window.closes_at, 400);
+    assert_eq!(window.version, 2);
+}
+
+#[test]
+fn test_stale_window_update_preserves_newer_state() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    let pid = program_id(&env, 1);
+    client.set_program_window(&admin, &pid, &0, &100u64, &200u64, &0i32, &0u64);
+    client.set_program_window(&admin, &pid, &1, &300u64, &400u64, &0i32, &0u64);
+
+    let result = client.try_set_program_window(&admin, &pid, &1, &500u64, &600u64, &0i32, &0u64);
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    let window = client.get_program_window(&pid);
+    assert_eq!(window.version, 2);
+    assert_eq!(window.opens_at, 300);
+    assert_eq!(window.closes_at, 400);
+}
+
+#[test]
+fn test_stale_budget_configuration_preserves_reservation_state() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    let pid = program_id(&env, 2);
+    client.configure_award_budget(&admin, &pid, &0, &3, &100, &300);
+    client.reserve_award(&admin, &pid);
+
+    let result = client.try_configure_award_budget(&admin, &pid, &1, &5, &50, &250);
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    let budget = client.get_award_budget(&pid);
+    assert_eq!(budget.version, 2);
+    assert_eq!(budget.awarded_count, 1);
+    assert_eq!(budget.committed_amount, 100);
+    assert_eq!(budget.max_recipients, 3);
 }
 
 // ── #1064 — award inventory / budget ceilings ────────────────────────────────
@@ -141,7 +179,7 @@ fn test_configure_budget_rejects_insufficient_total_budget() {
     let pid = program_id(&env, 1);
 
     // 10 recipients * 100 = 1000 required, but only 500 budgeted.
-    let result = client.try_configure_award_budget(&admin, &pid, &10u32, &100i128, &500i128);
+    let result = client.try_configure_award_budget(&admin, &pid, &0, &10u32, &100i128, &500i128);
     assert_eq!(result, Err(Ok(ContractError::InvalidBudgetConfig)));
 }
 
@@ -152,7 +190,7 @@ fn test_configure_budget_rejects_zero_max_recipients() {
     client.initialize(&admin);
     let pid = program_id(&env, 1);
 
-    let result = client.try_configure_award_budget(&admin, &pid, &0u32, &100i128, &1000i128);
+    let result = client.try_configure_award_budget(&admin, &pid, &0, &0u32, &100i128, &1000i128);
     assert_eq!(result, Err(Ok(ContractError::InvalidBudgetConfig)));
 }
 
@@ -162,7 +200,7 @@ fn test_reserve_award_increments_counters() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &3u32, &100i128, &300i128);
+    client.configure_award_budget(&admin, &pid, &0, &3u32, &100i128, &300i128);
 
     let idx = client.reserve_award(&admin, &pid);
     assert_eq!(idx, 1);
@@ -179,7 +217,7 @@ fn test_reserve_award_cannot_exceed_max_recipients() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &1000i128);
+    client.configure_award_budget(&admin, &pid, &0, &2u32, &100i128, &1000i128);
 
     client.reserve_award(&admin, &pid);
     client.reserve_award(&admin, &pid);
@@ -205,7 +243,7 @@ fn test_a_budget_too_small_to_cover_its_recipients_is_rejected_at_configure_time
     client.initialize(&admin);
     let pid = program_id(&env, 1);
     // max_recipients is generously large, but total_budget only covers 2 awards.
-    let result = client.try_configure_award_budget(&admin, &pid, &100u32, &100i128, &200i128);
+    let result = client.try_configure_award_budget(&admin, &pid, &0, &100u32, &100i128, &200i128);
     assert_eq!(result, Err(Ok(ContractError::InvalidBudgetConfig)));
     // Nothing was written, so there is no partial budget to reserve against.
     assert_eq!(
@@ -222,7 +260,7 @@ fn test_tightest_legal_budget_fails_on_capacity() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &200i128);
+    client.configure_award_budget(&admin, &pid, &0, &2u32, &100i128, &200i128);
 
     client.reserve_award(&admin, &pid);
     client.reserve_award(&admin, &pid);
@@ -240,7 +278,7 @@ fn test_release_award_returns_capacity_and_budget() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &200i128);
+    client.configure_award_budget(&admin, &pid, &0, &2u32, &100i128, &200i128);
 
     client.reserve_award(&admin, &pid);
     client.reserve_award(&admin, &pid);
@@ -263,7 +301,7 @@ fn test_release_award_with_none_reserved_fails() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &200i128);
+    client.configure_award_budget(&admin, &pid, &0, &2u32, &100i128, &200i128);
 
     let result = client.try_release_award(&admin, &pid);
     assert_eq!(result, Err(Ok(ContractError::NoAwardsReserved)));
@@ -275,7 +313,7 @@ fn test_non_admin_cannot_reserve_award() {
     let client = crate::ScholarshipProgramsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
     let pid = program_id(&env, 1);
-    client.configure_award_budget(&admin, &pid, &2u32, &100i128, &200i128);
+    client.configure_award_budget(&admin, &pid, &0, &2u32, &100i128, &200i128);
     let attacker = Address::generate(&env);
 
     let result = client.try_reserve_award(&attacker, &pid);

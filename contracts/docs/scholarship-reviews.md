@@ -11,7 +11,8 @@ multiple independent reviews of an application into a single, reproducible
 aggregate score:
 
 - **Rubrics are versioned and immutable.** `publish_rubric()` records a
-  rubric (an ordered list of `Criterion { weight_bps, max_score }`) as
+  rubric (an ordered list of `Criterion { weight_bps, max_score }`) using the
+  expected latest rubric version (`0` before the first publication), as
   version N+1; existing versions are never overwritten, so the exact
   weighting that produced a past score stays recoverable via
   `get_rubric(program_id, version)`. A rubric is rejected (`InvalidRubric`)
@@ -19,6 +20,10 @@ aggregate score:
   `max_score` is positive, and the `weight_bps` values sum to exactly
   `BPS_DENOMINATOR` (10_000) — i.e. weights are basis points that must add
   up to 100%.
+- `ProgramConfig.version` protects mutable activation state. Activation
+  changes and rubric publications reject stale revisions with
+  `VersionConflict`; clients reload the current config or rubric version and
+  compare before retrying. Revision increments use checked arithmetic.
 - **Scores are normalized per criterion.** `submit_review()` records a
   reviewer's raw scores only after checking there is exactly one score per
   criterion and every score is within that criterion's `max_score`
@@ -94,6 +99,10 @@ program flow is: `initialize` → `register_program` → `publish_rubric` →
 reviewers `submit_review` → `aggregate_score`/`compare_applicants`. A
 program must have a published rubric before any review is accepted
 (`NoRubricPublished`).
+Existing deployments must migrate program records and rubric-version
+counters before switching callers to the expected-version ABI. Revision
+fields add no applicant or reviewer narrative data; authorization and the
+persistent TTL policy are unchanged.
 
 ## Operational impact
 
@@ -109,3 +118,7 @@ program must have a published rubric before any review is accepted
   or scores; it only affects future submissions, and mixing versions in
   one aggregate is rejected explicitly.
 - No upgrade/pause admin function exists in this pass.
+- A conflict performs no write and emits no success event. Clients should
+  reload `get_program_config` or `get_latest_rubric_version`, compare the
+  newer state, and require a deliberate retry. Submitted scores and reviews
+  remain immutable.

@@ -38,7 +38,7 @@ fn ready(env: &Env, client: &crate::ScholarshipReviewsContractClient, admin: &Ad
     let pid = key(env, 1);
     client.initialize(admin);
     client.register_program(admin, &pid, &2u32, &4u32);
-    client.publish_rubric(admin, &pid, &criteria(env));
+    client.publish_rubric(admin, &pid, &0, &criteria(env));
     pid
 }
 
@@ -60,12 +60,25 @@ fn test_publish_rubric_creates_immutable_new_version() {
     let client = crate::ScholarshipReviewsContractClient::new(&env, &contract_id);
     let pid = ready(&env, &client, &admin);
 
-    let v2 = client.publish_rubric(&admin, &pid, &criteria(&env));
+    let v2 = client.publish_rubric(&admin, &pid, &1, &criteria(&env));
     assert_eq!(v2, 2);
 
     // Version 1 is unchanged and still retrievable.
     assert_eq!(client.get_rubric(&pid, &1).version, 1);
     assert_eq!(client.get_rubric(&pid, &2).version, 2);
+}
+
+#[test]
+fn test_stale_rubric_publication_returns_current_version() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipReviewsContractClient::new(&env, &contract_id);
+    let pid = ready(&env, &client, &admin);
+
+    let result = client.try_publish_rubric(&admin, &pid, &0, &criteria(&env));
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    assert_eq!(client.get_latest_rubric_version(&pid), 1);
+    assert_eq!(client.get_rubric(&pid, &1).version, 1);
 }
 
 #[test]
@@ -76,7 +89,7 @@ fn test_publish_rubric_rejects_empty_criteria() {
     client.initialize(&admin);
     client.register_program(&admin, &pid, &1u32, &4u32);
 
-    let result = client.try_publish_rubric(&admin, &pid, &empty_criteria(&env));
+    let result = client.try_publish_rubric(&admin, &pid, &0, &empty_criteria(&env));
     assert_eq!(result, Err(Ok(ContractError::InvalidRubric)));
 }
 
@@ -99,7 +112,7 @@ fn test_publish_rubric_rejects_weights_not_summing_to_10000() {
             max_score: 50,
         },
     ];
-    let result = client.try_publish_rubric(&admin, &pid, &bad);
+    let result = client.try_publish_rubric(&admin, &pid, &0, &bad);
     assert_eq!(result, Err(Ok(ContractError::InvalidRubric)));
 }
 
@@ -118,7 +131,7 @@ fn test_publish_rubric_rejects_zero_max_score() {
             max_score: 0,
         },
     ];
-    let result = client.try_publish_rubric(&admin, &pid, &bad);
+    let result = client.try_publish_rubric(&admin, &pid, &0, &bad);
     assert_eq!(result, Err(Ok(ContractError::InvalidRubric)));
 }
 
@@ -129,7 +142,7 @@ fn test_non_admin_cannot_publish_rubric() {
     let pid = ready(&env, &client, &admin);
 
     let attacker = Address::generate(&env);
-    let result = client.try_publish_rubric(&attacker, &pid, &criteria(&env));
+    let result = client.try_publish_rubric(&attacker, &pid, &0, &criteria(&env));
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
@@ -252,7 +265,7 @@ fn test_reviewer_capacity_is_enforced() {
     let pid = key(&env, 1);
     client.initialize(&admin);
     client.register_program(&admin, &pid, &1u32, &1u32); // at most one review
-    client.publish_rubric(&admin, &pid, &criteria(&env));
+    client.publish_rubric(&admin, &pid, &0, &criteria(&env));
 
     let applicant = Address::generate(&env);
     let r1 = Address::generate(&env);
@@ -268,13 +281,28 @@ fn test_review_rejected_for_inactive_program() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipReviewsContractClient::new(&env, &contract_id);
     let pid = ready(&env, &client, &admin);
-    client.set_program_active(&admin, &pid, &false);
+    client.set_program_active(&admin, &pid, &1, &false);
 
     let reviewer = Address::generate(&env);
     let applicant = Address::generate(&env);
     let result =
         client.try_submit_review(&reviewer, &pid, &applicant, &vec![&env, 100u32, 50u32]);
     assert_eq!(result, Err(Ok(ContractError::ProgramInactive)));
+}
+
+#[test]
+fn test_stale_review_program_update_preserves_newer_state() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipReviewsContractClient::new(&env, &contract_id);
+    let pid = ready(&env, &client, &admin);
+
+    client.set_program_active(&admin, &pid, &1, &false);
+    let result = client.try_set_program_active(&admin, &pid, &1, &true);
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    let config = client.get_program_config(&pid);
+    assert_eq!(config.version, 2);
+    assert!(!config.active);
 }
 
 // ── aggregate score ─────────────────────────────────────────────────────────
@@ -316,7 +344,7 @@ fn test_aggregate_floors_at_each_division() {
     let pid = key(&env, 1);
     client.initialize(&admin);
     client.register_program(&admin, &pid, &2u32, &4u32);
-    client.publish_rubric(&admin, &pid, &criteria(&env));
+    client.publish_rubric(&admin, &pid, &0, &criteria(&env));
 
     let applicant = Address::generate(&env);
     let r1 = Address::generate(&env);
@@ -337,14 +365,14 @@ fn test_aggregate_rejects_mixed_rubric_versions() {
     let pid = key(&env, 1);
     client.initialize(&admin);
     client.register_program(&admin, &pid, &1u32, &4u32);
-    client.publish_rubric(&admin, &pid, &criteria(&env));
+    client.publish_rubric(&admin, &pid, &0, &criteria(&env));
 
     let applicant = Address::generate(&env);
     let r1 = Address::generate(&env);
     client.submit_review(&r1, &pid, &applicant, &vec![&env, 100u32, 50u32]);
 
     // A second rubric version is published before the next review is scored.
-    client.publish_rubric(&admin, &pid, &criteria(&env));
+    client.publish_rubric(&admin, &pid, &1, &criteria(&env));
     let r2 = Address::generate(&env);
     client.submit_review(&r2, &pid, &applicant, &vec![&env, 100u32, 50u32]);
 
@@ -362,7 +390,7 @@ fn single_review_program(
     let pid = key(env, 2);
     client.initialize(admin);
     client.register_program(admin, &pid, &1u32, &4u32);
-    client.publish_rubric(admin, &pid, &criteria(env));
+    client.publish_rubric(admin, &pid, &0, &criteria(env));
     pid
 }
 
