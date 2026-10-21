@@ -92,6 +92,8 @@ pub enum ContractError {
     /// versions, so no single weighting can combine them reproducibly.
     /// Re-score the application against one rubric version to aggregate.
     MixedRubricVersions = 18,
+    /// The program or rubric changed since the caller last read it.
+    VersionConflict = 19,
 }
 
 #[contracttype]
@@ -134,6 +136,7 @@ pub struct Rubric {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramConfig {
+    pub version: u32,
     pub active: bool,
     /// Minimum number of recorded reviews required before an aggregate may
     /// be computed. Unsubmitted ("missing") reviews are simply absent and
@@ -221,6 +224,7 @@ impl ScholarshipReviewsContract {
         }
 
         let config = ProgramConfig {
+            version: 1,
             active: true,
             min_reviews,
             max_reviews,
@@ -240,8 +244,9 @@ impl ScholarshipReviewsContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         active: bool,
-    ) -> Result<(), ContractError> {
+    ) -> Result<u32, ContractError> {
         Self::require_admin(&env, &admin)?;
 
         let key = DataKey::ProgramConfig(program_id.clone());
@@ -250,6 +255,13 @@ impl ScholarshipReviewsContract {
             .persistent()
             .get(&key)
             .ok_or(ContractError::ProgramNotFound)?;
+        if config.version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        config.version = config
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
         config.active = active;
 
         env.storage().persistent().set(&key, &config);
@@ -261,7 +273,7 @@ impl ScholarshipReviewsContract {
             (soroban_sdk::symbol_short!("REVACT"),),
             (program_id, active),
         );
-        Ok(())
+        Ok(config.version)
     }
 
     pub fn get_program_config(
@@ -284,6 +296,7 @@ impl ScholarshipReviewsContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         criteria: Vec<Criterion>,
     ) -> Result<u32, ContractError> {
         Self::require_admin(&env, &admin)?;
@@ -299,11 +312,15 @@ impl ScholarshipReviewsContract {
         Self::validate_rubric(&criteria)?;
 
         let version_key = DataKey::RubricVersion(program_id.clone());
-        let next_version: u32 = env
+        let current_version: u32 = env
             .storage()
             .persistent()
             .get::<DataKey, u32>(&version_key)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        if current_version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        let next_version = current_version
             .checked_add(1)
             .ok_or(ContractError::VersionOverflow)?;
 

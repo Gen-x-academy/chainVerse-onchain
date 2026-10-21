@@ -50,6 +50,9 @@ pub enum ContractError {
     /// already has reserved awards. The budget may be replaced only
     /// before any award is reserved; see the note on the function.
     BudgetAlreadyCommitted = 12,
+    /// The record changed since the caller last read it; reload and retry.
+    VersionConflict = 13,
+    VersionOverflow = 14,
 }
 
 #[contracttype]
@@ -69,6 +72,7 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramWindow {
+    pub version: u32,
     pub opens_at: u64,
     pub closes_at: u64,
     pub timezone_offset_minutes: i32,
@@ -81,6 +85,7 @@ pub struct ProgramWindow {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AwardBudget {
+    pub version: u32,
     pub max_recipients: u32,
     pub per_award_amount: i128,
     pub total_budget: i128,
@@ -125,12 +130,27 @@ impl ScholarshipProgramsContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         opens_at: u64,
         closes_at: u64,
         timezone_offset_minutes: i32,
         grace_period_seconds: u64,
-    ) -> Result<(), ContractError> {
+    ) -> Result<u32, ContractError> {
         Self::require_admin(&env, &admin)?;
+
+        let key = DataKey::Window(program_id.clone());
+        let current_version = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ProgramWindow>(&key)
+            .map(|window| window.version)
+            .unwrap_or(0);
+        if expected_version != current_version {
+            return Err(ContractError::VersionConflict);
+        }
+        let next_version = current_version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
 
         if opens_at >= closes_at {
             return Err(ContractError::InvalidWindow);
@@ -141,21 +161,21 @@ impl ScholarshipProgramsContract {
             .ok_or(ContractError::WindowOverflow)?;
 
         let window = ProgramWindow {
+            version: next_version,
             opens_at,
             closes_at,
             timezone_offset_minutes,
             grace_period_seconds,
         };
 
-        let key = DataKey::Window(program_id.clone());
         env.storage().persistent().set(&key, &window);
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
 
         env.events()
-            .publish((soroban_sdk::symbol_short!("WINSET"),), (program_id,));
-        Ok(())
+            .publish((soroban_sdk::symbol_short!("WINSET"),), (program_id, next_version));
+        Ok(next_version)
     }
 
     pub fn get_program_window(
@@ -212,11 +232,24 @@ impl ScholarshipProgramsContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         max_recipients: u32,
         per_award_amount: i128,
         total_budget: i128,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
+
+        let existing = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AwardBudget>(&DataKey::Budget(program_id.clone()));
+        let current_version = existing.as_ref().map(|budget| budget.version).unwrap_or(0);
+        if expected_version != current_version {
+            return Err(ContractError::VersionConflict);
+        }
+        let next_version = current_version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
 
         if max_recipients == 0 || per_award_amount <= 0 || total_budget <= 0 {
             return Err(ContractError::InvalidBudgetConfig);
@@ -230,17 +263,14 @@ impl ScholarshipProgramsContract {
 
         // Refuse to overwrite a budget that is already in use, rather than
         // silently zeroing the commitment it records.
-        if let Some(existing) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, AwardBudget>(&DataKey::Budget(program_id.clone()))
-        {
+        if let Some(existing) = existing {
             if existing.awarded_count > 0 || existing.committed_amount > 0 {
                 return Err(ContractError::BudgetAlreadyCommitted);
             }
         }
 
         let budget = AwardBudget {
+            version: next_version,
             max_recipients,
             per_award_amount,
             total_budget,
@@ -295,6 +325,10 @@ impl ScholarshipProgramsContract {
             .checked_add(1)
             .ok_or(ContractError::CapacityExceeded)?;
         budget.committed_amount = new_committed;
+        budget.version = budget
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
 
         env.storage().persistent().set(&key, &budget);
         env.storage()
@@ -337,6 +371,10 @@ impl ScholarshipProgramsContract {
             .committed_amount
             .checked_sub(budget.per_award_amount)
             .ok_or(ContractError::NoAwardsReserved)?;
+        budget.version = budget
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
 
         env.storage().persistent().set(&key, &budget);
         env.storage()

@@ -204,16 +204,16 @@ fn an_unfundable_budget_is_rejected_at_configuration_time() {
         &scholarship_core::FundingModel::FixedAward,
     );
     w.programs
-        .set_program_window(&admin, &pid, &START, &(START + WINDOW), &0, &0);
+        .set_program_window(&admin, &pid, &0, &START, &(START + WINDOW), &0, &0);
 
     assert_eq!(
         w.programs
-            .try_configure_award_budget(&admin, &pid, &10, &1_000, &5_000),
+            .try_configure_award_budget(&admin, &pid, &0, &10, &1_000, &5_000),
         Err(Ok(ProgError::InvalidBudgetConfig))
     );
     assert_eq!(
         w.programs
-            .try_configure_award_budget(&admin, &pid, &10, &0, &5_000),
+            .try_configure_award_budget(&admin, &pid, &0, &10, &0, &5_000),
         Err(Ok(ProgError::InvalidBudgetConfig))
     );
     // The rejected attempts left no budget behind at all.

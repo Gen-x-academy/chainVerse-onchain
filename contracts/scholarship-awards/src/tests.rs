@@ -102,9 +102,29 @@ fn test_create_award_records_fields_and_holds_reservation() {
 
     let award = c.get_award(&hash(&env, 1));
     assert_eq!(award.amount, 5_000);
+    assert_eq!(award.version, 1);
     assert_eq!(award.status, AwardStatus::Offered);
     assert!(award.reserved);
     assert_eq!(award.paid_amount, 0);
+    assert_eq!(c.get_reservation(&pid), 1);
+    assert!(c.has_active_award(&recipient, &pid));
+}
+
+#[test]
+fn test_stale_award_transition_does_not_release_reservation() {
+    let (env, contract_id, admin) = setup();
+    let c = client(&env, &contract_id);
+    let pid = hash(&env, 2);
+    let recipient = Address::generate(&env);
+    offer(&env, &c, &admin, &hash(&env, 1), &pid, &recipient, 5_000, 1_000);
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
+
+    let result = c.try_cancel_award(&admin, &hash(&env, 1), &1, &7);
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    let award = c.get_award(&hash(&env, 1));
+    assert_eq!(award.version, 2);
+    assert_eq!(award.status, AwardStatus::Accepted);
     assert_eq!(c.get_reservation(&pid), 1);
     assert!(c.has_active_award(&recipient, &pid));
 }
@@ -263,7 +283,7 @@ fn test_expired_offer_releases_reservation_and_pointer() {
     env.ledger().set_timestamp(1_001);
     assert!(c.is_acceptance_expired(&hash(&env, 1)));
 
-    c.expire_award(&hash(&env, 1));
+    c.expire_award(&hash(&env, 1), &1);
     assert_eq!(c.get_award(&hash(&env, 1)).status, AwardStatus::Expired);
     assert_eq!(c.get_reservation(&pid), 0);
     assert!(!c.has_active_award(&recipient, &pid));
@@ -285,7 +305,7 @@ fn test_expire_before_deadline_fails() {
         1_000,
     );
 
-    let result = c.try_expire_award(&hash(&env, 1));
+    let result = c.try_expire_award(&hash(&env, 1), &1);
     assert_eq!(result, Err(Ok(ContractError::OfferNotExpired)));
 }
 
@@ -308,7 +328,7 @@ fn test_accept_award_captures_signer_timestamp_and_terms() {
     );
 
     env.ledger().set_timestamp(400);
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
 
     let acceptance = c.get_acceptance(&hash(&env, 1));
     assert_eq!(acceptance.signer, recipient);
@@ -336,7 +356,7 @@ fn test_non_recipient_cannot_accept() {
     );
 
     let attacker = Address::generate(&env);
-    let result = c.try_accept_award(&attacker, &hash(&env, 1), &hash(&env, 55));
+    let result = c.try_accept_award(&attacker, &hash(&env, 1), &1, &hash(&env, 55));
     assert_eq!(result, Err(Ok(ContractError::NotRecipient)));
 }
 
@@ -357,7 +377,7 @@ fn test_accept_after_deadline_fails() {
     );
 
     env.ledger().set_timestamp(1_001);
-    let result = c.try_accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    let result = c.try_accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
     assert_eq!(result, Err(Ok(ContractError::OfferExpired)));
 }
 
@@ -378,12 +398,12 @@ fn test_declined_offer_cannot_disburse() {
         1_000,
     );
 
-    c.decline_award(&recipient, &hash(&env, 1));
+    c.decline_award(&recipient, &hash(&env, 1), &1);
     assert_eq!(c.get_award(&hash(&env, 1)).status, AwardStatus::Declined);
     assert!(!c.can_disburse(&hash(&env, 1)));
     assert_eq!(c.get_reservation(&pid), 0);
 
-    let result = c.try_record_disbursement(&admin, &hash(&env, 1), &100i128);
+    let result = c.try_record_disbursement(&admin, &hash(&env, 1), &2, &100i128);
     assert_eq!(result, Err(Ok(ContractError::AwardNotDisburseable)));
 }
 
@@ -405,9 +425,9 @@ fn test_cancel_before_payment_succeeds_and_stops_disbursement() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
 
-    c.cancel_award(&admin, &hash(&env, 1), &7u32);
+    c.cancel_award(&admin, &hash(&env, 1), &2, &7u32);
 
     let award = c.get_award(&hash(&env, 1));
     assert_eq!(award.status, AwardStatus::Cancelled);
@@ -416,7 +436,7 @@ fn test_cancel_before_payment_succeeds_and_stops_disbursement() {
     assert!(!c.can_disburse(&hash(&env, 1)));
     assert_eq!(c.get_reservation(&pid), 0);
     assert_eq!(
-        c.try_record_disbursement(&admin, &hash(&env, 1), &100i128),
+        c.try_record_disbursement(&admin, &hash(&env, 1), &3, &100i128),
         Err(Ok(ContractError::AwardNotDisburseable))
     );
 }
@@ -436,10 +456,10 @@ fn test_cancel_after_payment_is_rejected() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
-    c.record_disbursement(&admin, &hash(&env, 1), &1_000i128);
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
+    c.record_disbursement(&admin, &hash(&env, 1), &2, &1_000i128);
 
-    let result = c.try_cancel_award(&admin, &hash(&env, 1), &7u32);
+    let result = c.try_cancel_award(&admin, &hash(&env, 1), &3, &7u32);
     assert_eq!(result, Err(Ok(ContractError::PaymentAlreadyMade)));
 }
 
@@ -458,9 +478,9 @@ fn test_terminate_requires_a_payment() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
 
-    let result = c.try_terminate_award(&admin, &hash(&env, 1), &3u32, &0i128);
+    let result = c.try_terminate_award(&admin, &hash(&env, 1), &2, &3u32, &0i128);
     assert_eq!(result, Err(Ok(ContractError::NoPaymentMade)));
 }
 
@@ -480,10 +500,10 @@ fn test_terminate_tracks_recovery_separately() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
-    c.record_disbursement(&admin, &hash(&env, 1), &2_000i128);
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
+    c.record_disbursement(&admin, &hash(&env, 1), &2, &2_000i128);
 
-    c.terminate_award(&admin, &hash(&env, 1), &9u32, &1_500i128);
+    c.terminate_award(&admin, &hash(&env, 1), &3, &9u32, &1_500i128);
 
     let award = c.get_award(&hash(&env, 1));
     assert_eq!(award.status, AwardStatus::Terminated);
@@ -508,10 +528,10 @@ fn test_terminate_rejects_recovery_over_paid() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
-    c.record_disbursement(&admin, &hash(&env, 1), &1_000i128);
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
+    c.record_disbursement(&admin, &hash(&env, 1), &2, &1_000i128);
 
-    let result = c.try_terminate_award(&admin, &hash(&env, 1), &3u32, &1_001i128);
+    let result = c.try_terminate_award(&admin, &hash(&env, 1), &3, &3u32, &1_001i128);
     assert_eq!(result, Err(Ok(ContractError::RecoveryExceedsPaid)));
 }
 
@@ -530,9 +550,9 @@ fn test_disbursement_cannot_exceed_award() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
 
-    let result = c.try_record_disbursement(&admin, &hash(&env, 1), &5_001i128);
+    let result = c.try_record_disbursement(&admin, &hash(&env, 1), &2, &5_001i128);
     assert_eq!(result, Err(Ok(ContractError::DisbursementExceedsAward)));
 }
 
@@ -551,8 +571,8 @@ fn test_fully_paid_award_cannot_disburse_again() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
-    c.record_disbursement(&admin, &hash(&env, 1), &5_000i128);
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
+    c.record_disbursement(&admin, &hash(&env, 1), &2, &5_000i128);
 
     assert!(!c.can_disburse(&hash(&env, 1)));
 }
@@ -572,10 +592,10 @@ fn test_illegal_transition_declined_then_cancel() {
         5_000,
         1_000,
     );
-    c.decline_award(&recipient, &hash(&env, 1));
+    c.decline_award(&recipient, &hash(&env, 1), &1);
 
     // Declined is terminal — cancel is not a legal transition from it.
-    let result = c.try_cancel_award(&admin, &hash(&env, 1), &1u32);
+    let result = c.try_cancel_award(&admin, &hash(&env, 1), &2, &1u32);
     assert_eq!(result, Err(Ok(ContractError::InvalidTransition)));
 }
 
@@ -594,9 +614,9 @@ fn test_cannot_accept_twice() {
         5_000,
         1_000,
     );
-    c.accept_award(&recipient, &hash(&env, 1), &hash(&env, 55));
+    c.accept_award(&recipient, &hash(&env, 1), &1, &hash(&env, 55));
 
-    let result = c.try_accept_award(&recipient, &hash(&env, 1), &hash(&env, 56));
+    let result = c.try_accept_award(&recipient, &hash(&env, 1), &2, &hash(&env, 56));
     assert_eq!(result, Err(Ok(ContractError::OfferNotActive)));
 }
 

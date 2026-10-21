@@ -4,7 +4,7 @@ Role-based operating guide for the scholarship contracts: who does what, what
 each role can actually call, what is visible on-chain, and what to do when
 something fails.
 
-This is the *narrative* guide. For exhaustive per-function reference, including
+This is the _narrative_ guide. For exhaustive per-function reference, including
 storage layout and error-by-error semantics, see the per-contract documents
 listed under [Related documents](#related-documents). Where the two disagree,
 the per-contract document is authoritative and this one is a bug.
@@ -25,15 +25,15 @@ the per-contract document is authoritative and this one is a bug.
 
 ## The seven contracts
 
-| Contract | Responsibility |
-| --- | --- |
-| `scholarship-core` | Program records and their lifecycle |
-| `scholarship-registry` | Which contracts are wired in, and who holds which role |
-| `scholarship-programs` | Application windows and award budgets |
-| `scholarship-eligibility` | Eligibility rules and attestations |
-| `scholarship-applications` | Forms, consent, and application submission |
-| `scholarship-milestones` | Milestone definition, evidence, and verification |
-| `scholarship-disbursements` | Payout wallets, disbursement intents, execution |
+| Contract                    | Responsibility                                         |
+| --------------------------- | ------------------------------------------------------ |
+| `scholarship-core`          | Program records and their lifecycle                    |
+| `scholarship-registry`      | Which contracts are wired in, and who holds which role |
+| `scholarship-programs`      | Application windows and award budgets                  |
+| `scholarship-eligibility`   | Eligibility rules and attestations                     |
+| `scholarship-applications`  | Forms, consent, and application submission             |
+| `scholarship-milestones`    | Milestone definition, evidence, and verification       |
+| `scholarship-disbursements` | Payout wallets, disbursement intents, execution        |
 
 These do not call each other. A program identifier means different things in
 different contracts, and the contracts deliberately cannot confirm each
@@ -50,13 +50,13 @@ have to perform yourself, off-chain, and it can be wrong.
 
 Roles live in `scholarship-registry` and are granted by the registry admin:
 
-| Role | Held by | Grants |
-| --- | --- | --- |
-| `Student` | Applicants | Nothing directly; the registry records the affiliation |
-| `Sponsor` | Programme owners | Program administration in `scholarship-core` |
-| `Reviewer` | Reviewers | Application assignment and review decisions |
-| `Finance` | Finance staff | Disbursement creation and execution |
-| `Administrator` | Contract admins | `initialize`, role and module wiring, budget configuration |
+| Role            | Held by          | Grants                                                     |
+| --------------- | ---------------- | ---------------------------------------------------------- |
+| `Student`       | Applicants       | Nothing directly; the registry records the affiliation     |
+| `Sponsor`       | Programme owners | Program administration in `scholarship-core`               |
+| `Reviewer`      | Reviewers        | Application assignment and review decisions                |
+| `Finance`       | Finance staff    | Disbursement creation and execution                        |
+| `Administrator` | Contract admins  | `initialize`, role and module wiring, budget configuration |
 
 Two different things are both called "admin", and confusing them wastes time:
 
@@ -163,12 +163,12 @@ The creating address becomes `program.owner` and is the only address that may
 Lifecycle states are `Draft`, `Published`, `Paused`, `Closed`, `Archived`. The
 only legal transitions are:
 
-| From | To |
-| --- | --- |
-| `Draft` | `Published`, `Archived` |
-| `Published` | `Paused`, `Closed` |
-| `Paused` | `Published`, `Closed` |
-| `Closed` | `Archived` |
+| From        | To                      |
+| ----------- | ----------------------- |
+| `Draft`     | `Published`, `Archived` |
+| `Published` | `Paused`, `Closed`      |
+| `Paused`    | `Published`, `Closed`   |
+| `Closed`    | `Archived`              |
 
 Anything else is `InvalidTransition`. Note what is **not** in that table: there
 is no path out of `Archived`, and no path from `Closed` back to `Published`. If
@@ -184,7 +184,7 @@ events, so **an indexer is required** if you need the audit trail.
 ### Open the application window
 
 ```
-set_program_window(admin, program_id, opens_at, closes_at,
+set_program_window(admin, program_id, expected_version, opens_at, closes_at,
                    timezone_offset_minutes, grace_period_seconds)
 is_open(program_id)             -> bool
 is_within_grace(program_id)     -> bool
@@ -193,6 +193,9 @@ is_within_grace(program_id)     -> bool
 `opens_at` and `closes_at` are absolute ledger timestamps (`u64`); out-of-range
 values give `WindowOverflow`. `InvalidWindow` means the boundaries are
 inconsistent — typically `closes_at` before `opens_at`.
+Pass `0` when creating a window, then use the returned revision for each
+replacement. A stale revision returns `VersionConflict`; reload and compare
+before retrying.
 
 `grace_period_seconds` is a **duration, not an end timestamp**, and
 `timezone_offset_minutes` records the program's intended offset so tooling can
@@ -206,7 +209,7 @@ after it. It does not extend submission: `submit_application` refuses with
 ### Configure the award budget
 
 ```
-configure_award_budget(admin, program_id, max_recipients, per_award_amount, total_budget)
+configure_award_budget(admin, program_id, expected_version, max_recipients, per_award_amount, total_budget)
 reserve_award(admin, program_id)                              -> u32
 release_award(admin, program_id)
 get_award_budget(program_id)
@@ -240,8 +243,8 @@ usually a double release rather than an accounting problem.
 
 ### Application review
 
-What exists in `scholarship-applications` is reviewer *administration and
-assignment*:
+What exists in `scholarship-applications` is reviewer _administration and
+assignment_:
 
 ```
 register_reviewer(admin, reviewer, max_assignments)
@@ -330,7 +333,7 @@ refusing a window outside its accepted range.
 
 ### Create and execute an intent
 
-```
+````
 add_creator(admin, creator)                     -> authorise a finance address
 create_intent(creator, program_id, recipient, amount, installment) -> BytesN<32>
 is_intent_executable(intent_id)                 -> bool
@@ -465,8 +468,10 @@ changed, because adding a read guard would alter the ABI.
 The fastest safe move is `transition_program` to `Paused`. It preserves the
 record, stops new submissions, and is reversible — unlike `Closed`.
 
-```
+````
+
 transition_program(<owner address>, program_id, Paused)
+
 ```
 
 ### A bad form version or consent version was published
@@ -510,3 +515,4 @@ before deployment rather than after.
 | [ADR 0002](../../docs/adr/0002-scholarships-on-chain-boundaries.md) | Why the contracts do not call each other |
 | [scholarship-staging.md](scholarship-staging.md) | Provisioning, verifying, and reversing a staging scenario |
 | [scholarship-launch-readiness.md](scholarship-launch-readiness.md) | Go-live criteria, hard blockers, and rollback |
+```

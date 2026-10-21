@@ -43,12 +43,12 @@ fn program(env: &Env) -> BytesN<32> {
 }
 
 fn open_window(client: &ScholarshipProgramsContractClient, env: &Env, admin: &Address) {
-    client.set_program_window(admin, &program(env), &1_000, &2_000, &0, &0);
+    client.set_program_window(admin, &program(env), &0, &1_000, &2_000, &0, &0);
 }
 
 fn fund(client: &ScholarshipProgramsContractClient, env: &Env, admin: &Address) {
     // 10 recipients at 100 each against a 1,000 total.
-    client.configure_award_budget(admin, &program(env), &10, &100, &1_000);
+    client.configure_award_budget(admin, &program(env), &0, &10, &100, &1_000);
 }
 
 // ── NotInitialized ──────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ fn test_uninitialized_admin_write_is_refused() {
 
     // The initialization guard sits on the admin path.
     assert_eq!(
-        client.try_set_program_window(&admin, &program(&env), &1_000, &2_000, &0, &0),
+        client.try_set_program_window(&admin, &program(&env), &0, &1_000, &2_000, &0, &0),
         Err(Ok(ContractError::NotInitialized))
     );
 
@@ -137,7 +137,7 @@ fn test_grace_period_cannot_wrap_the_close_time() {
     // it, so a pathological grace period is refused rather than becoming a
     // window that appears to end before it opens.
     assert_eq!(
-        client.try_set_program_window(&admin, &program(&env), &(u64::MAX - 1), &u64::MAX, &0, &1,),
+        client.try_set_program_window(&admin, &program(&env), &0, &(u64::MAX - 1), &u64::MAX, &0, &1,),
         Err(Ok(ContractError::WindowOverflow))
     );
 }
@@ -161,7 +161,7 @@ fn test_window_overflow_boundary_is_table_driven() {
             raw[0] = (index + 1) as u8;
             raw
         });
-        let result = client.try_set_program_window(&admin, &target, &opens, &closes, &0, &grace);
+        let result = client.try_set_program_window(&admin, &target, &0, &opens, &closes, &0, &grace);
         assert_eq!(
             result.is_ok(),
             accepted,
@@ -183,7 +183,7 @@ fn test_budget_is_frozen_once_awards_are_committed() {
     // Reconfiguring now would silently discard the commitment already
     // recorded against the budget.
     assert_eq!(
-        client.try_configure_award_budget(&admin, &program(&env), &99, &1, &10_000),
+        client.try_configure_award_budget(&admin, &program(&env), &2, &99, &1, &10_000),
         Err(Ok(ContractError::BudgetAlreadyCommitted))
     );
     // The recorded commitment is untouched by the refused write.
@@ -199,7 +199,7 @@ fn test_budget_is_reconfigurable_before_any_award() {
     fund(&client, &env, &admin);
     // No award committed yet, so correcting a misconfigured budget is allowed.
     assert!(client
-        .try_configure_award_budget(&admin, &program(&env), &5, &50, &250)
+        .try_configure_award_budget(&admin, &program(&env), &1, &5, &50, &250)
         .is_ok());
     assert_eq!(client.get_award_budget(&program(&env)).max_recipients, 5);
 }
@@ -218,7 +218,7 @@ fn test_the_budget_freeze_tracks_the_commitment_not_the_history() {
     // that an award can never be released and the budget re-decided.
     assert_eq!(client.get_award_budget(&program(&env)).committed_amount, 0);
     assert!(client
-        .try_configure_award_budget(&admin, &program(&env), &5, &50, &250)
+        .try_configure_award_budget(&admin, &program(&env), &3, &5, &50, &250)
         .is_ok());
 }
 
@@ -249,7 +249,7 @@ fn test_budget_exceeded_cannot_be_reached_because_configuration_precludes_it() {
 
     // 3 recipients at 100 against a total of exactly 300: the tightest
     // configuration the contract still accepts.
-    client.configure_award_budget(&admin, &program(&env), &3, &100, &300);
+    client.configure_award_budget(&admin, &program(&env), &0, &3, &100, &300);
     for expected in 1..=3u32 {
         assert_eq!(client.reserve_award(&admin, &program(&env)), expected);
         let budget = client.get_award_budget(&program(&env));
@@ -275,7 +275,7 @@ fn test_undersized_budget_is_refused_at_configuration_time() {
     // 3 x 100 = 300 required, 299 funded. Refused here rather than
     // surfacing later as a reserve that cannot be honoured.
     assert_eq!(
-        client.try_configure_award_budget(&admin, &program(&env), &3, &100, &299),
+        client.try_configure_award_budget(&admin, &program(&env), &0, &3, &100, &299),
         Err(Ok(ContractError::InvalidBudgetConfig))
     );
     // Nothing was recorded.
@@ -315,7 +315,7 @@ fn test_budget_exceeded_boundary_is_table_driven() {
         });
 
         if client
-            .try_configure_award_budget(&admin, &target, max_recipients, per_award, total)
+            .try_configure_award_budget(&admin, &target, 0, max_recipients, per_award, total)
             .is_err()
         {
             assert_eq!(
@@ -357,7 +357,7 @@ fn test_committed_amount_never_wraps() {
     let (env, id, admin) = setup();
     let client = ScholarshipProgramsContractClient::new(&env, &id);
     // 1 recipient at i128::MAX, funded at i128::MAX.
-    client.configure_award_budget(&admin, &program(&env), &1, &i128::MAX, &i128::MAX);
+    client.configure_award_budget(&admin, &program(&env), &0, &1, &i128::MAX, &i128::MAX);
     assert_eq!(client.reserve_award(&admin, &program(&env)), 1);
     let budget = client.get_award_budget(&program(&env));
     assert_eq!(budget.committed_amount, i128::MAX);
@@ -373,11 +373,14 @@ const DECLARED: &[&str] = &[
     "InvalidWindow",
     "WindowNotFound",
     "WindowOverflow",
+    "VersionConflict",
+    "VersionOverflow",
     "InvalidBudgetConfig",
     "BudgetNotFound",
     "CapacityExceeded",
     "BudgetExceeded",
     "BudgetAlreadyCommitted",
+    "VersionConflict",
 ];
 
 const COVERED_ELSEWHERE: &[&str] = &[
@@ -402,6 +405,9 @@ const UNREACHABLE: &[&str] = &[
     // total_budget`, and `reserve_award` stops at `max_recipients`, so
     // `committed_amount` can never pass `total_budget`.
     "BudgetExceeded",
+    // A u32 revision requires 2^32 successful writes to overflow; increments
+    // remain checked so even corrupted or migrated state cannot wrap.
+    "VersionOverflow",
 ];
 
 #[test]

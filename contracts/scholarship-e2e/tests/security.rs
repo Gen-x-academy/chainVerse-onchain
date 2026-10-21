@@ -137,7 +137,7 @@ fn ownership_and_admin_authority_do_not_overlap() {
     // contract: role membership is not authority.
     assert_eq!(
         w.programs
-            .try_set_program_window(&reviewer, &pid, &0, &(START + WINDOW), &0, &0),
+            .try_set_program_window(&reviewer, &pid, &0, &0, &(START + WINDOW), &0, &0),
         Err(Ok(ProgError::NotAdmin))
     );
     assert_eq!(
@@ -440,7 +440,7 @@ fn the_award_inventory_cannot_be_drawn_down_twice() {
     // `total_budget` with a single call.
     assert_eq!(
         w.programs
-            .try_configure_award_budget(&admin, &pid, &8, &1_000, &8_000),
+            .try_configure_award_budget(&admin, &pid, &5, &8, &1_000, &8_000),
         Err(Ok(ProgError::BudgetAlreadyCommitted))
     );
     let budget = w.programs.get_award_budget(&pid);
@@ -456,7 +456,7 @@ fn the_award_inventory_cannot_be_drawn_down_twice() {
         w.programs.release_award(&admin, &pid);
     }
     w.programs
-        .configure_award_budget(&admin, &pid, &8, &1_000, &8_000);
+        .configure_award_budget(&admin, &pid, &9, &8, &1_000, &8_000);
     assert_eq!(w.programs.remaining_capacity(&pid), 8);
 }
 

@@ -236,6 +236,8 @@ pub enum ContractError {
     /// Version counter would overflow u32 — practically unreachable, but
     /// checked rather than silently wrapping.
     VersionOverflow = 18,
+    /// The program changed since the caller last read it; reload and retry.
+    VersionConflict = 19,
 }
 
 #[contracttype]
@@ -259,6 +261,7 @@ pub enum DataKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Program {
+    pub version: u32,
     pub active: bool,
     /// Ledger timestamp (seconds) after which submissions are rejected.
     pub deadline: u64,
@@ -368,6 +371,7 @@ impl ScholarshipApplicationsContract {
         }
 
         let program = Program {
+            version: 1,
             active: true,
             deadline,
         };
@@ -383,8 +387,9 @@ impl ScholarshipApplicationsContract {
         env: Env,
         admin: Address,
         program_id: BytesN<32>,
+        expected_version: u32,
         active: bool,
-    ) -> Result<(), ContractError> {
+    ) -> Result<u32, ContractError> {
         Self::require_admin(&env, &admin)?;
 
         let key = DataKey::Program(program_id.clone());
@@ -393,13 +398,20 @@ impl ScholarshipApplicationsContract {
             .persistent()
             .get(&key)
             .ok_or(ContractError::ProgramNotFound)?;
+        if program.version != expected_version {
+            return Err(ContractError::VersionConflict);
+        }
+        program.version = program
+            .version
+            .checked_add(1)
+            .ok_or(ContractError::VersionOverflow)?;
         program.active = active;
 
         env.storage().persistent().set(&key, &program);
         env.storage()
             .persistent()
             .extend_ttl(&key, RECORD_MIN_TTL, RECORD_MAX_TTL);
-        Ok(())
+        Ok(program.version)
     }
 
     pub fn get_program(env: Env, program_id: BytesN<32>) -> Result<Program, ContractError> {

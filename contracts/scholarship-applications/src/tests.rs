@@ -338,11 +338,26 @@ fn test_submit_application_requires_existing_program() {
 }
 
 #[test]
+fn test_stale_program_update_preserves_newer_state() {
+    let (env, contract_id, admin) = setup();
+    let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
+    let pid = ready_program(&env, &client, &admin);
+
+    client.set_program_active(&admin, &pid, &1, &false);
+    let result = client.try_set_program_active(&admin, &pid, &1, &true);
+
+    assert_eq!(result, Err(Ok(ContractError::VersionConflict)));
+    let program = client.get_program(&pid);
+    assert_eq!(program.version, 2);
+    assert!(!program.active);
+}
+
+#[test]
 fn test_submit_application_rejects_inactive_program() {
     let (env, contract_id, admin) = setup();
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
     let pid = ready_program(&env, &client, &admin);
-    client.set_program_active(&admin, &pid, &false);
+    client.set_program_active(&admin, &pid, &1, &false);
 
     let applicant = Address::generate(&env);
     client.record_consent(&applicant, &pid);
@@ -478,7 +493,7 @@ fn test_set_program_active_requires_admin() {
     client.register_program(&admin, &pid, &1_000_000u64);
 
     let attacker = Address::generate(&env);
-    let result = client.try_set_program_active(&attacker, &pid, &false);
+    let result = client.try_set_program_active(&attacker, &pid, &1, &false);
     assert_eq!(result, Err(Ok(ContractError::NotAdmin)));
 }
 
@@ -488,6 +503,6 @@ fn test_set_program_active_on_missing_program_fails() {
     let client = crate::ScholarshipApplicationsContractClient::new(&env, &contract_id);
     client.initialize(&admin);
 
-    let result = client.try_set_program_active(&admin, &program_id(&env, 42), &false);
+    let result = client.try_set_program_active(&admin, &program_id(&env, 42), &1, &false);
     assert_eq!(result, Err(Ok(ContractError::ProgramNotFound)));
 }

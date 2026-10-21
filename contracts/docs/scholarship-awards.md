@@ -60,6 +60,14 @@ Offered ──accept──▶ Accepted ──record_disbursement──▶ Accept
 `Declined`, `Expired`, `Cancelled`, and `Terminated` are terminal — there
 is no transition out of, or between, them.
 
+Every `Award` has a checked `version`, initialized to 1. Mutating lifecycle
+calls (`accept_award`, `decline_award`, `expire_award`, `cancel_award`,
+`terminate_award`, and `record_disbursement`) require the exact version read
+by the caller and advance it on success. `VersionConflict` means reload the
+award and reassess the intended transition. The check precedes acceptance,
+recovery, reservation, and active-award writes; Soroban invocation rollback
+also protects against partial mutation if a later checked operation fails.
+
 ## Privacy
 
 On-chain storage never holds award terms or declaration documents. Each is
@@ -82,7 +90,9 @@ grants no authority over the recipient.
 
 New contract, no prior on-chain state. After deployment, the admin must
 `initialize` before any award can be created. Award IDs are caller-supplied
-and permanent — there is no rename or re-key operation.
+and permanent — there is no rename or re-key operation. Existing award
+records must be migrated to a revision baseline before clients use the new
+ABI; clients handle `VersionConflict` by reloading instead of replaying.
 
 ## Operational impact
 
@@ -108,3 +118,7 @@ and permanent — there is no rename or re-key operation.
   counter is local. Wiring the two together so a program's budget ceiling
   is authoritative across both contracts is follow-up work, in line with
   ADR 0002's "cross-contract enforcement" non-goal.
+- Version metadata is public lifecycle metadata only and adds no applicant
+  content or document data. Recipient/admin authorization and persistent TTL
+  policy are unchanged; deployment operators must coordinate ABI and storage
+  schema migration.
