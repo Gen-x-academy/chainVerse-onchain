@@ -18,6 +18,7 @@ members = [
     "token",
     "mentorship-lifecycle",
     "mentorship-programs",
+    "mentorship-sponsorship",
     "mentorship-identity",
     "library-rights",
     "library_licensing",
