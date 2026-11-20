@@ -6,6 +6,7 @@
 - [Escrow Lifecycle](./docs/escrow_lifecycle.md)
 - [Contract Events](./docs/events.md)
 - [Developer Setup Guide](./docs/setup.md)
+- [Capstone Workspace (CAPSTONE-047/048/049 design)](./docs/capstone/README.md)
 ## Requirements
 
 - Rust (latest stable)
