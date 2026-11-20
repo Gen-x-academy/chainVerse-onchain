@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "certificates",
     "chainverse-core",
+    "capstone-identifiers",
     "chainverse-types",
     "escrow",
     "escrow-vault",
