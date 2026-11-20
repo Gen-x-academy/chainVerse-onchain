@@ -10,6 +10,7 @@ members = [
     "contracts/reward",
     "contracts/payout-automation",
     "contracts/chainverse-core",
+    "contracts/capstone-opportunity-details",
     "contracts/chainverse-types",
     "contracts/course_registry",
     "contracts/shared",
