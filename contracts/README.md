@@ -10,6 +10,7 @@
 - [Scholarship Service-Level Indicators](./docs/scholarship-sli.md)
 - [Mentor Credential Claims](./docs/mentor-credentials.md)
 - [Developer Setup Guide](./docs/setup.md)
+- [Capstone Workspace (CAPSTONE-047/048/049 design)](./docs/capstone/README.md)
 ## Requirements
 
 - Rust (latest stable)

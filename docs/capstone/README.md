@@ -1,24 +1,21 @@
-# Capstone & Research Projects — On-chain Design Docs
+# Capstone On-chain Specs: Governance Track
 
-| ID | Doc | Track | Contract |
+| Item | Issue | Doc | Contract (planned) |
 | --- | --- | --- | --- |
-| CAPSTONE-038 | [Submit proposals atomically](CAPSTONE-038-submit-proposals-atomically.md) | Proposals | `capstone-proposals` (new) |
-| CAPSTONE-039 | [Withdrawal and resubmission](CAPSTONE-039-proposal-withdrawal-resubmission.md) | Proposals | `capstone-proposals` |
-| CAPSTONE-040 | [History and status timeline](CAPSTONE-040-proposal-history-timeline.md) | Proposals | `capstone-proposals` |
-| CAPSTONE-041 | [Team formation requests](CAPSTONE-041-team-formation-requests.md) | Teams | `capstone-teams` (new) |
+| CAPSTONE-050 | #1398 | [Record charter acceptance](CAPSTONE-050-charter-acceptance.md) | `capstone-charters` |
+| CAPSTONE-051 | #1399 | [Guardian consent](CAPSTONE-051-guardian-consent.md) | `capstone-guardian-consent` |
+| CAPSTONE-052 | #1400 | [Amend active charters](CAPSTONE-052-charter-amendments.md) | `capstone-charters` |
+| CAPSTONE-053 | #1401 | [Pause and resume projects](CAPSTONE-053-pause-resume.md) | `capstone-pauses` |
 
-## Shared principles
+Order of implementation: 050 → 052 → 051 → 053. Each later item depends on the
+state and checks introduced by the earlier ones.
 
-- **Privacy:** only hashes, opaque ids, numeric codes, states and timestamps go
-  on-chain. Proposal content, reviewer comments, skills and profiles stay off-chain.
-- **Authorization:** `require_auth` on every mutation, role checks deny by
-  default, and every key is scoped by `tenant_id`.
-- **Idempotency:** every mutation takes an `intent_id`. Replays are no-ops and
-  conflicting replays fail.
-- **Errors:** `#[contracterror]` codes are stable and append-only. They are
-  never renumbered across upgrades.
-
-## Deployment order
-
-`capstone-identifiers` → `capstone-call-terms` / `capstone-delivery-modes` →
-`capstone-teams` (041) → `capstone-proposals` (038 → 039 → 040).
+Rules shared by all four specs:
+- The chain stores only hashes, opaque references, addresses, enums, counters
+  and timestamps. Charter text, reasons, identity evidence and amounts stay in
+  the backend.
+- Authorization is deny-by-default and scoped to a `tenant_id`.
+- Every state-changing call that a signer authorizes includes a single-use
+  nonce. Retries return a stable "already done" error, so they never repeat a
+  side effect.
+- Error codes are append-only and existing codes are never renumbered.
