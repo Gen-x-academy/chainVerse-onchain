@@ -4,7 +4,7 @@ resolver = "2"
 members = [
     "certificates",
     "chainverse-core",
-    "capstone-profile-visibility",
+    "capstone-identifiers",
     "chainverse-types",
     "escrow",
     "escrow-vault",
@@ -19,6 +19,7 @@ members = [
     "token",
     "mentorship-lifecycle",
     "mentorship-programs",
+    "mentorship-sponsorship",
     "mentorship-identity",
     "library-rights",
     "library_licensing",
