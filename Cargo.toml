@@ -34,6 +34,10 @@ members = [
     "contracts/mentorship-capacity",
     "contracts/mentorship-conflicts",
     "contracts/mentorship-eligibility",
+    "contracts/capstone-revision-requests",
+    "contracts/capstone-milestone-deliverables",
+    "contracts/capstone-deliverable-acceptance",
+    "contracts/capstone-funding-models",
 ]
 
 [workspace.dependencies]
