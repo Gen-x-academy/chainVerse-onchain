@@ -11,10 +11,10 @@ members = [
     "contracts/payout-automation",
     "contracts/chainverse-core",
     "contracts/capstone-identifiers",
-    "contracts/capstone-project-notes",
-    "contracts/capstone-private-notes",
-    "contracts/capstone-resource-library",
-    "contracts/capstone-discussion-threads",
+    "contracts/capstone-budget-plans",
+    "contracts/capstone-budget-reservations",
+    "contracts/capstone-escrow-intents",
+    "contracts/capstone-escrow-confirmations",
     "contracts/chainverse-types",
     "contracts/course_registry",
     "contracts/shared",
@@ -38,6 +38,10 @@ members = [
     "contracts/mentorship-capacity",
     "contracts/mentorship-conflicts",
     "contracts/mentorship-eligibility",
+    "contracts/capstone-revision-requests",
+    "contracts/capstone-milestone-deliverables",
+    "contracts/capstone-deliverable-acceptance",
+    "contracts/capstone-funding-models",
 ]
 
 [workspace.dependencies]
