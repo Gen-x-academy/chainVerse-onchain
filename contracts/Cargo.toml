@@ -5,6 +5,10 @@ members = [
     "certificates",
     "chainverse-core",
     "capstone-identifiers",
+    "capstone-budget-plans",
+    "capstone-budget-reservations",
+    "capstone-escrow-intents",
+    "capstone-escrow-confirmations",
     "chainverse-types",
     "escrow",
     "escrow-vault",
@@ -73,10 +77,10 @@ members = [
     "mentorship-availability",
     "mentorship-calendar",
     "mentorship-slots",
-    "capstone-milestone-payments",
-    "capstone-expense-claims",
-    "capstone-financial-ledger",
-    "capstone-contributor-attribution",
+    "capstone-revision-requests",
+    "capstone-milestone-deliverables",
+    "capstone-deliverable-acceptance",
+    "capstone-funding-models",
 ]
 
 [workspace.dependencies]
