@@ -73,6 +73,10 @@ members = [
     "mentorship-availability",
     "mentorship-calendar",
     "mentorship-slots",
+    "capstone-milestone-payments",
+    "capstone-expense-claims",
+    "capstone-financial-ledger",
+    "capstone-contributor-attribution",
 ]
 
 [workspace.dependencies]
