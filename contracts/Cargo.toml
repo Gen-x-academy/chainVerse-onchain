@@ -81,6 +81,7 @@ members = [
     "capstone-milestone-deliverables",
     "capstone-deliverable-acceptance",
     "capstone-funding-models",
+    "capstone-integrity-privacy",
 ]
 
 [workspace.dependencies]

@@ -42,6 +42,7 @@ members = [
     "contracts/capstone-milestone-deliverables",
     "contracts/capstone-deliverable-acceptance",
     "contracts/capstone-funding-models",
+    "contracts/capstone-integrity-privacy",
 ]
 
 [workspace.dependencies]
