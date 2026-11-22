@@ -26,3 +26,4 @@ Rules shared by all four specs:
 | --- | --- | --- | --- |
 | CAPSTONE-062 | #1410 | [Manage project risks and mitigations](CAPSTONE-062-project-risks.md) | `capstone-project-risks` |
 | CAPSTONE-063 | #1411 | [Build project timeline and roadmap](CAPSTONE-063-project-timeline.md) | `capstone-project-timeline` |
+| CAPSTONE-064 | #1412 | [Handle deadline extension requests](CAPSTONE-064-deadline-extensions.md) | `capstone-deadline-extensions` |

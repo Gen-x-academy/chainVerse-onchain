@@ -45,6 +45,7 @@ members = [
     "contracts/capstone-publication-integrity",
     "contracts/capstone-project-risks",
     "contracts/capstone-project-timeline",
+    "contracts/capstone-deadline-extensions",
 ]
 
 [workspace.dependencies]
