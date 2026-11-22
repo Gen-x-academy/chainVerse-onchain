@@ -19,3 +19,9 @@ Rules shared by all four specs:
   nonce. Retries return a stable "already done" error, so they never repeat a
   side effect.
 - Error codes are append-only and existing codes are never renumbered.
+
+# Capstone On-chain Specs: Planning and Workspace Tracks (062 to 065)
+
+| Item | Issue | Doc | Contract |
+| --- | --- | --- | --- |
+| CAPSTONE-062 | #1410 | [Manage project risks and mitigations](CAPSTONE-062-project-risks.md) | `capstone-project-risks` |
