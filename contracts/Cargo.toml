@@ -81,10 +81,7 @@ members = [
     "capstone-milestone-deliverables",
     "capstone-deliverable-acceptance",
     "capstone-funding-models",
-    "capstone-work-breakdown",
-    "capstone-schedule-risk",
-    "capstone-project-milestones",
-    "capstone-objective-checkins",
+    "capstone-publication-integrity",
 ]
 
 [workspace.dependencies]
