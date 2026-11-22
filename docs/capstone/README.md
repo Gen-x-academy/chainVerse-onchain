@@ -25,3 +25,4 @@ Rules shared by all four specs:
 | Item | Issue | Doc | Contract |
 | --- | --- | --- | --- |
 | CAPSTONE-062 | #1410 | [Manage project risks and mitigations](CAPSTONE-062-project-risks.md) | `capstone-project-risks` |
+| CAPSTONE-063 | #1411 | [Build project timeline and roadmap](CAPSTONE-063-project-timeline.md) | `capstone-project-timeline` |
