@@ -44,6 +44,7 @@ Cargo.lock
 scratch/
 
 # Soroban test snapshots are regenerated on every cargo test run
+contracts/capstone-project-workspace/test_snapshots/
 contracts/capstone-deadline-extensions/test_snapshots/
 contracts/capstone-project-timeline/test_snapshots/
 contracts/capstone-project-risks/test_snapshots/
