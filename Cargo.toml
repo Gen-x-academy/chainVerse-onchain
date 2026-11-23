@@ -43,6 +43,7 @@ members = [
     "contracts/capstone-deliverable-acceptance",
     "contracts/capstone-funding-models",
     "contracts/capstone-publication-integrity",
+    "contracts/capstone-field-privacy",
 ]
 
 [workspace.dependencies]
