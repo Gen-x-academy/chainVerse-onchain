@@ -19,3 +19,20 @@ Rules shared by all four specs:
   nonce. Retries return a stable "already done" error, so they never repeat a
   side effect.
 - Error codes are append-only and existing codes are never renumbered.
+
+# Capstone On-chain Specs: Planning and Workspace Tracks (062 to 065)
+
+| Item | Issue | Doc | Contract |
+| --- | --- | --- | --- |
+| CAPSTONE-062 | #1410 | [Manage project risks and mitigations](CAPSTONE-062-project-risks.md) | `capstone-project-risks` |
+| CAPSTONE-063 | #1411 | [Build project timeline and roadmap](CAPSTONE-063-project-timeline.md) | `capstone-project-timeline` |
+| CAPSTONE-064 | #1412 | [Handle deadline extension requests](CAPSTONE-064-deadline-extensions.md) | `capstone-deadline-extensions` |
+| CAPSTONE-065 | #1413 | [Create project collaboration workspace](CAPSTONE-065-project-workspace.md) | `capstone-project-workspace` |
+
+Shared design, identical across all four crates:
+- Roles are scoped to `(tenant_id, project_id)`, deny by default, and carry an optional expiry.
+- Every mutation takes a `request_id`. Replays return the recorded result with no write and no event;
+  the same id with another payload or actor returns `RequestConflict`.
+- Mutations on existing records take an `expected_version` and return `StaleVersion` when it is old.
+- Error codes 1 to 13 are shared and append-only. Events carry ids, hashes, enums, and counters only.
+- Storage is bounded per project and paged reads return at most 32 items.
